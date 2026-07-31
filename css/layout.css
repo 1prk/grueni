@@ -1,0 +1,89 @@
+/* App-Gerüst: nutzt die volle Fensterbreite, kein zentrierter Fixbreiten-
+   Container wie im Ursprungswerkzeug. */
+.appshell{ min-height:100vh; display:flex; flex-direction:column; }
+
+/* ---------- Topbar ---------- */
+.topbar{
+  position:sticky; top:0; z-index:50;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:var(--space-4); flex-wrap:wrap;
+  background:linear-gradient(180deg, var(--bg-header-2), var(--bg-header));
+  color:var(--text-on-dark);
+  padding:10px var(--space-5);
+  box-shadow:var(--shadow-md);
+}
+.brand{ display:flex; align-items:center; gap:11px; }
+.brand-badge{
+  width:28px; height:28px; flex-shrink:0; border-radius:6px; overflow:hidden;
+  display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
+  box-shadow:0 0 0 1px rgba(255,255,255,.15);
+}
+.brand-badge span{ display:block; }
+.brand-badge .b1{ background:var(--sig-red); }
+.brand-badge .b2{ background:var(--sig-yellow); }
+.brand-badge .b3{ background:var(--sig-green); }
+.brand-badge .b4{ background:var(--sig-dark); }
+.brand-title{ font-size:14.5px; font-weight:700; letter-spacing:.01em; }
+.brand-sub{ font-family:var(--mono); font-size:10.5px; color:var(--text-on-dark-muted); }
+.toolbar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+/* ---------- Data intake ---------- */
+.data-panel{
+  background:var(--bg-surface);
+  border-bottom:1px solid var(--border);
+}
+.data-panel-head{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--space-3);
+  padding:10px var(--space-5); cursor:pointer; user-select:none;
+}
+.data-panel-head h2{ font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
+.data-panel-summary{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); }
+.data-panel-summary .ok{ color:var(--sig-green); font-weight:700; }
+.data-panel-toggle{ font-size:11px; color:var(--accent); font-weight:600; white-space:nowrap; }
+.data-panel-body{ padding:0 var(--space-5) var(--space-4); display:none; }
+.data-panel.open .data-panel-body{ display:block; }
+.data-panel.open .data-panel-toggle::before{ content:"Einklappen"; }
+.data-panel:not(.open) .data-panel-toggle::before{ content:"Bearbeiten"; }
+
+/* ---------- Tabs ---------- */
+.tabbar{
+  display:flex; gap:6px; flex-wrap:wrap;
+  padding:10px var(--space-5); background:var(--bg-surface);
+  border-bottom:1px solid var(--border);
+  position:sticky; top:52px; z-index:40;
+}
+.tab-btn{
+  appearance:none; border:1px solid transparent; background:transparent; color:var(--text-muted);
+  font:inherit; font-size:12.5px; font-weight:600; padding:7px 16px; border-radius:999px; cursor:pointer;
+}
+.tab-btn:hover{ background:var(--bg-surface-3); color:var(--text); }
+.tab-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+
+.content{ display:none; flex:1; }
+.content.show{ display:block; }
+.tab-panel{ display:none; }
+.tab-panel.active{ display:block; }
+
+/* ---------- Main content ---------- */
+.view{ padding:var(--space-5); display:flex; flex-direction:column; gap:var(--space-5); width:100%; }
+.gz-layout{ display:grid; grid-template-columns:296px 1fr; gap:var(--space-5); align-items:start; }
+.main-col{ display:flex; flex-direction:column; gap:var(--space-5); min-width:0; }
+
+.navigator{
+  position:sticky; top:110px;
+  display:flex; flex-direction:column; gap:8px;
+  max-height:calc(100vh - 130px); overflow-y:auto;
+  padding-right:2px;
+}
+
+footer.app-footer{
+  font-family:var(--mono); font-size:10.5px; color:var(--text-faint);
+  padding:10px var(--space-5); border-top:1px solid var(--border); background:var(--bg-surface);
+  text-align:center;
+}
+
+@media (max-width:980px){
+  .gz-layout{ grid-template-columns:1fr; }
+  .navigator{ position:static; max-height:none; flex-direction:row; flex-wrap:wrap; }
+  .navigator .nav-card{ flex:1 1 220px; }
+}
