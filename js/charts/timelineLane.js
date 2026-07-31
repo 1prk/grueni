@@ -82,7 +82,7 @@
     const {
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
       baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
-      segTitle = defaultTitle, onGreenClick
+      segTitle = defaultTitle, onGreenClick, fillFor
     } = opts;
 
     const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
@@ -101,7 +101,7 @@
       .attr('y', 1.5)
       .attr('width', d => Math.max(x(Math.min(d.end, wMax)) - x(Math.max(d.start, wMin)), 1.2))
       .attr('height', height - 3)
-      .style('fill', d => CAT_FILL[d.cat] || '#9aa4b0')
+      .style('fill', d => (fillFor && fillFor(d)) || CAT_FILL[d.cat] || '#9aa4b0')
       .style('cursor', d => (d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default');
     segSel.append('title').text(segTitle);
 

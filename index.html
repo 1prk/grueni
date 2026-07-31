@@ -204,32 +204,23 @@
                 <button id="paBtnWinAll">Alle anzeigen</button>
               </div>
             </div>
-            <div class="legend">
-              <span class="item"><span class="swatch" style="background:var(--sig-red);height:3px;align-self:center;"></span>Phase nicht aktiv (Grundlinie)</span>
-              <span class="item"><span class="swatch" style="background:var(--sig-green)"></span>Phase aktiv (alle Mitglieder gleichzeitig Grün)</span>
-              <span class="item"><span class="swatch" style="background:var(--sig-yellow);height:4px;align-self:center;"></span>Auffälliges Erscheinen</span>
-              <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
-            </div>
-            <div class="lane-row lane-header" style="padding:10px 16px 0;">
-              <div class="lane-name">Phase</div>
-              <div class="lane-num">An</div>
-              <div class="lane-num">Ab</div>
-              <div class="lane-num">TF</div>
-              <div class="lane-track" style="background:none;border:none;"></div>
-            </div>
-            <div class="spl-bar-row" style="padding:0 16px;">
+            <div class="legend" id="paLegend"></div>
+            <div class="spl-bar-row" style="padding:10px 16px 0;">
               <div class="spl-bar-label-fixed">Programm (SPL)</div>
               <div class="spl-bar" id="paSplBar"><svg></svg></div>
             </div>
             <div style="padding:0 16px 12px;">
-              <div id="paTimeline"></div>
+              <div class="lane-row">
+                <div class="lane-name">Phasen</div>
+                <div class="lane-track" id="paLaneTrack"><svg></svg></div>
+              </div>
               <div class="axis" id="paAxis"><svg></svg></div>
             </div>
           </div>
 
           <div class="panel">
             <div class="panel-head">Kennzahlen je Phase</div>
-            <table>
+            <table class="static-rows">
               <thead><tr>
                 <th>Phase</th><th>Anzahl</th><th>Ø Dauer</th><th>Median</th><th>Min</th><th>Max</th><th>Summe</th>
               </tr></thead>
@@ -238,28 +229,10 @@
           </div>
 
           <div class="panel">
-            <div class="panel-head">Phasen-Trend je Erscheinen <span class="trend-target" id="paTrendTarget" style="font-family:var(--mono);font-weight:600;"></span></div>
-            <div class="trend-toolbar">
-              <div class="cfg-field" style="flex-direction:row; align-items:center; gap:8px;">
-                <label for="paTrendSelect" style="margin:0;">Phase</label>
-                <select id="paTrendSelect"></select>
-              </div>
-              <div class="seg-toggle" id="paTrendModeGroup">
-                <button type="button" data-mode="scatter" class="active">Zeitverlauf</button>
-                <button type="button" data-mode="hist">Verteilung (CDF)</button>
-              </div>
-            </div>
-            <div class="trend-legend">
-              <span class="item"><span class="dot" style="background:var(--sig-green)"></span>unauffällig</span>
-              <span class="item"><span class="dot" style="background:var(--sig-yellow)"></span>leichte Abweichung</span>
-              <span class="item"><span class="dot" style="background:var(--sig-redyellow)"></span>mittlere Abweichung</span>
-              <span class="item"><span class="dot" style="background:var(--sig-red)"></span>auffällig</span>
-            </div>
-            <div class="chart-box" id="paTrendChartBox"><svg></svg><div class="chart-tooltip"></div></div>
-            <div class="axis" id="paTrendAxis"><svg></svg></div>
-            <div class="chart-box hoverable" id="paTrendHistBox" style="display:none;"><svg></svg><div class="chart-tooltip"></div></div>
-            <div class="axis" id="paTrendHistAxis" style="display:none;"><svg></svg></div>
-            <div class="chart-caption" id="paTrendCaption"></div>
+            <div class="panel-head">Phasendauer pro Umlauf</div>
+            <div class="chart-box" id="paDurChartBox"><svg></svg><div class="chart-tooltip"></div></div>
+            <div class="axis" id="paDurAxis"><svg></svg></div>
+            <div class="chart-note">Ein Balken je Phase und Umlauf im oben angezeigten Fenster – Höhe = Dauer der Phase in diesem Umlauf.</div>
           </div>
         </div>
 
@@ -433,6 +406,7 @@
 <script src="js/charts/timelineChart.js"></script>
 <script src="js/charts/trendChart.js"></script>
 <script src="js/charts/waitScatterChart.js"></script>
+<script src="js/charts/phaseDurationChart.js"></script>
 <script src="js/views/navigator.js"></script>
 <script src="js/views/gruenzeitanalyse.js"></script>
 <script src="js/views/stammdatenLsa.js"></script>

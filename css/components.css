@@ -178,3 +178,7 @@ table.phase-matrix .phase-check-cell input[type=checkbox]{ width:16px; height:16
 .phase-count-hint.warn{ color:var(--warn-text); }
 .phase-del-cell .phase-del{ padding:4px 8px; font-size:12px; color:var(--sig-red); border-color:var(--border); }
 .phase-del-cell .phase-del:hover{ background:var(--crit-bg); border-color:var(--sig-red); }
+
+/* ---------- Phasenauswertung ---------- */
+table.static-rows tbody tr{ cursor:default; }
+.phase-color-dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; box-shadow:0 0 0 1px rgba(0,0,0,.2); }

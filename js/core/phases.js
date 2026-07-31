@@ -2,15 +2,24 @@
    fasst die Signalgruppen zusammen, die GLEICHZEITIG Grün (Freigabe) zeigen
    und damit keinen Verkehrskonflikt miteinander haben. Ein Signalprogramm
    durchläuft je Umlauf eine feste Phasenfolge, getrennt durch Zwischenzeiten
-   (hier nicht modelliert - wir werten nur aus, WANN eine definierte Phase in
-   den aufgezeichneten Daten tatsächlich vollständig angezeigt wurde).
-
-   Eine Phase wird rein über ihre Mitglieder-Signalgruppen definiert
-   (Stammdaten-LSA-Tab); ob/wann sie in der Aufzeichnung auftritt, wird aus
-   den bereits vorhandenen Grünsegmenten (stats.greens je Signalgruppe)
-   abgeleitet - reine Auswertungslogik, unabhängig vom DOM. */
+   - zwei Phasen sind daher per Definition nie gleichzeitig aktiv. Diese
+   Datei leitet aus den bereits vorhandenen Grünsegmenten (stats.greens je
+   Mitglieds-Signalgruppe) ab, WANN eine definierte Phase in der Aufzeichnung
+   tatsächlich vollständig angezeigt wurde - reine Auswertungslogik,
+   unabhängig vom DOM. */
 (function (GZ) {
   'use strict';
+
+  // Kategoriale Farbpalette je Phase (Reihenfolge = Definitionsreihenfolge in
+  // GZ.state.data.phases) - bewusst von den Signalfarben (--sig-*) abgesetzt,
+  // damit auf den ersten Blick klar ist: das sind Phasen-Identitäten, keine
+  // Ampel-Zustände.
+  const PHASE_COLORS = [
+    '#3b7dc4', '#e08a2f', '#6c4fb0', '#2fa393',
+    '#c2517a', '#8a9a2f', '#b8464a', '#4f7942',
+    '#a3762f', '#4a5a8a'
+  ];
+  function colorForIndex(i) { return PHASE_COLORS[i % PHASE_COLORS.length]; }
 
   // Schnittmenge mehrerer sortierter, disjunkter Intervall-Listen (z. B.
   // stats.greens je Mitglieds-Signalgruppe): liefert die Zeitbereiche, in
@@ -55,35 +64,59 @@
     return { id: 'ph' + (phaseIdSeq++), name, kuerzel, members: new Set() };
   }
 
-  // Baut aus einer Phasendefinition + der laufenden Analyse eine Struktur im
-  // selben Format wie ein Signalgruppen-Eintrag aus app.js (col/segs/stats) -
-  // dadurch lassen sich das Signalzeitendiagramm (timelineChart), die
-  // Kennzahlen-Logik und der Trend-Chart unverändert wiederverwenden. Aktiv
-  // = Kategorie GRUEN (wie bei einer echten Signalgruppe), inaktiv = ROT.
-  function buildPhaseAnalysisEntry(phase, allStats, tMin, tMax) {
+  // Zeitbereiche, in denen eine Phase tatsächlich vollständig angezeigt
+  // wurde (alle Mitglieder gleichzeitig Grün).
+  function computePhaseOccurrences(phase, allStats) {
     const memberGreens = [...phase.members]
       .map(idx => allStats.find(a => a.col.index === idx))
       .filter(Boolean)
       .map(entry => entry.stats.greens);
     const intervals = phase.members.size ? intersectIntervals(memberGreens) : [];
-
-    const segs = [];
-    let cursor = tMin;
-    intervals.forEach(iv => {
-      if (iv.start > cursor) segs.push({ cat: 'ROT', start: cursor, end: iv.start });
-      segs.push({ cat: 'GRUEN', start: iv.start, end: iv.end });
-      cursor = iv.end;
-    });
-    if (cursor < tMax) segs.push({ cat: 'ROT', start: cursor, end: tMax });
-
-    const greenDurations = intervals.map(iv => (iv.end - iv.start) / 1000);
-    const cycleDurations = [];
-    for (let i = 0; i < intervals.length - 1; i++) cycleDurations.push((intervals[i + 1].start - intervals[i].start) / 1000);
-
-    const col = { index: 'phase:' + phase.id, name: phase.kuerzel, beschreibung: phase.name };
-    const stats = { greens: intervals, greenDurations, cycleDurations };
-    return { col, segs, stats, phase };
+    return { phase, intervals };
   }
 
-  GZ.phases = { intersectIntervals, createPhase, buildPhaseAnalysisEntry };
+  // Baut aus mehreren Phasen-Vorkommenslisten EINE gemeinsame, lückenlose
+  // Segment-Reihe für die kombinierte Zeitleiste (eine Spur für alle
+  // Phasen): da Phasen per Definition nie gleichzeitig aktiv sind, genügt
+  // Zusammenführen + Sortieren; Lücken (kein Phasen-Vorkommen, z. B.
+  // Zwischenzeiten oder nicht abgedeckte Zustände) werden als eigene
+  // Kategorie 'NONE' aufgefüllt. cat trägt die Phasen-ID (oder 'NONE').
+  function buildCombinedSegments(occurrenceEntries, tMin, tMax) {
+    const all = [];
+    occurrenceEntries.forEach(({ phase, intervals }) => {
+      intervals.forEach(iv => all.push({ cat: phase.id, start: iv.start, end: iv.end }));
+    });
+    all.sort((a, b) => a.start - b.start);
+    const segs = [];
+    let cursor = tMin;
+    all.forEach(seg => {
+      if (seg.start > cursor) segs.push({ cat: 'NONE', start: cursor, end: seg.start });
+      segs.push(seg);
+      if (seg.end > cursor) cursor = seg.end;
+    });
+    if (cursor < tMax) segs.push({ cat: 'NONE', start: cursor, end: tMax });
+    return segs;
+  }
+
+  // Summiert je Umlauf (cycleStarts[i]..cycleStarts[i+1)) die Vorkommensdauer
+  // einer Phase - amortisierter Sweep über die (sortierten) Vorkommen statt
+  // eines Vollscans je Umlauf, damit auch bei "Alle anzeigen" auf großen
+  // Aufzeichnungen performant.
+  function durationPerCycle(intervals, cycleStarts, tMax, fromIdx, toIdx) {
+    const sweep = GZ.segments.makeIntervalSweep(intervals);
+    const out = [];
+    for (let i = fromIdx; i < toIdx; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < cycleStarts.length ? cycleStarts[i + 1] : tMax;
+      const hits = sweep(start, end);
+      const sec = hits.reduce((sum, iv) => sum + (Math.min(iv.end, end) - Math.max(iv.start, start)) / 1000, 0);
+      out.push(sec);
+    }
+    return out;
+  }
+
+  GZ.phases = {
+    PHASE_COLORS, colorForIndex, intersectIntervals, createPhase,
+    computePhaseOccurrences, buildCombinedSegments, durationPerCycle
+  };
 })(window.GZ = window.GZ || {});
