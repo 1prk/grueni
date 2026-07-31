@@ -159,3 +159,22 @@ tr.wz-unresolved td{ color:var(--sig-red); font-style:italic; }
 .up-apw-pill{ padding:1px 7px; border:1px solid var(--border-strong); border-radius:10px; color:var(--text-muted); background:var(--bg-surface-2); }
 .up-apw-pill.changed{ border-color:var(--req-marker); color:var(--req-marker); background:var(--req-marker-bg); font-weight:700; }
 .up-apw-pill.empty{ opacity:.5; }
+
+/* ---------- Stammdaten LSA: Phasenmatrix ---------- */
+.phase-matrix-wrap{ overflow-x:auto; }
+table.phase-matrix{ width:auto; min-width:100%; border-collapse:collapse; font-size:12.5px; }
+table.phase-matrix th, table.phase-matrix td{ padding:8px 10px; border-bottom:1px solid var(--border); text-align:center; white-space:nowrap; }
+table.phase-matrix thead th{
+  font-family:var(--sans); font-size:10.5px; letter-spacing:.03em; text-transform:uppercase;
+  color:var(--text-muted); font-weight:700; background:var(--bg-surface-2); border-bottom:1px solid var(--border-strong);
+}
+table.phase-matrix thead th:first-child{ text-align:left; min-width:190px; }
+table.phase-matrix tbody tr:nth-child(even){ background:var(--bg-surface-2); }
+table.phase-matrix .phase-label-cell{ text-align:left; }
+table.phase-matrix .phase-check-cell input[type=checkbox]{ width:16px; height:16px; cursor:pointer; }
+.phase-kuerzel{ width:64px; font-family:var(--mono); font-weight:700; margin-right:6px; }
+.phase-name{ width:150px; }
+.phase-count-hint{ display:block; font-size:10px; color:var(--text-faint); margin-top:4px; }
+.phase-count-hint.warn{ color:var(--warn-text); }
+.phase-del-cell .phase-del{ padding:4px 8px; font-size:12px; color:var(--sig-red); border-color:var(--border); }
+.phase-del-cell .phase-del:hover{ background:var(--crit-bg); border-color:var(--sig-red); }

@@ -266,11 +266,45 @@
     return [{ start, end: TU }, { start: 0, end }];
   }
 
+  // Liefert eine "take(start,end)"-Funktion für einen Sweep über
+  // sortedIntervals (aufsteigend nach .start, disjunkt/chronologisch wie
+  // von buildSegments erzeugt): bei AUFSTEIGEND aufeinanderfolgenden,
+  // nicht überlappenden Aufrufen (z. B. einmal je Umlauf in einer Schleife)
+  // liefert take() die mit [start,end) überlappenden Einträge - amortisiert
+  // O(n) über alle Aufrufe zusammen, statt O(n) Vollscan PRO Aufruf. Wird
+  // gebraucht, sobald ein Vollscan pro Umlauf bei vielen Umläufen quadratisch
+  // würde (siehe Umlaufprüfung bei großen Aufzeichnungen).
+  function makeIntervalSweep(sortedIntervals) {
+    let ptr = 0;
+    return function take(start, end) {
+      while (ptr < sortedIntervals.length && sortedIntervals[ptr].end <= start) ptr++;
+      const out = [];
+      let j = ptr;
+      while (j < sortedIntervals.length && sortedIntervals[j].start < end) {
+        if (sortedIntervals[j].end > start) out.push(sortedIntervals[j]);
+        j++;
+      }
+      return out;
+    };
+  }
+
+  // Wie makeIntervalSweep, liefert aber nur den ERSTEN Index eines Eintrags
+  // mit start < end (oder -1) - für Fälle, in denen (wie bei stats.greens je
+  // Umlauf) je Fenster höchstens ein Treffer erwartet wird und dessen
+  // Original-Index gebraucht wird (z. B. für parallele Auffällig-Flags).
+  function makeIndexSweep(sortedItems) {
+    let ptr = 0;
+    return function take(start, end) {
+      while (ptr < sortedItems.length && sortedItems[ptr].start < start) ptr++;
+      return (ptr < sortedItems.length && sortedItems[ptr].start < end) ? ptr : -1;
+    };
+  }
+
   GZ.segments = {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
     findSplAt, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
-    computeAnomalyBands, wrapInterval
+    computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep
   };
 })(window.GZ = window.GZ || {});

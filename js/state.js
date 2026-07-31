@@ -10,7 +10,8 @@
     trendMode: 'scatter', // 'scatter' | 'hist'
     trendSelected: new Set(), // Signalgruppen-Indizes im Grünzeit-Trend
     wzActivePoints: null, // {colIndex, times[], unresolvedTime} - für Anforderungspunkte im Zeitdiagramm
-    window: { count: 5, startIdx: 0, showAll: false }
+    window: { count: 5, startIdx: 0, showAll: false },
+    phases: [] // {id, name, kuerzel, members:Set<colIndex>} - siehe Tab „Stammdaten LSA“
   };
 
   function anomalyCtx() {

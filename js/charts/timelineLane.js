@@ -62,13 +62,21 @@
   }
 
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
-  //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick}
+  //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
+  //   width, height}
+  // width/height optional: wenn nicht angegeben, wird der Container gemessen
+  // (clientWidth/-Height erzwingt einen synchronen Reflow). Wer renderLane in
+  // einer Schleife für viele Spuren gleicher Größe aufruft (z. B. Umlauf-
+  // prüfung), sollte einmalig VOR der Schleife messen und hier durchreichen -
+  // sonst entsteht Layout-Thrashing (Schreiben einer Spur invalidiert das
+  // Layout, die nächste Breitenmessung erzwingt es neu, x-mal in Folge).
   // Rückgabe: true wenn gerendert, false wenn der Container (noch) keine
   // messbare Größe hat (z. B. verstecktes Tab) - der Aufrufer rendert dann
   // beim nächsten Sichtbarwerden erneut.
   function renderLane(svgEl, opts) {
     ensurePatternDefs();
-    const width = svgEl.clientWidth, height = svgEl.clientHeight;
+    const width = opts.width != null ? opts.width : svgEl.clientWidth;
+    const height = opts.height != null ? opts.height : svgEl.clientHeight;
     if (!width || !height) return false;
 
     const {

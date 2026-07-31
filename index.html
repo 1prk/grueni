@@ -46,6 +46,8 @@
 
   <nav class="tabbar">
     <button type="button" class="tab-btn active" data-tab="gz">Grünzeitanalyse</button>
+    <button type="button" class="tab-btn" data-tab="sd">Stammdaten LSA</button>
+    <button type="button" class="tab-btn" data-tab="pa">Phasenauswertung</button>
     <button type="button" class="tab-btn" data-tab="wz">Wartezeit ab Anforderung</button>
     <button type="button" class="tab-btn" data-tab="up">Umlaufprüfung</button>
   </nav>
@@ -153,6 +155,114 @@
           </div>
 
         </div>
+      </div>
+    </div>
+
+    <!-- ============== Stammdaten LSA (Phaseneinteilung) ============== -->
+    <div class="tab-panel" id="tab-sd">
+      <div class="view">
+
+        <div class="panel">
+          <div class="panel-head">Stammdaten LSA — Phaseneinteilung</div>
+          <div class="hint" style="padding:14px 16px 0;">
+            Eine <b>Phase</b> fasst die Signalgruppen zusammen, die gleichzeitig Grün (Freigabe) zeigen
+            und damit ohne Verkehrskonflikt gemeinsam abgewickelt werden (RiLSA). Ein Signalprogramm
+            durchläuft je Umlauf eine feste Phasenfolge, getrennt durch Zwischenzeiten. Hier festlegen,
+            welche Signalgruppen zu welcher Phase gehören – ausgewertet wird das im Tab „Phasenauswertung“.
+          </div>
+          <div class="hint warn" id="sdNoSgHint" style="display:none;">Keine Signalgruppen in der aktuellen Analyse gefunden.</div>
+          <div class="panel-body phase-matrix-wrap">
+            <table class="phase-matrix" id="sdPhaseTable"></table>
+            <div class="cfg-empty" id="sdEmptyHint">Noch keine Phase angelegt.</div>
+          </div>
+          <div style="padding:0 16px 16px;">
+            <button type="button" class="primary" id="sdAddPhase">+ Phase hinzufügen</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ============== Phasenauswertung ============== -->
+    <div class="tab-panel" id="tab-pa">
+      <div class="view">
+
+        <div class="hint" id="paEmptyHint" style="padding:14px 0 0;">Noch keine Phase definiert – im Tab „Stammdaten LSA“ mindestens eine Phase mit Signalgruppen anlegen.</div>
+
+        <div id="paContent" style="display:none;">
+          <div class="panel">
+            <div class="panel-head">
+              <span>Phasendiagramm</span>
+              <div class="diagram-controls" id="paDiagramControls" style="display:none;">
+                <button id="paBtnWinPrev" title="Vorheriger Umlauf">◀</button>
+                <span class="win-label" id="paWinLabel"></span>
+                <button id="paBtnWinNext" title="Nächster Umlauf">▶</button>
+                <label class="win-size-label">Fenster:
+                  <input type="number" id="paWinSize" min="1" max="200" value="5" step="1">
+                  Umläufe
+                </label>
+                <button id="paBtnWinAll">Alle anzeigen</button>
+              </div>
+            </div>
+            <div class="legend">
+              <span class="item"><span class="swatch" style="background:var(--sig-red);height:3px;align-self:center;"></span>Phase nicht aktiv (Grundlinie)</span>
+              <span class="item"><span class="swatch" style="background:var(--sig-green)"></span>Phase aktiv (alle Mitglieder gleichzeitig Grün)</span>
+              <span class="item"><span class="swatch" style="background:var(--sig-yellow);height:4px;align-self:center;"></span>Auffälliges Erscheinen</span>
+              <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
+            </div>
+            <div class="lane-row lane-header" style="padding:10px 16px 0;">
+              <div class="lane-name">Phase</div>
+              <div class="lane-num">An</div>
+              <div class="lane-num">Ab</div>
+              <div class="lane-num">TF</div>
+              <div class="lane-track" style="background:none;border:none;"></div>
+            </div>
+            <div class="spl-bar-row" style="padding:0 16px;">
+              <div class="spl-bar-label-fixed">Programm (SPL)</div>
+              <div class="spl-bar" id="paSplBar"><svg></svg></div>
+            </div>
+            <div style="padding:0 16px 12px;">
+              <div id="paTimeline"></div>
+              <div class="axis" id="paAxis"><svg></svg></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">Kennzahlen je Phase</div>
+            <table>
+              <thead><tr>
+                <th>Phase</th><th>Anzahl</th><th>Ø Dauer</th><th>Median</th><th>Min</th><th>Max</th><th>Summe</th>
+              </tr></thead>
+              <tbody id="paStatsBody"></tbody>
+            </table>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">Phasen-Trend je Erscheinen <span class="trend-target" id="paTrendTarget" style="font-family:var(--mono);font-weight:600;"></span></div>
+            <div class="trend-toolbar">
+              <div class="cfg-field" style="flex-direction:row; align-items:center; gap:8px;">
+                <label for="paTrendSelect" style="margin:0;">Phase</label>
+                <select id="paTrendSelect"></select>
+              </div>
+              <div class="seg-toggle" id="paTrendModeGroup">
+                <button type="button" data-mode="scatter" class="active">Zeitverlauf</button>
+                <button type="button" data-mode="hist">Verteilung (CDF)</button>
+              </div>
+            </div>
+            <div class="trend-legend">
+              <span class="item"><span class="dot" style="background:var(--sig-green)"></span>unauffällig</span>
+              <span class="item"><span class="dot" style="background:var(--sig-yellow)"></span>leichte Abweichung</span>
+              <span class="item"><span class="dot" style="background:var(--sig-redyellow)"></span>mittlere Abweichung</span>
+              <span class="item"><span class="dot" style="background:var(--sig-red)"></span>auffällig</span>
+            </div>
+            <div class="chart-box" id="paTrendChartBox"><svg></svg><div class="chart-tooltip"></div></div>
+            <div class="axis" id="paTrendAxis"><svg></svg></div>
+            <div class="chart-box hoverable" id="paTrendHistBox" style="display:none;"><svg></svg><div class="chart-tooltip"></div></div>
+            <div class="axis" id="paTrendHistAxis" style="display:none;"><svg></svg></div>
+            <div class="chart-caption" id="paTrendCaption"></div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -267,6 +377,16 @@
         <div class="panel" id="upTablePanel" style="display:none;">
           <div class="panel-head">
             <span>Umläufe — <span id="upSgLabel"></span></span>
+            <div class="diagram-controls" id="upDiagramControls" style="display:none;">
+              <button id="upBtnWinPrev" title="Vorheriges Fenster">◀</button>
+              <span class="win-label" id="upWinLabel"></span>
+              <button id="upBtnWinNext" title="Nächstes Fenster">▶</button>
+              <label class="win-size-label">Fenster:
+                <input type="number" id="upWinSize" min="1" max="500" value="20" step="1">
+                Umläufe
+              </label>
+              <button id="upBtnWinAll">Alle anzeigen</button>
+            </div>
             <span class="win-label" id="upInfo"></span>
           </div>
           <div class="legend">
@@ -305,6 +425,7 @@
 <script src="js/core/parser.js"></script>
 <script src="js/core/segments.js"></script>
 <script src="js/core/wartezeitLogic.js"></script>
+<script src="js/core/phases.js"></script>
 <script src="js/core/sampleData.js"></script>
 <script src="js/state.js"></script>
 <script src="js/charts/tooltipHelper.js"></script>
@@ -314,6 +435,8 @@
 <script src="js/charts/waitScatterChart.js"></script>
 <script src="js/views/navigator.js"></script>
 <script src="js/views/gruenzeitanalyse.js"></script>
+<script src="js/views/stammdatenLsa.js"></script>
+<script src="js/views/phasenauswertung.js"></script>
 <script src="js/views/wartezeit.js"></script>
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/app.js"></script>
