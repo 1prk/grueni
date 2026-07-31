@@ -19,14 +19,19 @@ Beschreibung) gefolgt von den Messzeilen — siehe Hinweistext im Reiter
 - **Grünzeitanalyse** — Signalzeitendiagramm je Signalgruppe mit Umlauf-
   Fenster, SPL-Programmleiste, Kennzahlen-Tabelle (gesamt/je Signalzeitenplan),
   Dunkel-/Abschaltzeiträume und Grünzeit-Trend (Zeitverlauf + Verteilung/CDF).
+  Optional per Checkbox einblendbar: ein Phasen-Overlay über dem gesamten
+  Spuren-Stapel, das je Phasen-Vorkommen eine gestrichelte Klammer
+  („┊----Ph2----┊“, in der Phasenfarbe) über die volle Höhe zeichnet.
 - **Stammdaten LSA** — Phaseneinteilung: legt fest, welche Signalgruppen
   gleichzeitig Grün zeigen und damit ohne Verkehrskonflikt eine gemeinsame
   Phase bilden (RiLSA). Phasen sind frei benennbar (Kürzel + Bezeichnung,
   Standard „Ph1“/„Phase 1“ usw.), beliebig hinzufügbar/entfernbar.
 - **Phasenauswertung** — wertet aus, wann und wie oft jede definierte Phase
   in der Aufzeichnung tatsächlich vollständig angezeigt wurde (alle
-  Mitglieds-Signalgruppen gleichzeitig grün) — im selben Aufbau wie die
-  Grünzeitanalyse (Zeitdiagramm, Kennzahlen, Trend je Erscheinen).
+  Mitglieds-Signalgruppen gleichzeitig grün): ein kombiniertes Phasendiagramm
+  (eine Farbe je Phase, da Phasen nie gleichzeitig aktiv sind), eine
+  Kennzahlen-Tabelle und "Phasendauer pro Umlauf" (gruppiertes Balkendiagramm,
+  alle Phasen je Umlauf im Vergleich).
 - **Wartezeit ab Anforderung** — Zuordnung Signalgruppe ↔ Detektor(en),
   ereignisbasierte Wartezeit-Auswertung mit Kennzahlen, Streudiagramm und
   Ereignistabelle.

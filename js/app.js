@@ -79,8 +79,11 @@
     // die bei display:none immer 0 wäre.
     els.contentArea.classList.add('show');
 
-    GZ.views.gruenzeitanalyse.onAnalyzeComplete();
+    // Phasen zuerst zurücksetzen, damit die Grünzeitanalyse (Phasen-Overlay-
+    // Sichtbarkeit) beim eigenen onAnalyzeComplete() bereits den korrekten,
+    // leeren Phasenstand der neuen Analyse sieht statt der alten Phasenliste.
     GZ.views.stammdatenLsa.onAnalyzeComplete();
+    GZ.views.gruenzeitanalyse.onAnalyzeComplete();
     GZ.views.phasenauswertung.onAnalyzeComplete();
     GZ.views.wartezeit.populateControls();
     GZ.views.umlaufpruefung.populateControls();

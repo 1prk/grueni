@@ -35,6 +35,7 @@
 
   function notifyChanged() {
     if (GZ.views.phasenauswertung) GZ.views.phasenauswertung.refresh();
+    if (GZ.views.gruenzeitanalyse) GZ.views.gruenzeitanalyse.refresh();
   }
 
   function renderTable() {

@@ -11,6 +11,7 @@
   } = GZ.segments;
 
   let els = null;
+  let showPhaseOverlay = false;
 
   function init(root) {
     els = {
@@ -23,6 +24,9 @@
       winSize: root.querySelector('#gzWinSize'),
       btnWinAll: root.querySelector('#gzBtnWinAll'),
       timelineEl: root.querySelector('#gzTimeline'),
+      phaseOverlaySvgEl: root.querySelector('#gzPhaseOverlaySvg'),
+      phaseOverlayToggle: root.querySelector('#gzPhaseOverlayToggle'),
+      phaseOverlayCheckbox: root.querySelector('#gzShowPhaseOverlay'),
       splBarSvgEl: root.querySelector('#gzSplBar svg'),
       axisSvgEl: root.querySelector('#gzAxis svg'),
       statsScopeGroup: root.querySelector('#gzStatsScopeGroup'),
@@ -86,6 +90,10 @@
         renderTrend();
       });
     });
+    els.phaseOverlayCheckbox.addEventListener('change', () => {
+      showPhaseOverlay = els.phaseOverlayCheckbox.checked;
+      updateDiagramWindow();
+    });
   }
 
   /* ---------------- Navigator + Auswahl ---------------- */
@@ -131,6 +139,7 @@
       },
       onGreenClick: () => {}
     });
+    renderPhaseOverlay(range.wMin, range.wMax);
 
     if (!hasCycles) return;
     const total = cycleStarts.length;
@@ -141,6 +150,25 @@
     els.btnWinPrev.disabled = GZ.state.data.window.showAll || range.startIdx <= 0;
     els.btnWinNext.disabled = GZ.state.data.window.showAll || range.startIdx >= total - 1;
     els.winSize.disabled = GZ.state.data.window.showAll;
+  }
+
+  // Phasen-Overlay (siehe Tab "Stammdaten LSA"): toggelbare Klammern über dem
+  // gesamten Spuren-Stapel, unabhängig von der Signalgruppen-Aufteilung.
+  function renderPhaseOverlay(wMin, wMax) {
+    const a = GZ.state.data.currentAnalysis;
+    const phases = a ? GZ.state.data.phases : [];
+    const hasPhases = phases && phases.length > 0;
+    els.phaseOverlayToggle.style.display = hasPhases ? '' : 'none';
+    if (!hasPhases || !showPhaseOverlay) {
+      els.phaseOverlaySvgEl.style.display = 'none';
+      return;
+    }
+    els.phaseOverlaySvgEl.style.display = 'block';
+    const occEntries = phases.map((phase, i) => ({
+      ...GZ.phases.computePhaseOccurrences(phase, a.allStats),
+      color: GZ.phases.colorForIndex(i)
+    }));
+    GZ.charts.phaseOverlay.render(els.phaseOverlaySvgEl, { wMin, wMax, occEntries });
   }
 
   // Springt im Signalzeitendiagramm zum Umlauf, der den Zeitpunkt t enthält
@@ -380,6 +408,8 @@
     GZ.state.data.wzActivePoints = null;
     const winSizeVal = parseInt(els.winSize.value, 10);
     GZ.state.data.window.count = Number.isFinite(winSizeVal) && winSizeVal > 0 ? winSizeVal : 5;
+    showPhaseOverlay = false;
+    els.phaseOverlayCheckbox.checked = false;
 
     renderNavigatorPanel();
     updateDiagramWindow();

@@ -63,15 +63,20 @@
           <div class="panel">
             <div class="panel-head">
               <span>Signalzeitendiagramm</span>
-              <div class="diagram-controls" id="gzDiagramControls" style="display:none;">
-                <button id="gzBtnWinPrev" title="Vorheriger Umlauf">◀</button>
-                <span class="win-label" id="gzWinLabel"></span>
-                <button id="gzBtnWinNext" title="Nächster Umlauf">▶</button>
-                <label class="win-size-label">Fenster:
-                  <input type="number" id="gzWinSize" min="1" max="200" value="5" step="1">
-                  Umläufe
+              <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                <label class="phase-overlay-toggle" id="gzPhaseOverlayToggle" style="display:none;">
+                  <input type="checkbox" id="gzShowPhaseOverlay"> Phasen einblenden
                 </label>
-                <button id="gzBtnWinAll">Alle anzeigen</button>
+                <div class="diagram-controls" id="gzDiagramControls" style="display:none;">
+                  <button id="gzBtnWinPrev" title="Vorheriger Umlauf">◀</button>
+                  <span class="win-label" id="gzWinLabel"></span>
+                  <button id="gzBtnWinNext" title="Nächster Umlauf">▶</button>
+                  <label class="win-size-label">Fenster:
+                    <input type="number" id="gzWinSize" min="1" max="200" value="5" step="1">
+                    Umläufe
+                  </label>
+                  <button id="gzBtnWinAll">Alle anzeigen</button>
+                </div>
               </div>
             </div>
             <div class="legend">
@@ -98,7 +103,10 @@
               <div class="spl-bar" id="gzSplBar"><svg></svg></div>
             </div>
             <div style="padding:0 16px 12px;">
-              <div id="gzTimeline"></div>
+              <div class="timeline-wrap">
+                <div id="gzTimeline"></div>
+                <svg id="gzPhaseOverlaySvg" class="phase-overlay-svg" style="display:none;"></svg>
+              </div>
               <div class="axis" id="gzAxis"><svg></svg></div>
             </div>
           </div>
@@ -407,6 +415,7 @@
 <script src="js/charts/trendChart.js"></script>
 <script src="js/charts/waitScatterChart.js"></script>
 <script src="js/charts/phaseDurationChart.js"></script>
+<script src="js/charts/phaseOverlay.js"></script>
 <script src="js/views/navigator.js"></script>
 <script src="js/views/gruenzeitanalyse.js"></script>
 <script src="js/views/stammdatenLsa.js"></script>
