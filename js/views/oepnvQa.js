@@ -1,0 +1,220 @@
+/* GZ.views.oepnvQa — Tab "ÖPNV — Anmeldung/Abmeldung": Zuweisung von
+   Signalgruppe + getrennten An-/Abmeldedetektor(en), LOS-Kennzahlen (A-F),
+   Streudiagramm und Ereignistabelle. Analog zu js/views/wartezeit.js, aber
+   mit zwei Detektorgruppen statt einer und LOS- statt Warn-/Grenzwertstufen. */
+(function (GZ) {
+  'use strict';
+  const { esc, fmtTs } = GZ.format;
+  const { mean, percentile, parseNumListe } = GZ.stats;
+  const { computeSplTransitions } = GZ.segments;
+  const {
+    LOS_LEVELS, losDefaultBounds, losStufe, computeOepnvEvents,
+    wzIstBelegt, txAtTime, auslosenderDetektor
+  } = GZ.oepnvLogic;
+
+  let els = null;
+
+  function init(root) {
+    els = {
+      root,
+      sgSelect: root.querySelector('#oeSgSelect'),
+      anDetChecks: root.querySelector('#oeAnDetChecks'),
+      abDetChecks: root.querySelector('#oeAbDetChecks'),
+      losInputs: [...root.querySelectorAll('.oe-los-bound')],
+      splExcl: root.querySelector('#oeSplExcl'),
+      hint: root.querySelector('#oeHint'),
+      kpiPanel: root.querySelector('#oeKpiPanel'),
+      kpiGrid: root.querySelector('#oeKpiGrid'),
+      losDist: root.querySelector('#oeLosDist'),
+      chartPanel: root.querySelector('#oeChartPanel'),
+      chartInfo: root.querySelector('#oeChartInfo'),
+      chartBox: root.querySelector('#oeChartBox'),
+      axis: root.querySelector('#oeAxis'),
+      tablePanel: root.querySelector('#oeTablePanel'),
+      eventsBody: root.querySelector('#oeEventsBody')
+    };
+  }
+
+  function populateDetChecks(el, detCols, defaultIdx) {
+    if (detCols.length === 0) {
+      el.innerHTML = '<div class="cfg-empty">Keine Detektor-Spalten (DET) in den Daten erkannt.</div>';
+      return;
+    }
+    const prevChecked = new Set([...el.querySelectorAll('input:checked')].map(i => i.value));
+    el.innerHTML = detCols.map((c, i) => {
+      const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
+      const checked = prevChecked.size ? prevChecked.has(String(c.index)) : i === defaultIdx;
+      return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> ${esc(label)}</label>`;
+    }).join('');
+  }
+
+  function populateControls() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const { allStats, otherColumns } = a;
+
+    const prevSg = els.sgSelect.value;
+    els.sgSelect.innerHTML = allStats.map(({ col }, i) => {
+      const label = col.beschreibung && col.beschreibung !== col.name ? `${col.name} – ${col.beschreibung}` : col.name;
+      return `<option value="${i}">${esc(label)}</option>`;
+    }).join('');
+    if (prevSg && allStats[prevSg]) els.sgSelect.value = prevSg;
+
+    const detCols = otherColumns.filter(c => c.kuerzel === 'DET');
+    populateDetChecks(els.anDetChecks, detCols, 0);
+    populateDetChecks(els.abDetChecks, detCols, detCols.length > 1 ? 1 : 0);
+
+    wireEvents();
+    recompute();
+  }
+
+  function wireEvents() {
+    els.sgSelect.onchange = recompute;
+    els.anDetChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = recompute);
+    els.abDetChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = recompute);
+    els.losInputs.forEach(inp => inp.onchange = recompute);
+    els.splExcl.onchange = recompute;
+  }
+
+  function leseLosBounds() {
+    return els.losInputs.map((inp, i) => {
+      const raw = inp.value.trim();
+      const v = raw === '' ? losDefaultBounds[i] : Number(raw);
+      return Number.isFinite(v) && v > 0 ? v : losDefaultBounds[i];
+    });
+  }
+
+  function recompute() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const { allStats, otherColumns, times, seriesByCol, splValues, cycleStarts } = a;
+    const sgIdx = Number(els.sgSelect.value);
+    const sgEntry = allStats[sgIdx];
+    const detCols = otherColumns.filter(c => c.kuerzel === 'DET');
+    const anIdx = [...els.anDetChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
+    const abIdx = [...els.abDetChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
+    const anDetCols = detCols.filter(c => anIdx.includes(c.index));
+    const abDetCols = detCols.filter(c => abIdx.includes(c.index));
+    const losBounds = leseLosBounds();
+    const exclSpl = parseNumListe(els.splExcl.value);
+
+    if (!sgEntry || anDetCols.length === 0 || abDetCols.length === 0) {
+      els.hint.textContent = 'Bitte Signalgruppe sowie mindestens einen Anmelde- und einen Abmeldedetektor auswählen.';
+      els.hint.className = 'hint warn';
+      els.kpiPanel.style.display = 'none';
+      els.chartPanel.style.display = 'none';
+      els.tablePanel.style.display = 'none';
+      GZ.state.data.oepnvActivePoints = null;
+      GZ.views.gruenzeitanalyse.refreshReqPoints();
+      return;
+    }
+
+    const sgRaw = seriesByCol.get(sgEntry.col.index);
+    const anOccupied = times.map((_, i) => anDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
+    const abOccupied = times.map((_, i) => abDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
+    const { events, unresolved } = computeOepnvEvents(times, sgRaw, anOccupied, abOccupied, splValues, exclSpl);
+
+    GZ.state.data.oepnvActivePoints = {
+      colIndex: sgEntry.col.index,
+      times: events.map(e => e.reqTime),
+      unresolvedTime: unresolved ? unresolved.startTime : null
+    };
+    GZ.views.gruenzeitanalyse.refreshReqPoints();
+
+    const successEvents = events.filter(e => e.type === 'ERFOLG');
+    const deniedEvents = events.filter(e => e.type === 'ABGEMELDET');
+    const validSuccess = successEvents.filter(e => !e.excluded);
+    const validDenied = deniedEvents.filter(e => !e.excluded);
+    const excludedCount = events.length - validSuccess.length - validDenied.length;
+    const waits = validSuccess.map(e => e.waitSec).sort((a, b) => a - b);
+    const losCounts = {};
+    LOS_LEVELS.forEach(l => { losCounts[l] = 0; });
+    validSuccess.forEach(e => { losCounts[losStufe(e.waitSec, losBounds)]++; });
+
+    els.hint.textContent = `Signalgruppe „${sgEntry.col.name}“, Anmeldedetektor(en): ${anDetCols.map(c => c.name).join(' + ')}, Abmeldedetektor(en): ${abDetCols.map(c => c.name).join(' + ')} · ${events.length} Anmeldung(en) ausgewertet.`;
+    els.hint.className = 'hint';
+    els.kpiPanel.style.display = 'block';
+    els.chartPanel.style.display = 'block';
+    els.tablePanel.style.display = 'block';
+
+    renderKpis(waits, losCounts, validDenied.length, excludedCount, unresolved);
+    renderChart(successEvents, deniedEvents, losBounds, cycleStarts, a);
+    renderTable(events, unresolved, losBounds, anDetCols, abDetCols, seriesByCol, cycleStarts);
+  }
+
+  function renderKpis(waits, losCounts, deniedCount, excludedCount, unresolved) {
+    const n = waits.length;
+    const totalOutcomes = n + deniedCount;
+    const successRate = totalOutcomes ? (n / totalOutcomes * 100) : null;
+    const cards = [
+      { label: 'Mittelwert', value: n ? mean(waits).toFixed(1) + 's' : '–', sub: `n=${n}` },
+      { label: 'Median (P50)', value: n ? percentile(waits, 50).toFixed(1) + 's' : '–' },
+      { label: 'P85', value: n ? percentile(waits, 85).toFixed(1) + 's' : '–' },
+      { label: 'P95', value: n ? percentile(waits, 95).toFixed(1) + 's' : '–' },
+      { label: 'Erfolgsquote', value: successRate != null ? successRate.toFixed(0) + '%' : '–', cls: successRate != null && successRate < 100 ? 'warn' : '' },
+      { label: 'Abgemeldet ohne Grün', value: deniedCount, cls: deniedCount > 0 ? 'crit' : '' },
+      { label: 'Ausgeschlossen (SPL)', value: excludedCount },
+      { label: 'Unaufgelöst bis Datenende', value: unresolved ? `Ja (${unresolved.durationSec.toFixed(0)}s)` : 'Nein', cls: unresolved ? 'crit' : '' }
+    ];
+    els.kpiGrid.innerHTML = cards.map(c => `
+      <div class="kpi ${c.cls || ''}">
+        <div class="kpi-label">${esc(c.label)}</div>
+        <div class="kpi-value">${esc(c.value)}</div>
+        ${c.sub ? `<div class="kpi-sub">${esc(c.sub)}</div>` : ''}
+      </div>`).join('');
+
+    els.losDist.innerHTML = LOS_LEVELS.map(l => `
+      <div class="los-dist-item"><span class="los-chip los-${l}">${l}</span> ${losCounts[l]}</div>
+    `).join('');
+  }
+
+  function renderChart(successEvents, deniedEvents, losBounds, cycleStarts, a) {
+    const splTransitions = computeSplTransitions(a.times, a.splValues);
+    const result = GZ.charts.oepnvScatterChart.render(els.chartBox, els.axis.querySelector('svg'), {
+      tMin: a.tMin, tMax: a.tMax, successEvents, deniedEvents, losBounds,
+      splTransitions, cycleStarts, onPointClick: GZ.app.jumpToGruenzeit
+    });
+    const total = successEvents.length + deniedEvents.length;
+    els.chartInfo.textContent = `${total} Ereignis(se)` + (result && result.yMax ? ` · y-Achse bis ${Math.round(result.yMax)}s` : '');
+  }
+
+  function losChipHtml(level) {
+    return level ? `<span class="los-chip los-${level}">${level}</span>` : '<span class="los-chip los-na">–</span>';
+  }
+
+  function renderTable(events, unresolved, losBounds, anDetCols, abDetCols, seriesByCol, cycleStarts) {
+    let rows = events.map((e, i) => {
+      const tx = txAtTime(e.reqTime, cycleStarts);
+      const cls = e.excluded ? 'oe-excluded' : (e.type === 'ABGEMELDET' ? 'oe-abgemeldet' : '');
+      const ergebnis = e.excluded ? 'ausgeschlossen (SPL)' : (e.type === 'ERFOLG' ? 'Grün' : 'Abgemeldet ohne Grün');
+      const losLabel = (!e.excluded && e.type === 'ERFOLG') ? losStufe(e.waitSec, losBounds) : null;
+      const anDet = auslosenderDetektor(anDetCols, seriesByCol, e.reqIdx);
+      const abDet = e.type === 'ABGEMELDET' ? auslosenderDetektor(abDetCols, seriesByCol, e.endIdx) : '–';
+      return `<tr class="${cls}" data-t="${e.reqTime}">
+        <td>${i + 1}</td><td>${fmtTs(new Date(e.reqTime))}</td><td>${tx ?? '–'}</td>
+        <td>${esc(ergebnis)}</td><td>${fmtTs(new Date(e.endTime))}</td><td>${esc(e.spl)}</td>
+        <td>${e.waitSec.toFixed(1)}s</td><td>${losChipHtml(losLabel)}</td>
+        <td>${esc(anDet)}</td><td>${esc(abDet)}</td>
+      </tr>`;
+    }).join('');
+
+    if (unresolved) {
+      const tx = txAtTime(unresolved.startTime, cycleStarts);
+      const anDet = auslosenderDetektor(anDetCols, seriesByCol, unresolved.startIdx);
+      rows += `<tr class="oe-unresolved" data-t="${unresolved.startTime}">
+        <td>–</td><td>${fmtTs(new Date(unresolved.startTime))}</td><td>${tx ?? '–'}</td>
+        <td>unaufgelöst (kein Grün/Abmeldung bis Datenende)</td><td>–</td><td>–</td>
+        <td>${unresolved.durationSec.toFixed(1)}s*</td><td>${losChipHtml(null)}</td>
+        <td>${esc(anDet)}</td><td>–</td>
+      </tr>`;
+    }
+
+    els.eventsBody.innerHTML = rows || '<tr><td colspan="10">Keine Anmeldungen gefunden.</td></tr>';
+    els.eventsBody.querySelectorAll('tr[data-t]').forEach(tr => {
+      tr.addEventListener('click', () => GZ.app.jumpToGruenzeit(Number(tr.dataset.t)));
+    });
+  }
+
+  GZ.views = GZ.views || {};
+  GZ.views.oepnvQa = { init, populateControls, recompute };
+})(window.GZ = window.GZ || {});

@@ -150,6 +150,24 @@ tr.wz-warnung td:nth-child(6), tr.wz-warnung td:nth-child(7){ color:var(--warn-t
 tr.wz-grenzwert td:nth-child(6), tr.wz-grenzwert td:nth-child(7){ color:var(--sig-red); font-weight:700; }
 tr.wz-unresolved td{ color:var(--sig-red); font-style:italic; }
 
+/* ---------- ÖPNV-Ereignistabelle: LOS-Stufen + Statuszeilen ---------- */
+.los-chip{ display:inline-flex; align-items:center; justify-content:center; min-width:20px; padding:1px 7px; border-radius:10px; font-weight:700; font-family:var(--mono); font-size:11px; color:var(--text); }
+.los-chip.los-A{ background:var(--los-a); color:#fff; }
+.los-chip.los-B{ background:var(--los-b); }
+.los-chip.los-C{ background:var(--los-c); }
+.los-chip.los-D{ background:var(--los-d); }
+.los-chip.los-E{ background:var(--los-e); }
+.los-chip.los-F{ background:var(--los-f); color:#fff; }
+.los-chip.los-na{ background:var(--bg-surface-2); color:var(--text-faint); border:1px solid var(--border); }
+.los-dist{ display:flex; gap:10px; flex-wrap:wrap; padding:0 16px 16px; align-items:center; }
+.los-dist-item{ display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--text-muted); font-family:var(--mono); }
+.los-bounds-row{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12.5px; }
+.los-bounds-row .los-bound-field{ display:flex; align-items:center; gap:4px; }
+.los-bounds-row input[type=number]{ width:52px; font-family:var(--mono); }
+tr.oe-excluded td{ color:var(--text-faint); font-style:italic; }
+tr.oe-abgemeldet td:nth-child(4), tr.oe-abgemeldet td:nth-child(7){ color:var(--sig-red); font-weight:700; }
+tr.oe-unresolved td{ color:var(--sig-red); font-style:italic; }
+
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }
 .up-group{ padding:7px 0 10px; border-bottom:1px solid var(--border); }

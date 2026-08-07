@@ -35,6 +35,14 @@ Beschreibung) gefolgt von den Messzeilen — siehe Hinweistext im Reiter
 - **Wartezeit ab Anforderung** — Zuordnung Signalgruppe ↔ Detektor(en),
   ereignisbasierte Wartezeit-Auswertung mit Kennzahlen, Streudiagramm und
   Ereignistabelle.
+- **ÖPNV — Anmeldung/Abmeldung** — QA-Modul für ÖPNV-Priorisierung, strukturell
+  identisch zu „Wartezeit ab Anforderung“, aber mit getrennten, frei
+  wählbaren Anmelde- und Abmeldedetektor(en) je Signalgruppe (z. B. Signalgruppe
+  S1 über Hauptanmelder S1_HA oder Türkontakt S1_TS als Anmeldung, S1_AB als
+  Abmeldung). Eine Anmeldung endet entweder mit Erfolg (Signalgruppe wird
+  Dauergrün) oder wird ohne Grün wieder abgemeldet (Prioritätsfehlschlag,
+  eigenes Symbol im Diagramm). Bewertung über manuell justierbare LOS-Stufen
+  A–F (Obergrenzen in Sekunden) statt der zweistufigen Warn-/Grenzwertlogik.
 - **Umlaufprüfung** — je Umlauf eine Zeile im Stil des Signalzeitendiagramms,
   mit optionalen Detektor- und APW-/ÖPNV-Wert-Zusatzspuren. Fenster-Steuerung
   wie im Signalzeitendiagramm, damit auch sehr lange Aufzeichnungen (viele

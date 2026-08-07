@@ -49,6 +49,7 @@
     <button type="button" class="tab-btn" data-tab="sd">Stammdaten LSA</button>
     <button type="button" class="tab-btn" data-tab="pa">Phasenauswertung</button>
     <button type="button" class="tab-btn" data-tab="wz">Wartezeit ab Anforderung</button>
+    <button type="button" class="tab-btn" data-tab="oe">ÖPNV — Anmeldung/Abmeldung</button>
     <button type="button" class="tab-btn" data-tab="up">Umlaufprüfung</button>
   </nav>
 
@@ -89,7 +90,7 @@
               <span class="item"><span class="swatch" style="background:repeating-linear-gradient(90deg,#d8dce1 0 3px,#f2f4f6 3px 6px);border:1px dotted var(--border-strong)"></span>Datenlücke</span>
               <span class="item"><span class="swatch" style="background:var(--sig-yellow);height:4px;align-self:center;"></span>Auffälliger Umlauf</span>
               <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
-              <span class="item"><span class="swatch" style="background:var(--req-marker);border-radius:50%;width:9px;height:9px;"></span>Anforderungsbeginn (Detektor, siehe Tab „Wartezeit“)</span>
+              <span class="item"><span class="swatch" style="background:var(--req-marker);border-radius:50%;width:9px;height:9px;"></span>Anforderungsbeginn (Detektor/Anmeldung, siehe Tab „Wartezeit“ bzw. „ÖPNV“)</span>
             </div>
             <div class="lane-row lane-header" style="padding:10px 16px 0;">
               <div class="lane-name">Signalgr.</div>
@@ -332,6 +333,84 @@
       </div>
     </div>
 
+    <!-- ============== ÖPNV — Anmeldung/Abmeldung ============== -->
+    <div class="tab-panel" id="tab-oe">
+      <div class="view">
+
+        <div class="panel">
+          <div class="panel-head">ÖPNV — Anmeldung/Abmeldung — Zuweisung</div>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <label for="oeSgSelect">Signalgruppe</label>
+              <select id="oeSgSelect"></select>
+            </div>
+            <div class="cfg-field">
+              <label>Anmeldedetektor(en) <span class="cfg-field-hint">(mehrere = ODER-Verknüpfung, z.&nbsp;B. Hauptanmelder oder Türkontakt)</span></label>
+              <div id="oeAnDetChecks" class="det-checks"></div>
+            </div>
+            <div class="cfg-field">
+              <label>Abmeldedetektor(en) <span class="cfg-field-hint">(mehrere = ODER-Verknüpfung)</span></label>
+              <div id="oeAbDetChecks" class="det-checks"></div>
+            </div>
+            <div class="cfg-field">
+              <label>LOS-Stufen <span class="cfg-field-hint">(Obergrenzen in Sekunden, LOS F = darüber)</span></label>
+              <div class="los-bounds-row">
+                <span class="los-bound-field"><span class="los-chip los-A">A</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="5"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-B">B</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="10"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-C">C</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="20"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-D">D</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="35"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-E">E</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="50"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-F">F</span> darüber</span>
+              </div>
+              <div class="source-note">Orientierungswerte ohne Richtlinienbezug – maßgebliche Werte bitte selbst festlegen und hier eintragen.</div>
+              <label style="margin-top:4px;">Ausgeschlossene SPL <span class="cfg-field-hint">(kommagetrennt)</span></label>
+              <div class="num-row"><input type="text" id="oeSplExcl" value="0,-1,-2"></div>
+            </div>
+          </div>
+          <div id="oeHint" class="hint"></div>
+        </div>
+
+        <div class="panel" id="oeKpiPanel" style="display:none;">
+          <div class="panel-head">Kennzahlen</div>
+          <div class="kpi-grid" id="oeKpiGrid"></div>
+          <div class="los-dist" id="oeLosDist"></div>
+        </div>
+
+        <div class="panel" id="oeChartPanel" style="display:none;">
+          <div class="panel-head">
+            <span>Anmeldungen im Zeitverlauf</span>
+            <span class="win-label" id="oeChartInfo"></span>
+          </div>
+          <div class="legend">
+            <span class="item"><span class="swatch" style="background:var(--los-a);border-radius:50%;width:9px;height:9px;"></span>LOS A</span>
+            <span class="item"><span class="swatch" style="background:var(--los-b);border-radius:50%;width:9px;height:9px;"></span>LOS B</span>
+            <span class="item"><span class="swatch" style="background:var(--los-c);border-radius:50%;width:9px;height:9px;"></span>LOS C</span>
+            <span class="item"><span class="swatch" style="background:var(--los-d);border-radius:50%;width:9px;height:9px;"></span>LOS D</span>
+            <span class="item"><span class="swatch" style="background:var(--los-e);border-radius:50%;width:9px;height:9px;"></span>LOS E</span>
+            <span class="item"><span class="swatch" style="background:var(--los-f);border-radius:50%;width:9px;height:9px;"></span>LOS F</span>
+            <span class="item"><span class="swatch" style="background:var(--sig-dark);width:9px;height:9px;clip-path:polygon(50% 0,100% 100%,0 100%);"></span>Abgemeldet ohne Grün</span>
+            <span class="item"><span class="swatch" style="background:var(--text-faint);border-radius:50%;width:9px;height:9px;opacity:.6;"></span>Ausgeschlossen (SPL)</span>
+            <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
+          </div>
+          <div class="chart-box" id="oeChartBox"><svg></svg><div class="chart-tooltip"></div></div>
+          <div class="axis" id="oeAxis"><svg></svg></div>
+          <div class="chart-note">Punkt anklicken, um im Signalzeitendiagramm zum betreffenden Umlauf zu springen.</div>
+        </div>
+
+        <div class="panel" id="oeTablePanel" style="display:none;">
+          <div class="panel-head">Anmelde-Ereignisse</div>
+          <table>
+            <thead><tr>
+              <th>Nr</th><th>Anmeldung</th><th>TX</th><th>Ergebnis</th><th>Zeitpunkt Ergebnis</th><th>SPL</th>
+              <th>Dauer</th><th>LOS</th><th>Anmeldedetektor</th><th>Abmeldedetektor</th>
+            </tr></thead>
+            <tbody id="oeEventsBody"></tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ============== Umlaufprüfung ============== -->
     <div class="tab-panel" id="tab-up">
       <div class="view">
@@ -406,6 +485,7 @@
 <script src="js/core/parser.js"></script>
 <script src="js/core/segments.js"></script>
 <script src="js/core/wartezeitLogic.js"></script>
+<script src="js/core/oepnvLogic.js"></script>
 <script src="js/core/phases.js"></script>
 <script src="js/core/sampleData.js"></script>
 <script src="js/state.js"></script>
@@ -414,6 +494,7 @@
 <script src="js/charts/timelineChart.js"></script>
 <script src="js/charts/trendChart.js"></script>
 <script src="js/charts/waitScatterChart.js"></script>
+<script src="js/charts/oepnvScatterChart.js"></script>
 <script src="js/charts/phaseDurationChart.js"></script>
 <script src="js/charts/phaseOverlay.js"></script>
 <script src="js/views/navigator.js"></script>
@@ -421,6 +502,7 @@
 <script src="js/views/stammdatenLsa.js"></script>
 <script src="js/views/phasenauswertung.js"></script>
 <script src="js/views/wartezeit.js"></script>
+<script src="js/views/oepnvQa.js"></script>
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/app.js"></script>
 </body>
