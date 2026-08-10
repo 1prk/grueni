@@ -1,7 +1,8 @@
 /* GZ.charts.oepnvScatterChart — ÖPNV-Anmeldungen im Zeitverlauf: Streudiagramm
-   der Verlustzeit (Ist-Fahrzeit An->Ab minus Sollfahrzeit) mit LOS-
+   der Verlustzeit (Ist-Fahrzeit An->Ab minus Sollfahrzeit) mit QSV-
    Referenzlinien (A-F) und eigenem Symbol für Zwangslöschungen (keine
-   Abmeldung innerhalb der Zwangslöschzeit erhalten). */
+   Abmeldung innerhalb der Zwangslöschzeit erhalten). Wird je Signalgruppe
+   einzeln aufgerufen (getrennte Diagramme statt einem kombinierten). */
 (function (GZ) {
   'use strict';
   const { fmtTimeShort, esc } = GZ.format;
@@ -41,7 +42,7 @@
       refG.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(bound)).attr('y2', y(bound))
         .attr('class', 'd3-ref-line').style('stroke', LOS_COLOR[LOS_LEVELS[i + 1]]);
       refG.append('text').attr('x', 4).attr('y', y(bound) - 4).attr('class', 'd3-ref-label')
-        .text(`LOS ${LOS_LEVELS[i + 1]} ab ${bound}s`);
+        .text(`QSV ${LOS_LEVELS[i + 1]} ab ${bound}s`);
     });
 
     if (splTransitions && splTransitions.length) {
@@ -67,7 +68,7 @@
       .style('cursor', onPointClick ? 'pointer' : 'default')
       .on('mouseenter', function (evt, d) {
         const tx = txAtTime(d.anTime, cycleStarts);
-        const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : `LOS ${losStufe(d.verlustSek, losBounds)}`;
+        const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : `QSV ${losStufe(d.verlustSek, losBounds)}`;
         const sgLine = d.sgLabel ? `<div>${esc(d.sgLabel)}</div>` : '';
         tooltip.show(`${sgLine}<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Ist-Fahrzeit: ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit: ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
         tooltip.move(evt);

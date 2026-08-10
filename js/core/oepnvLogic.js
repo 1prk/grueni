@@ -79,7 +79,7 @@
     }
 
     const unresolved = waiting
-      ? { startIdx, startTime: times[startIdx], durationSec: (times[n - 1] - times[startIdx]) / 1000 }
+      ? { startIdx, startTime: times[startIdx], durationSec: (times[n - 1] - times[startIdx]) / 1000, spl: splRaw[startIdx] }
       : null;
     return { events, unresolved };
   }
