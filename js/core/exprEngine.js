@@ -14,11 +14,28 @@
 
    Typen: NUM, BOOL, SG, DET (Objekt-Handles auf eine Signalgruppen-/
    Detektor-Variable), KAT_SG, KAT_DET (Zustands-Konstanten, z.B. GRUEN/
-   BELEGT). Operatoren erzwingen den erwarteten Typ ihrer Operanden
-   (AND/OR/NOT nur BOOL, Arithmetik nur NUM, Vergleich NUM==NUM ODER
-   gleichartiges KAT==KAT) - Typfehler werden beim Parsen erkannt, ohne dass
-   Daten ausgewertet werden müssen (siehe compile()). Der Gesamtausdruck muss
-   zu BOOL auswerten.
+   BELEGT), ANY (Platzhalter für einen noch nicht gebundenen Funktions-
+   parameter, siehe compileFunctionDef() - erfüllt jede Typprüfung, damit
+   eine Funktionsdefinition VOR ihrer ersten Verwendung syntaktisch geprüft
+   werden kann, ohne die konkreten Argumenttypen zu kennen). Operatoren
+   erzwingen den erwarteten Typ ihrer Operanden (AND/OR/NOT nur BOOL,
+   Arithmetik nur NUM, Vergleich NUM==NUM ODER gleichartiges KAT==KAT) -
+   Typfehler werden beim Parsen erkannt, ohne dass Daten ausgewertet werden
+   müssen. Der Gesamtausdruck einer Formel (siehe compile()) muss zu BOOL
+   auswerten; der Rumpf einer benutzerdefinierten Funktion (siehe
+   compileFunctionDef()) darf einen beliebigen Typ liefern - erst der
+   tatsächliche Aufruf an einer Formel entscheidet, ob das passt.
+
+   Benutzerdefinierte Funktionen (funcs-Parameter von compile()/parse(), Form
+   { [name]: {params:string[], exprText:string} }): ein Aufruf FUNC(a,b,...)
+   wird "inline" expandiert - der Rumpftext wird mit einer neuen varTypes-
+   Bindung (Parametername -> tatsächlicher Argumenttyp DIESES Aufrufs) neu
+   geparst/typgeprüft (siehe parseCall()). Das bedeutet: derselbe Funktions-
+   rumpf wird potenziell mehrfach mit unterschiedlichen konkreten Typen
+   spezialisiert (wie C++-Templates/Java-Generics bei der Instanziierung),
+   nicht einmalig kompiliert. Ein visiting-Set (Funktionsnamen im aktuellen
+   Expansions-Stack) verhindert zyklische Aufrufe (A ruft B ruft A) mit
+   einem klaren Fehler statt eines Stapelüberlaufs.
 
    Eingebaute Funktionen (PRIMITIVES unten) verwandeln ein Objekt-Handle in
    einen auswertbaren Wert - Zustand(sg|det, TX)->KAT_*, Dauer(sg|det, TX)
@@ -50,8 +67,12 @@
   const TYPE_LABEL = t => ({
     BOOL: 'WAHR/FALSCH', NUM: 'eine Zahl',
     SG: 'eine Signalgruppe', DET: 'einen Detektor',
-    KAT_SG: 'einen Signalgruppen-Zustand', KAT_DET: 'einen Detektor-Zustand'
+    KAT_SG: 'einen Signalgruppen-Zustand', KAT_DET: 'einen Detektor-Zustand',
+    ANY: 'einen (noch unbestimmten) Parameterwert'
   })[t] || t;
+  const isNumCompatible = t => t === 'NUM' || t === 'ANY';
+  const isKatCompatible = t => t === 'KAT_SG' || t === 'KAT_DET' || t === 'ANY';
+  const isObjCompatible = t => t === 'SG' || t === 'DET' || t === 'ANY';
 
   // Zustands-Konstanten (exakte Schreibweise, siehe GZ.parser STATE_CAT/
   // categorizeDetRaw) - UNBEKANNT/INV/LUECKE sind bewusst NICHT als
@@ -62,20 +83,20 @@
     BELEGT: 'KAT_DET', FREI: 'KAT_DET'
   };
 
-  const OBJ_TYPES = new Set(['SG', 'DET']);
-  const katTypeForObj = t => t === 'SG' ? 'KAT_SG' : 'KAT_DET';
+  const katTypeForObj = t => t === 'SG' ? 'KAT_SG' : t === 'DET' ? 'KAT_DET' : 'ANY';
 
   // Eingebaute Funktionen: Objekt-Handle (+ optional Kategorie/TX) -> Wert.
   // check(argNodes, pos) wirft ExprError bei Typfehlern und liefert den
-  // Ergebnistyp; run(argNodes) baut den run(scope)-Closure. Siehe Datei-
-  // Kopfkommentar für die Semantik.
+  // Ergebnistyp; run(argNodes) baut den run(scope)-Closure. Akzeptiert ANY
+  // (noch unspezialisierter Funktionsparameter) überall dort, wo sonst SG/
+  // DET/NUM/KAT_* verlangt wird - siehe Datei-Kopfkommentar zu ANY.
   const PRIMITIVES = {
     Zustand: {
       arity: 2,
       check(args, pos) {
         const [obj, tx] = args;
-        if (!OBJ_TYPES.has(obj.type)) throw new ExprError('"Zustand" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
-        if (tx.type !== 'NUM') throw new ExprError(`"Zustand" (2. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
+        if (!isObjCompatible(obj.type)) throw new ExprError('"Zustand" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
+        if (!isNumCompatible(tx.type)) throw new ExprError(`"Zustand" (2. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
         return katTypeForObj(obj.type);
       },
       run(args) {
@@ -90,8 +111,8 @@
       arity: 2,
       check(args, pos) {
         const [obj, tx] = args;
-        if (!OBJ_TYPES.has(obj.type)) throw new ExprError('"Dauer" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
-        if (tx.type !== 'NUM') throw new ExprError(`"Dauer" (2. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
+        if (!isObjCompatible(obj.type)) throw new ExprError('"Dauer" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
+        if (!isNumCompatible(tx.type)) throw new ExprError(`"Dauer" (2. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
         return 'NUM';
       },
       run(args) {
@@ -107,10 +128,16 @@
       arity: 3,
       check(args, pos) {
         const [obj, kat, tx] = args;
-        if (!OBJ_TYPES.has(obj.type)) throw new ExprError('"DauerSeit" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
-        const expectedKat = katTypeForObj(obj.type);
-        if (kat.type !== expectedKat) throw new ExprError(`"DauerSeit" (2. Argument) erwartet ${TYPE_LABEL(expectedKat)} passend zum 1. Argument, bekam ${TYPE_LABEL(kat.type)}`, pos);
-        if (tx.type !== 'NUM') throw new ExprError(`"DauerSeit" (3. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
+        if (!isObjCompatible(obj.type)) throw new ExprError('"DauerSeit" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
+        if (obj.type === 'SG' || obj.type === 'DET') {
+          const expectedKat = katTypeForObj(obj.type);
+          if (kat.type !== expectedKat && kat.type !== 'ANY') {
+            throw new ExprError(`"DauerSeit" (2. Argument) erwartet ${TYPE_LABEL(expectedKat)} passend zum 1. Argument, bekam ${TYPE_LABEL(kat.type)}`, pos);
+          }
+        } else if (!isKatCompatible(kat.type)) {
+          throw new ExprError('"DauerSeit" (2. Argument) erwartet einen Zustand', pos);
+        }
+        if (!isNumCompatible(tx.type)) throw new ExprError(`"DauerSeit" (3. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
         return 'NUM';
       },
       run(args) {
@@ -164,8 +191,17 @@
     return tokens;
   }
 
-  // varTypes: { [alias]: 'BOOL'|'NUM'|'SG'|'DET' }
-  function parse(tokens, varTypes) {
+  // varTypes: { [alias]: 'BOOL'|'NUM'|'SG'|'DET'|'ANY' }
+  // funcs: { [name]: {params:string[], exprText:string} } (benutzerdefinierte
+  // Funktionen, siehe Datei-Kopfkommentar) - optional, Default {}.
+  // visiting: Set<string> der Funktionsnamen im aktuellen Expansions-Stack
+  // (Zyklenerkennung bei Funktionsaufrufen) - optional, Default leeres Set.
+  // Liefert den geparsten/typgeprüften Wurzelknoten OHNE die BOOL-Pflicht
+  // von compile() - die gilt nur für den Formel-Text selbst, nicht für
+  // (Zwischen-)Aufrufe von Funktionsrümpfen.
+  function parse(tokens, varTypes, funcs, visiting) {
+    funcs = funcs || {};
+    visiting = visiting || new Set();
     let pos = 0;
     const peek = () => tokens[pos];
     const next = () => tokens[pos++];
@@ -174,7 +210,9 @@
       return next();
     };
     const requireType = (node, expected, atPos, opLabel) => {
-      if (node.type !== expected) throw new ExprError(`"${opLabel}" erwartet ${TYPE_LABEL(expected)}, bekam ${TYPE_LABEL(node.type)}`, atPos);
+      if (node.type !== expected && node.type !== 'ANY') {
+        throw new ExprError(`"${opLabel}" erwartet ${TYPE_LABEL(expected)}, bekam ${TYPE_LABEL(node.type)}`, atPos);
+      }
     };
 
     function parseOr() {
@@ -215,12 +253,17 @@
       if (Object.prototype.hasOwnProperty.call(CMP_OPS, peek().type)) {
         const opTok = next();
         const right = parseAdd();
-        const bothNum = left.type === 'NUM' && right.type === 'NUM';
-        const bothSameKat = (left.type === 'KAT_SG' || left.type === 'KAT_DET') && left.type === right.type;
+        const bothNum = isNumCompatible(left.type) && isNumCompatible(right.type);
+        // Konkret unterschiedliche KAT-Subtypen (KAT_SG vs. KAT_DET) sind nie
+        // vergleichbar; ist eine Seite noch ANY (unspezialisierter Funktions-
+        // parameter), lässt sich das erst am tatsächlichen Aufruf entscheiden.
+        const concreteKatMismatch = (left.type === 'KAT_SG' && right.type === 'KAT_DET') || (left.type === 'KAT_DET' && right.type === 'KAT_SG');
+        const bothSameKat = isKatCompatible(left.type) && isKatCompatible(right.type) && !concreteKatMismatch;
         if (!bothNum && !bothSameKat) {
           throw new ExprError(`"${opTok.type}" erwartet zwei Zahlen oder zwei gleichartige Zustände, bekam ${TYPE_LABEL(left.type)} und ${TYPE_LABEL(right.type)}`, opTok.pos);
         }
-        if (bothSameKat && opTok.type !== '==' && opTok.type !== '!=') {
+        const isConcreteKat = left.type === 'KAT_SG' || left.type === 'KAT_DET' || right.type === 'KAT_SG' || right.type === 'KAT_DET';
+        if (bothSameKat && isConcreteKat && opTok.type !== '==' && opTok.type !== '!=') {
           throw new ExprError(`"${opTok.type}" ist für Zustände nicht sinnvoll - nur == oder != verwenden`, opTok.pos);
         }
         const fn = CMP_OPS[opTok.type], l = left, r = right;
@@ -275,12 +318,45 @@
     function parseCall(name, namePos) {
       const args = parseArgs();
       const prim = PRIMITIVES[name];
-      if (!prim) throw new ExprError(`Unbekannte Funktion "${name}"`, namePos);
-      if (args.length !== prim.arity) {
-        throw new ExprError(`"${name}" erwartet ${prim.arity} Argument(e), bekam ${args.length}`, namePos);
+      if (prim) {
+        if (args.length !== prim.arity) {
+          throw new ExprError(`"${name}" erwartet ${prim.arity} Argument(e), bekam ${args.length}`, namePos);
+        }
+        const returnType = prim.check(args, namePos);
+        return { type: returnType, run: prim.run(args) };
       }
-      const returnType = prim.check(args, namePos);
-      return { type: returnType, run: prim.run(args) };
+
+      const fn = funcs[name];
+      if (!fn) throw new ExprError(`Unbekannte Funktion "${name}"`, namePos);
+      if (args.length !== fn.params.length) {
+        throw new ExprError(`"${name}" erwartet ${fn.params.length} Argument(e), bekam ${args.length}`, namePos);
+      }
+      if (visiting.has(name)) {
+        throw new ExprError(`Zyklischer Funktionsaufruf: "${name}" ruft sich (direkt oder indirekt) selbst auf`, namePos);
+      }
+      // Aufruf-Expansion: Rumpf mit den TATSÄCHLICHEN Argumenttypen DIESES
+      // Aufrufs neu parsen/typprüfen (Spezialisierung je Aufrufstelle, siehe
+      // Datei-Kopfkommentar) - kein einmalig kompilierter, generischer Rumpf.
+      const localVarTypes = { TX: 'NUM' };
+      fn.params.forEach((p, i) => { localVarTypes[p] = args[i].type; });
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(name);
+      let bodyNode;
+      try {
+        bodyNode = parse(tokenize(fn.exprText), localVarTypes, funcs, nextVisiting);
+      } catch (e) {
+        const msg = e instanceof ExprError ? e.message : (e.message || String(e));
+        throw new ExprError(`In Funktion "${name}": ${msg}`, namePos);
+      }
+      const params = fn.params, argNodes = args;
+      return {
+        type: bodyNode.type,
+        run: scope => {
+          const paramScope = { TX: scope.TX };
+          params.forEach((p, i) => { paramScope[p] = argNodes[i].run(scope); });
+          return bodyNode.run(paramScope);
+        }
+      };
     }
 
     function parseAtom() {
@@ -306,21 +382,23 @@
 
     const result = parseOr();
     expect('EOF');
-    if (result.type !== 'BOOL') {
-      throw new ExprError('Die Formel muss insgesamt zu WAHR/FALSCH auswerten (z.B. mit einem Vergleich wie "<" oder einer Verknüpfung mit AND/OR)', 0);
-    }
     return result;
   }
 
-  // Parst UND typprüft (aber wertet nicht aus) - für Live-Validierung sowie
-  // als Vorstufe der eigentlichen Berechnung.
+  // Parst UND typprüft (aber wertet nicht aus) EINEN FORMEL-Text - für Live-
+  // Validierung sowie als Vorstufe der eigentlichen Berechnung. Muss zu BOOL
+  // auswerten (anders als ein Funktionsrumpf, siehe compileFunctionDef()).
   // varTypes: { [alias]: 'BOOL'|'NUM'|'SG'|'DET' }
+  // funcs: { [name]: {params:string[], exprText:string} }, optional.
   // Rückgabe: { ok:true, run(scope)->boolean } | { ok:false, message, pos }
-  function compile(text, varTypes) {
+  function compile(text, varTypes, funcs) {
     if (!text || !text.trim()) return { ok: false, message: 'Formel ist leer.', pos: 0 };
     try {
       const tokens = tokenize(text);
-      const node = parse(tokens, varTypes || {});
+      const node = parse(tokens, varTypes || {}, funcs || {});
+      if (node.type !== 'BOOL') {
+        throw new ExprError('Die Formel muss insgesamt zu WAHR/FALSCH auswerten (z.B. mit einem Vergleich wie "<" oder einer Verknüpfung mit AND/OR)', 0);
+      }
       return { ok: true, run: node.run };
     } catch (e) {
       if (e instanceof ExprError) return { ok: false, message: e.message, pos: e.pos };
@@ -328,5 +406,28 @@
     }
   }
 
-  GZ.exprEngine = { compile };
+  // Parst UND typprüft (aber wertet nicht aus) EINEN FUNKTIONS-Rumpf, isoliert
+  // von jeder konkreten Aufrufstelle - jeder Parameter erhält den Platzhalter-
+  // Typ ANY (siehe Datei-Kopfkommentar), da der tatsächliche Typ erst am
+  // jeweiligen Aufruf bekannt ist. Das prüft Syntax + grobe Struktur (bekannte
+  // Bezeichner/Funktionen, Argumentanzahl) VOR der ersten Verwendung, kann
+  // aber echte Typfehler (die erst mit konkreten Argumenttypen entstehen)
+  // naturgemäß nicht abschließend erkennen - die entstehen ggf. erst bei
+  // compile() eines Aufrufers (Fehlermeldung dann "In Funktion […]: …").
+  // Rückgabe: { ok:true, resultType } | { ok:false, message, pos }
+  function compileFunctionDef(params, text, funcs) {
+    if (!text || !text.trim()) return { ok: false, message: 'Ausdruck ist leer.', pos: 0 };
+    const varTypes = { TX: 'NUM' };
+    (params || []).forEach(p => { varTypes[p] = 'ANY'; });
+    try {
+      const tokens = tokenize(text);
+      const node = parse(tokens, varTypes, funcs || {});
+      return { ok: true, resultType: node.type };
+    } catch (e) {
+      if (e instanceof ExprError) return { ok: false, message: e.message, pos: e.pos };
+      return { ok: false, message: e.message || String(e), pos: 0 };
+    }
+  }
+
+  GZ.exprEngine = { compile, compileFunctionDef };
 })(window.GZ = window.GZ || {});

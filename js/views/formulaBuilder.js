@@ -4,27 +4,39 @@
    (siehe GZ.exprEngine): kein direkter WAHR/FALSCH-Wert mehr, sondern über
    die Primitiven Zustand/Dauer/DauerSeit auszuwerten (z.B. "Zustand(D1,TX)
    == BELEGT" statt früher bloß "D1"). APW/ÖPNV bleiben Zahl (roher Wert).
+
+   Funktionen sind benutzerdefinierte, parametrisierte Ausdrücke aus den
+   Primitiven (z.B. "LangGenug(sg, schwelle) := DauerSeit(sg, GRUEN, TX) >
+   schwelle"), aufrufbar aus Formeln (oder anderen Funktionen) mit konkreten
+   Argumenten ("LangGenug(K1, 30)"). Parameter sind generisch (kein fester
+   SG/DET/NUM-Typ in der Definition) - jeder Aufruf spezialisiert den Rumpf
+   neu mit den tatsächlichen Argumenttypen (siehe GZ.exprEngine.compile()/
+   compileFunctionDef()). Funktionen selbst haben KEINEN Spaltenbezug (nur
+   Formeln/Variablen haben den) und sind daher 1:1 über Konfigurationen
+   hinweg portabel.
+
    Formeln kombinieren alles über +,-,*,/,Vergleiche,AND/OR/NOT/Klammern und
-   müssen zu WAHR/FALSCH auswerten. Tippen validiert nur (Syntax/Typen, keine
-   Datenauswertung) - erst "Berechnen" wertet über alle TX aus und liefert je
-   gültiger Formel eine boolesche Rohreihe, die umlaufpruefung.js über
-   getSyntheticColumns() als zusätzliche, farblich abgesetzte Detektor-Spalte
-   (Kürzel FORMEL) einbindet. */
+   Funktionsaufrufe und müssen zu WAHR/FALSCH auswerten. Tippen validiert nur
+   (Syntax/Typen, keine Datenauswertung) - erst "Berechnen" wertet über alle
+   TX aus und liefert je gültiger Formel eine boolesche Rohreihe, die
+   umlaufpruefung.js über getSyntheticColumns() als zusätzliche, farblich
+   abgesetzte Detektor-Spalte (Kürzel FORMEL) einbindet. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
   const { buildSegments, makePointSegmentSweep } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
-  const { compile } = GZ.exprEngine;
+  const { compile, compileFunctionDef } = GZ.exprEngine;
 
   const SYNTH_INDEX_BASE = 1000000; // weit jenseits jedes realen Spaltenindex
 
   let els = null;
   let vars = []; // {id, alias, colIndex}
+  let funcs = []; // {id, name, params:string[], bodyText}
   let formulas = []; // {id, name, exprText}
-  let nextVarId = 1, nextFormulaId = 1;
+  let nextVarId = 1, nextFuncId = 1, nextFormulaId = 1;
   let syntheticCols = []; // [{index, kuerzel:'FORMEL', name, beschreibung, rawSeries}]
-  let debounceTimers = new Map(); // formulaId -> timeout handle
+  let debounceTimers = new Map(); // "<kind>:<id>" -> timeout handle
 
   // Case-insensitive (AND/OR/NOT, wie im Tokenizer) bzw. exakt (TX und die
   // Zustands-/Funktionsnamen, ebenfalls exakt wie im Tokenizer/PRIMITIVES von
@@ -41,12 +53,15 @@
       root,
       varRows: root.querySelector('#upVarRows'),
       addVarBtn: root.querySelector('#upAddVarBtn'),
+      funcRows: root.querySelector('#upFuncRows'),
+      addFuncBtn: root.querySelector('#upAddFuncBtn'),
       formulaRows: root.querySelector('#upFormulaRows'),
       addFormulaBtn: root.querySelector('#upAddFormulaBtn'),
       calcBtn: root.querySelector('#upFormulaCalcBtn'),
       hint: root.querySelector('#upFormulaHint')
     };
     els.addVarBtn.onclick = () => { addVar(); renderVarRows(); };
+    els.addFuncBtn.onclick = () => { addFunc(); renderFuncRows(); };
     els.addFormulaBtn.onclick = () => { addFormula(); renderFormulaRows(); };
     els.calcBtn.onclick = berechnen;
   }
@@ -73,6 +88,10 @@
     vars.push({ id: nextVarId++, alias: `VAR${nextVarId - 1}`, colIndex: cols.length ? cols[0].index : null });
   }
 
+  function addFunc() {
+    funcs.push({ id: nextFuncId++, name: `Func${nextFuncId - 1}`, params: ['x'], bodyText: '' });
+  }
+
   function addFormula() {
     formulas.push({ id: nextFormulaId++, name: `F${nextFormulaId - 1}`, exprText: '' });
   }
@@ -81,13 +100,42 @@
     const cols = sourceCols();
     // Nach neuem Datenimport: Spaltenverweise, die es nicht mehr gibt (andere
     // Datei/Spaltenlayout), auf die erste verfügbare Quellspalte zurücksetzen
-    // statt auf eine ungültige Spalte zu verweisen.
+    // statt auf eine ungültige Spalte zu verweisen. Funktionen haben keinen
+    // Spaltenbezug (siehe Datei-Kopfkommentar) und bleiben unverändert.
     vars.forEach(v => { if (!cols.find(c => c.index === v.colIndex)) v.colIndex = cols.length ? cols[0].index : null; });
     syntheticCols = [];
     renderVarRows();
+    renderFuncRows();
     renderFormulaRows();
     els.hint.textContent = '';
     els.hint.className = 'hint';
+  }
+
+  // Baut die Funktionstabelle für GZ.exprEngine (Form { [name]: {params,
+  // exprText} }) aus allen STRUKTURELL gültigen Funktionsdefinitionen
+  // (gültiger, eindeutiger Name; gültige, eindeutige Parameter) - bewusst
+  // OHNE den Rumpf selbst hier zu validieren: eine Funktion mit defektem
+  // Rumpf bleibt aufrufbar, der Fehler taucht dann erst (klar zugeordnet)
+  // an der jeweiligen Aufrufstelle auf ("In Funktion „X“: …", siehe
+  // GZ.exprEngine parseCall()) statt die gesamte Funktionstabelle wegen
+  // einer einzelnen kaputten Definition zu verwerfen.
+  function currentFuncDefs() {
+    const defs = {};
+    const errors = [];
+    const seen = new Set();
+    funcs.forEach(f => {
+      const name = f.name.trim();
+      if (!name) return;
+      if (!ALIAS_RE.test(name) || isReserved(name)) { errors.push(`Funktion "${name}" ist kein gültiger Name`); return; }
+      if (seen.has(name)) { errors.push(`Funktion "${name}" doppelt vergeben`); return; }
+      seen.add(name);
+      const params = f.params.map(p => p.trim());
+      const validParams = params.every(p => p && ALIAS_RE.test(p) && !isReserved(p));
+      const uniqueParams = new Set(params).size === params.length;
+      if (!validParams || !uniqueParams) { errors.push(`Funktion "${name}": ungültige oder doppelte Parameter`); return; }
+      defs[name] = { params, exprText: f.bodyText };
+    });
+    return { defs, errors };
   }
 
   function currentVarTypes() {
@@ -130,6 +178,45 @@
     validateAllInline();
   }
 
+  function renderFuncRows() {
+    els.funcRows.innerHTML = funcs.map(f => `
+      <div class="up-func-row" data-id="${f.id}">
+        <input type="text" class="up-func-name mono-input" value="${esc(f.name)}" placeholder="Name">
+        <span class="up-func-params">
+          ${f.params.map((p, i) => `
+            <span class="up-func-param-chip">
+              <input type="text" class="up-func-param-input mono-input" data-idx="${i}" value="${esc(p)}" placeholder="param">
+              <button type="button" class="up-func-param-remove" data-idx="${i}" title="Parameter entfernen">✕</button>
+            </span>`).join('')}
+          <button type="button" class="up-func-param-add btn" title="Parameter hinzufügen">+ Parameter</button>
+        </span>
+        <input type="text" class="up-func-body mono-input" value="${esc(f.bodyText)}" placeholder="Ausdruck, z.B. DauerSeit(sg, GRUEN, TX) &gt; schwelle">
+        <span class="up-func-status"></span>
+        <button type="button" class="oe-row-remove up-func-remove">✕</button>
+      </div>`).join('') || '<div class="cfg-empty">Keine Funktionen definiert.</div>';
+
+    const debouncedRevalidate = id => {
+      clearTimeout(debounceTimers.get(`fn:${id}`));
+      debounceTimers.set(`fn:${id}`, setTimeout(validateAllInline, 150));
+    };
+
+    els.funcRows.querySelectorAll('.up-func-row').forEach(rowEl => {
+      const id = Number(rowEl.dataset.id);
+      const f = funcs.find(x => x.id === id);
+      rowEl.querySelector('.up-func-name').oninput = e => { f.name = e.target.value; debouncedRevalidate(id); };
+      rowEl.querySelectorAll('.up-func-param-input').forEach(inp => {
+        inp.oninput = e => { f.params[Number(e.target.dataset.idx)] = e.target.value; debouncedRevalidate(id); };
+      });
+      rowEl.querySelectorAll('.up-func-param-remove').forEach(btn => {
+        btn.onclick = () => { f.params.splice(Number(btn.dataset.idx), 1); renderFuncRows(); validateAllInline(); };
+      });
+      rowEl.querySelector('.up-func-param-add').onclick = () => { f.params.push(''); renderFuncRows(); validateAllInline(); };
+      rowEl.querySelector('.up-func-body').oninput = e => { f.bodyText = e.target.value; debouncedRevalidate(id); };
+      rowEl.querySelector('.up-func-remove').onclick = () => { funcs = funcs.filter(x => x.id !== id); renderFuncRows(); validateAllInline(); };
+    });
+    validateAllInline();
+  }
+
   function renderFormulaRows() {
     els.formulaRows.innerHTML = formulas.map(f => `
       <div class="up-formula-row" data-id="${f.id}">
@@ -145,8 +232,8 @@
       rowEl.querySelector('.up-formula-name').oninput = e => { f.name = e.target.value; };
       rowEl.querySelector('.up-formula-expr').oninput = e => {
         f.exprText = e.target.value;
-        clearTimeout(debounceTimers.get(id));
-        debounceTimers.set(id, setTimeout(() => validateFormulaRow(rowEl, f), 150));
+        clearTimeout(debounceTimers.get(`f:${id}`));
+        debounceTimers.set(`f:${id}`, setTimeout(() => validateFormulaRow(rowEl, f), 150));
       };
       rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); };
       validateFormulaRow(rowEl, f);
@@ -160,13 +247,14 @@
   function validateFormulaRow(rowEl, f) {
     const statusEl = rowEl.querySelector('.up-formula-status');
     const { types, aliasErrors } = currentVarTypes();
-    if (aliasErrors.length) {
+    const { defs: funcDefs, errors: funcErrors } = currentFuncDefs();
+    if (aliasErrors.length || funcErrors.length) {
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
-      statusEl.title = 'Variablen-Fehler: ' + aliasErrors.join('; ');
+      statusEl.title = [...aliasErrors, ...funcErrors].join('; ');
       return;
     }
-    const result = compile(f.exprText, { ...types, TX: 'NUM' });
+    const result = compile(f.exprText, { ...types, TX: 'NUM' }, funcDefs);
     if (result.ok) {
       statusEl.textContent = '✓';
       statusEl.className = 'up-formula-status ok';
@@ -178,8 +266,37 @@
     }
   }
 
+  // Revalidiert Funktionen, Formeln UND Variablen gemeinsam - eine Änderung
+  // an EINER Variable/Funktion kann die Gültigkeit jeder Formel (und, bei
+  // Funktionen, auch anderer Funktionen) beeinflussen, daher kein isoliertes
+  // Neuprüfen nur der geänderten Zeile.
   function validateAllInline() {
     if (!els.formulaRows) return;
+    const { defs: funcDefs } = currentFuncDefs();
+
+    els.funcRows.querySelectorAll('.up-func-row').forEach(rowEl => {
+      const id = Number(rowEl.dataset.id);
+      const f = funcs.find(x => x.id === id);
+      const statusEl = rowEl.querySelector('.up-func-status');
+      if (!f || !statusEl) return;
+      const name = f.name.trim();
+      let msg = '';
+      if (!name || !ALIAS_RE.test(name) || isReserved(name)) msg = 'Ungültiger Funktionsname';
+      else if (funcs.filter(x => x.name.trim() === name).length > 1) msg = 'Name doppelt vergeben';
+      else {
+        const params = f.params.map(p => p.trim());
+        if (params.some(p => !p || !ALIAS_RE.test(p) || isReserved(p))) msg = 'Ungültiger Parametername';
+        else if (new Set(params).size !== params.length) msg = 'Parameter doppelt vergeben';
+      }
+      if (!msg) {
+        const result = compileFunctionDef(f.params.map(p => p.trim()), f.bodyText, funcDefs);
+        if (!result.ok) msg = result.message;
+      }
+      statusEl.textContent = msg ? '✕' : '✓';
+      statusEl.className = 'up-func-status ' + (msg ? 'err' : 'ok');
+      statusEl.title = msg || 'Gültig';
+    });
+
     els.formulaRows.querySelectorAll('.up-formula-row').forEach(rowEl => {
       const id = Number(rowEl.dataset.id);
       const f = formulas.find(x => x.id === id);
@@ -227,10 +344,11 @@
     if (!a) return;
     const { times, seriesByCol, cycleStarts } = a;
     const { types, aliasErrors } = currentVarTypes();
+    const { defs: funcDefs, errors: funcErrors } = currentFuncDefs();
     const cols = sourceCols();
 
-    if (aliasErrors.length) {
-      els.hint.textContent = 'Variablen-Fehler: ' + aliasErrors.join('; ') + ' – bitte zuerst beheben.';
+    if (aliasErrors.length || funcErrors.length) {
+      els.hint.textContent = [...aliasErrors, ...funcErrors].join('; ') + ' – bitte zuerst beheben.';
       els.hint.className = 'hint warn';
       return;
     }
@@ -255,7 +373,7 @@
     let skipped = 0;
     formulas.forEach(f => {
       const name = f.name.trim() || `F${f.id}`;
-      const compiled = compile(f.exprText, varTypesWithTx);
+      const compiled = compile(f.exprText, varTypesWithTx, funcDefs);
       if (!compiled.ok) { skipped++; return; }
       const rawSeries = new Array(times.length);
       let cyclePtr = 0;
@@ -302,16 +420,20 @@
         const col = cols.find(c => c.index === v.colIndex);
         return { alias: v.alias, colKuerzel: col ? col.kuerzel : null, colName: col ? col.name : null };
       }),
+      // Funktionen haben keinen Spaltenbezug (siehe Datei-Kopfkommentar) -
+      // params als Kopie speichern, nicht die Live-Referenz.
+      funcs: funcs.map(f => ({ name: f.name, params: f.params.slice(), bodyText: f.bodyText })),
       formulas: formulas.map(f => ({ name: f.name, exprText: f.exprText }))
     };
   }
 
-  // Setzt Variablen/Formeln aus einer geladenen Konfiguration und berechnet
-  // sofort (damit umlaufpruefung.js im Anschluss die dann existierenden
-  // FORMEL-Spalten in seiner eigenen applyConfig() by-Name auswählen kann -
-  // siehe dortige Aufrufreihenfolge). Spalten, die es in der aktuell
-  // geladenen CSV nicht (mehr) gibt, werden übersprungen und gemeldet statt
-  // die restliche Konfiguration abzubrechen.
+  // Setzt Variablen/Funktionen/Formeln aus einer geladenen Konfiguration und
+  // berechnet sofort (damit umlaufpruefung.js im Anschluss die dann
+  // existierenden FORMEL-Spalten in seiner eigenen applyConfig() by-Name
+  // auswählen kann - siehe dortige Aufrufreihenfolge). Spalten, die es in der
+  // aktuell geladenen CSV nicht (mehr) gibt, werden übersprungen und gemeldet
+  // statt die restliche Konfiguration abzubrechen - Funktionen betrifft das
+  // nicht (kein Spaltenbezug, immer vollständig übernehmbar).
   function applyConfig(cfg) {
     if (!cfg) return { skipped: [] };
     const cols = sourceCols();
@@ -321,8 +443,10 @@
       if (!col) skipped.push(`Variable „${v.alias}“ (Spalte „${v.colName}“ nicht gefunden)`);
       return { id: nextVarId++, alias: v.alias, colIndex: col ? col.index : (cols.length ? cols[0].index : null) };
     });
+    funcs = (cfg.funcs || []).map(f => ({ id: nextFuncId++, name: f.name, params: (f.params || []).slice(), bodyText: f.bodyText || '' }));
     formulas = (cfg.formulas || []).map(f => ({ id: nextFormulaId++, name: f.name, exprText: f.exprText }));
     renderVarRows();
+    renderFuncRows();
     renderFormulaRows();
     berechnen();
     return { skipped };
