@@ -1,7 +1,8 @@
-/* GZ.oepnvLogic — ÖPNV Anmeldung/Abmeldung: reine Berechnungslogik, analog zu
-   wartezeitLogic.js, aber mit getrennten An-/Abmeldedetektoren statt einer
-   einzelnen Anforderung. Eine Anmeldung endet entweder mit Erfolg (SG wird
-   grün) oder wird ohne Grün wieder abgemeldet (Prioritätsfehlschlag). */
+/* GZ.oepnvLogic — ÖPNV Anmeldung/Abmeldung: reine Berechnungslogik. Eine
+   Anmeldung endet entweder regulär mit der Abmeldung (Ist-Fahrzeit gemessen,
+   Verlustzeit = Ist-Fahrzeit - Sollfahrzeit) oder wird nach Ablauf der
+   Zwangslöschzeit ohne Abmeldung zwangsweise gelöscht. Das LOS (A-F) bewertet
+   die Verlustzeit. */
 (function (GZ) {
   'use strict';
   const { wzIstBelegt, txAtTime, auslosenderDetektor } = GZ.wartezeitLogic;
@@ -10,64 +11,66 @@
   // Obergrenzen [s] für LOS A..E (Orientierungswerte ohne Richtlinienbezug, in
   // der UI überschreibbar); LOS F = alles darüber.
   const losDefaultBounds = [5, 10, 20, 35, 50];
+  const sollfahrzeitDefault = 15;
+  const zwangsloeschDefault = 60;
 
-  // Freigabe = Dauergrün (Grünblinken zählt hier bewusst nicht als Freigabe).
-  function istGruen(rawVal) {
-    return Number(rawVal) === 48;
-  }
-
-  function losStufe(waitSec, bounds) {
+  function losStufe(verlustSek, bounds) {
     for (let i = 0; i < bounds.length; i++) {
-      if (waitSec <= bounds[i]) return LOS_LEVELS[i];
+      if (verlustSek <= bounds[i]) return LOS_LEVELS[i];
     }
     return LOS_LEVELS[LOS_LEVELS.length - 1];
   }
 
-  // Anmeldung = Anmeldedetektor(en) werden belegt, während SG nicht grün ist
-  // und keine Anmeldung läuft. Ereignis endet mit Erfolg (SG grün) oder -
-  // sofern das zuerst eintritt - mit Abmeldung ohne Grün (Prioritätsfehlschlag,
-  // z.B. Türkontakt/Hauptmelder löst aus, Fahrzeug verlässt den Meldepunkt
-  // ohne Freigabe erhalten zu haben).
-  function computeOepnvEvents(times, sgRaw, anOccupied, abOccupied, splRaw, exclSpl) {
+  // Alle steigenden Flanken (Belegt-Beginn) einer (ODER-verknüpften)
+  // Detektorbelegung als Rohpunkte - unabhängig von der Anmeldung/Abmeldung-
+  // Paarungslogik, für die Rohpunkte-Anzeige.
+  function risingEdgeTimes(times, occupied) {
+    const out = [];
+    let prev = false;
+    for (let i = 0; i < times.length; i++) {
+      if (occupied[i] && !prev) out.push(times[i]);
+      prev = occupied[i];
+    }
+    return out;
+  }
+
+  // Anmeldung = Anmeldedetektor(en) werden belegt, während keine Anmeldung
+  // läuft (SG-Zustand spielt hier keine Rolle mehr - die Verlustzeit ergibt
+  // sich rein aus der gemessenen Fahrzeit An- zu Abmeldung gegenüber der
+  // Sollfahrzeit). Endet mit der Abmeldung oder, falls die keine
+  // Zwangslöschzeit lang ausbleibt, durch Zwangslöschung.
+  function computeOepnvEvents(times, anOccupied, abOccupied, splRaw, exclSpl, sollfahrzeitSek, zwangsloeschSek) {
     const n = times.length;
     const events = [];
-    let prevAn = false, prevAb = false, inGreenPeriod = false, waiting = false, startIdx = -1;
+    let prevAn = false, prevAb = false, waiting = false, startIdx = -1;
+
+    function pushEvent(type, endIdx, istFahrzeitSek) {
+      const splVal = splRaw[startIdx];
+      const splNum = Number(splVal);
+      events.push({
+        type, anIdx: startIdx, endIdx,
+        anTime: times[startIdx], endTime: times[endIdx],
+        istFahrzeitSek, verlustSek: istFahrzeitSek - sollfahrzeitSek, spl: splVal,
+        excluded: Number.isFinite(splNum) && exclSpl.includes(splNum)
+      });
+    }
 
     for (let i = 0; i < n; i++) {
       const anBelegt = anOccupied[i];
       const abBelegt = abOccupied[i];
-      const gruen = istGruen(sgRaw[i]);
 
-      if (gruen && !inGreenPeriod) {
-        inGreenPeriod = true;
-        if (waiting) {
-          const splVal = splRaw[startIdx];
-          const splNum = Number(splVal);
-          events.push({
-            type: 'ERFOLG', reqIdx: startIdx, endIdx: i,
-            reqTime: times[startIdx], endTime: times[i],
-            waitSec: (times[i] - times[startIdx]) / 1000, spl: splVal,
-            excluded: Number.isFinite(splNum) && exclSpl.includes(splNum)
-          });
+      if (waiting) {
+        const elapsedSek = (times[i] - times[startIdx]) / 1000;
+        if (abBelegt && !prevAb) {
+          pushEvent('ABMELDUNG', i, elapsedSek);
+          waiting = false;
+        } else if (elapsedSek >= zwangsloeschSek) {
+          pushEvent('ZWANGSGELOESCHT', i, zwangsloeschSek);
           waiting = false;
         }
-      } else if (!gruen) {
-        inGreenPeriod = false;
       }
 
-      if (waiting && abBelegt && !prevAb) {
-        const splVal = splRaw[startIdx];
-        const splNum = Number(splVal);
-        events.push({
-          type: 'ABGEMELDET', reqIdx: startIdx, endIdx: i,
-          reqTime: times[startIdx], endTime: times[i],
-          waitSec: (times[i] - times[startIdx]) / 1000, spl: splVal,
-          excluded: Number.isFinite(splNum) && exclSpl.includes(splNum)
-        });
-        waiting = false;
-      }
-
-      if (anBelegt && !prevAn && !waiting && !gruen) {
+      if (anBelegt && !prevAn && !waiting) {
         waiting = true;
         startIdx = i;
       }
@@ -82,7 +85,8 @@
   }
 
   GZ.oepnvLogic = {
-    LOS_LEVELS, losDefaultBounds, istGruen, losStufe, computeOepnvEvents,
+    LOS_LEVELS, losDefaultBounds, sollfahrzeitDefault, zwangsloeschDefault,
+    losStufe, risingEdgeTimes, computeOepnvEvents,
     wzIstBelegt, txAtTime, auslosenderDetektor
   };
 })(window.GZ = window.GZ || {});

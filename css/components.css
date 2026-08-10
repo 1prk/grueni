@@ -165,8 +165,10 @@ tr.wz-unresolved td{ color:var(--sig-red); font-style:italic; }
 .los-bounds-row .los-bound-field{ display:flex; align-items:center; gap:4px; }
 .los-bounds-row input[type=number]{ width:52px; font-family:var(--mono); }
 tr.oe-excluded td{ color:var(--text-faint); font-style:italic; }
-tr.oe-abgemeldet td:nth-child(4), tr.oe-abgemeldet td:nth-child(7){ color:var(--sig-red); font-weight:700; }
+tr.oe-abgemeldet td:nth-child(4), tr.oe-abgemeldet td:nth-child(8){ color:var(--sig-red); font-weight:700; }
 tr.oe-unresolved td{ color:var(--sig-red); font-style:italic; }
+tr.oe-hidden{ display:none; }
+.table-search{ width:230px; }
 
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }

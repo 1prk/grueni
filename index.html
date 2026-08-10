@@ -353,7 +353,17 @@
               <div id="oeAbDetChecks" class="det-checks"></div>
             </div>
             <div class="cfg-field">
-              <label>LOS-Stufen <span class="cfg-field-hint">(Obergrenzen in Sekunden, LOS F = darüber)</span></label>
+              <label>Fahrzeit- und Löschparameter</label>
+              <div class="num-row">
+                <span>Sollfahrzeit An→Ab</span><input type="number" id="oeSollfahrzeit" min="0" step="1" value="15"><span>s</span>
+              </div>
+              <div class="num-row">
+                <span>Zwangslöschzeit</span><input type="number" id="oeZwangsloesch" min="1" step="1" value="60"><span>s</span>
+              </div>
+              <div class="source-note">Sollfahrzeit = ungestörte Fahrzeit zwischen den Meldepunkten (Standortwert, bitte messen/festlegen). Zwangslöschzeit = Zeit, nach der eine Anmeldung ohne Abmeldung verworfen wird (Steuergeräte-Parameter).</div>
+            </div>
+            <div class="cfg-field">
+              <label>LOS-Stufen <span class="cfg-field-hint">(Obergrenzen der Verlustzeit in Sekunden, LOS F = darüber)</span></label>
               <div class="los-bounds-row">
                 <span class="los-bound-field"><span class="los-chip los-A">A</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="5"> s</span>
                 <span class="los-bound-field"><span class="los-chip los-B">B</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="10"> s</span>
@@ -368,6 +378,16 @@
             </div>
           </div>
           <div id="oeHint" class="hint"></div>
+        </div>
+
+        <div class="panel" id="oeRawPanel" style="display:none;">
+          <div class="panel-head">Rohpunkte — An-/Abmeldung im Zeitverlauf</div>
+          <div style="padding:12px 16px 2px;">
+            <div class="lane-row oe-raw-row"><div class="lane-name">Anmeldung</div><div class="lane-track" id="oeRawAnTrack"><svg></svg></div></div>
+            <div class="lane-row oe-raw-row"><div class="lane-name">Abmeldung</div><div class="lane-track" id="oeRawAbTrack"><svg></svg></div></div>
+          </div>
+          <div class="axis oe-raw-axis" id="oeRawAxis"><svg></svg></div>
+          <div class="chart-note">Alle erkannten Flanken der gewählten Anmelde-/Abmeldedetektor(en), unabhängig von der Paarungslogik unten – zum schnellen Abgleich der Rohdaten.</div>
         </div>
 
         <div class="panel" id="oeKpiPanel" style="display:none;">
@@ -388,7 +408,7 @@
             <span class="item"><span class="swatch" style="background:var(--los-d);border-radius:50%;width:9px;height:9px;"></span>LOS D</span>
             <span class="item"><span class="swatch" style="background:var(--los-e);border-radius:50%;width:9px;height:9px;"></span>LOS E</span>
             <span class="item"><span class="swatch" style="background:var(--los-f);border-radius:50%;width:9px;height:9px;"></span>LOS F</span>
-            <span class="item"><span class="swatch" style="background:var(--sig-dark);width:9px;height:9px;clip-path:polygon(50% 0,100% 100%,0 100%);"></span>Abgemeldet ohne Grün</span>
+            <span class="item"><span class="swatch" style="background:var(--sig-dark);width:9px;height:9px;clip-path:polygon(50% 0,100% 100%,0 100%);"></span>Zwangsgelöscht (keine Abmeldung)</span>
             <span class="item"><span class="swatch" style="background:var(--text-faint);border-radius:50%;width:9px;height:9px;opacity:.6;"></span>Ausgeschlossen (SPL)</span>
             <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
           </div>
@@ -398,14 +418,18 @@
         </div>
 
         <div class="panel" id="oeTablePanel" style="display:none;">
-          <div class="panel-head">Anmelde-Ereignisse</div>
+          <div class="panel-head">
+            <span>Anmelde-Ereignisse</span>
+            <input type="text" id="oeSearch" class="table-search" placeholder="Suchen (Zeit, SPL, Ergebnis, LOS, Detektor) …">
+          </div>
           <table>
             <thead><tr>
-              <th>Nr</th><th>Anmeldung</th><th>TX</th><th>Ergebnis</th><th>Zeitpunkt Ergebnis</th><th>SPL</th>
-              <th>Dauer</th><th>LOS</th><th>Anmeldedetektor</th><th>Abmeldedetektor</th>
+              <th>Nr</th><th>Anmeldung</th><th>TX</th><th>Ergebnis</th><th>Abmeldung/Löschung</th><th>SPL</th>
+              <th>Ist-Fahrzeit</th><th>Verlustzeit</th><th>LOS</th><th>Anmeldedetektor</th><th>Abmeldedetektor</th>
             </tr></thead>
             <tbody id="oeEventsBody"></tbody>
           </table>
+          <div class="chart-note" id="oeSearchInfo"></div>
         </div>
 
       </div>
@@ -495,6 +519,7 @@
 <script src="js/charts/trendChart.js"></script>
 <script src="js/charts/waitScatterChart.js"></script>
 <script src="js/charts/oepnvScatterChart.js"></script>
+<script src="js/charts/oepnvRawPointsChart.js"></script>
 <script src="js/charts/phaseDurationChart.js"></script>
 <script src="js/charts/phaseOverlay.js"></script>
 <script src="js/views/navigator.js"></script>

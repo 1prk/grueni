@@ -1,5 +1,7 @@
 /* GZ.charts.oepnvScatterChart — ÖPNV-Anmeldungen im Zeitverlauf: Streudiagramm
-   mit LOS-Referenzlinien (A-F) und eigenem Symbol für "abgemeldet ohne Grün". */
+   der Verlustzeit (Ist-Fahrzeit An->Ab minus Sollfahrzeit) mit LOS-
+   Referenzlinien (A-F) und eigenem Symbol für Zwangslöschungen (keine
+   Abmeldung innerhalb der Zwangslöschzeit erhalten). */
 (function (GZ) {
   'use strict';
   const { fmtTimeShort, esc } = GZ.format;
@@ -11,7 +13,7 @@
   const EXCLUDED_COLOR = 'var(--text-faint)';
   const triangle = d3.symbol().type(d3.symbolTriangle).size(64);
 
-  // data: {tMin, tMax, successEvents, deniedEvents, losBounds, splTransitions, cycleStarts, onPointClick(t)}
+  // data: {tMin, tMax, abmeldungEvents, zwangsgeloeschtEvents, losBounds, splTransitions, cycleStarts, onPointClick(t)}
   function render(chartBoxEl, axisEl, data) {
     const svgEl = chartBoxEl.querySelector('svg');
     const tooltipEl = chartBoxEl.querySelector('.chart-tooltip');
@@ -20,14 +22,18 @@
     const svg = d3.select(svgEl).attr('viewBox', `0 0 ${width} ${height}`).attr('preserveAspectRatio', 'none');
     svg.selectAll('*').remove();
 
-    const { tMin, tMax, successEvents, deniedEvents, losBounds, splTransitions, cycleStarts, onPointClick } = data;
-    const maxWait = Math.max(
-      successEvents.length ? Math.max(...successEvents.map(e => e.waitSec)) : 0,
-      deniedEvents.length ? Math.max(...deniedEvents.map(e => e.waitSec)) : 0
-    );
-    const yMax = Math.max(losBounds[losBounds.length - 1] * 1.25, maxWait * 1.08, 20);
+    const { tMin, tMax, abmeldungEvents, zwangsgeloeschtEvents, losBounds, splTransitions, cycleStarts, onPointClick } = data;
+    const allVerlust = abmeldungEvents.concat(zwangsgeloeschtEvents).map(e => e.verlustSek);
+    const maxVerlust = allVerlust.length ? Math.max(...allVerlust) : 0;
+    const minVerlust = allVerlust.length ? Math.min(...allVerlust) : 0;
+    const yMax = Math.max(losBounds[losBounds.length - 1] * 1.25, maxVerlust * 1.08, 20);
+    const yMin = Math.min(0, minVerlust * 1.08);
     const x = d3.scaleLinear().domain([tMin, tMax]).range([0, width]);
-    const y = d3.scaleLinear().domain([0, yMax]).range([height, 0]);
+    const y = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]);
+
+    if (yMin < 0) {
+      svg.append('line').attr('x1', 0).attr('x2', width).attr('y1', y(0)).attr('y2', y(0)).attr('class', 'd3-gridline');
+    }
 
     const refG = svg.append('g').attr('class', 'ref-lines');
     losBounds.forEach((bound, i) => {
@@ -50,40 +56,41 @@
     }
 
     const tooltip = GZ.charts.tooltipHelper.attach(chartBoxEl, tooltipEl);
+    const yPos = d => y(Math.min(Math.max(d.verlustSek, yMin), yMax));
 
-    svg.append('g').attr('class', 'points').selectAll('circle').data(successEvents).join('circle')
-      .attr('cx', d => x(d.reqTime)).attr('cy', d => y(Math.min(d.waitSec, yMax)))
-      .attr('r', d => d.excluded ? 3.6 : (losStufe(d.waitSec, losBounds) === 'F' ? 5 : 4))
-      .style('fill', d => d.excluded ? EXCLUDED_COLOR : LOS_COLOR[losStufe(d.waitSec, losBounds)])
+    svg.append('g').attr('class', 'points').selectAll('circle').data(abmeldungEvents).join('circle')
+      .attr('cx', d => x(d.anTime)).attr('cy', yPos)
+      .attr('r', d => d.excluded ? 3.6 : (losStufe(d.verlustSek, losBounds) === 'F' ? 5 : 4))
+      .style('fill', d => d.excluded ? EXCLUDED_COLOR : LOS_COLOR[losStufe(d.verlustSek, losBounds)])
       .style('opacity', d => d.excluded ? .55 : 1)
       .style('stroke', '#fff').style('stroke-width', 1)
       .style('cursor', onPointClick ? 'pointer' : 'default')
       .on('mouseenter', function (evt, d) {
-        const tx = txAtTime(d.reqTime, cycleStarts);
-        const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : `LOS ${losStufe(d.waitSec, losBounds)}`;
-        tooltip.show(`<div>Anmeldung ${fmtTimeShort(d.reqTime)} (TX ${tx ?? '–'})</div><div>Wartezeit: ${d.waitSec.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
+        const tx = txAtTime(d.anTime, cycleStarts);
+        const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : `LOS ${losStufe(d.verlustSek, losBounds)}`;
+        tooltip.show(`<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Ist-Fahrzeit: ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit: ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
         tooltip.move(evt);
       })
       .on('mousemove', evt => tooltip.move(evt))
       .on('mouseleave', () => tooltip.hide())
-      .on('click', (evt, d) => { if (onPointClick) onPointClick(d.reqTime); });
+      .on('click', (evt, d) => { if (onPointClick) onPointClick(d.anTime); });
 
-    svg.append('g').attr('class', 'points-denied').selectAll('path').data(deniedEvents).join('path')
+    svg.append('g').attr('class', 'points-denied').selectAll('path').data(zwangsgeloeschtEvents).join('path')
       .attr('d', triangle)
-      .attr('transform', d => `translate(${x(d.reqTime)},${y(Math.min(d.waitSec, yMax))})`)
+      .attr('transform', d => `translate(${x(d.anTime)},${yPos(d)})`)
       .style('fill', d => d.excluded ? EXCLUDED_COLOR : DENIED_COLOR)
       .style('opacity', d => d.excluded ? .55 : 1)
       .style('stroke', '#fff').style('stroke-width', 1)
       .style('cursor', onPointClick ? 'pointer' : 'default')
       .on('mouseenter', function (evt, d) {
-        const tx = txAtTime(d.reqTime, cycleStarts);
-        const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : 'abgemeldet ohne Grün';
-        tooltip.show(`<div>Anmeldung ${fmtTimeShort(d.reqTime)} (TX ${tx ?? '–'})</div><div>Anmeldedauer: ${d.waitSec.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
+        const tx = txAtTime(d.anTime, cycleStarts);
+        const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : 'zwangsgelöscht (keine Abmeldung)';
+        tooltip.show(`<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Zwangslöschung nach ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit ≥ ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
         tooltip.move(evt);
       })
       .on('mousemove', evt => tooltip.move(evt))
       .on('mouseleave', () => tooltip.hide())
-      .on('click', (evt, d) => { if (onPointClick) onPointClick(d.reqTime); });
+      .on('click', (evt, d) => { if (onPointClick) onPointClick(d.anTime); });
 
     renderTimeAxis(axisEl, tMin, tMax);
     return { rendered: true, yMax };
