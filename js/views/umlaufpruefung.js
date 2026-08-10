@@ -3,7 +3,8 @@
    ihren eigenen Umlauf skaliert (nicht auf ein gemeinsames Zeitfenster).
    Mehrere Signalgruppen gleichzeitig (je eine Hauptzeile), Detektoren/APW-
    Werte/ÖV-Fahrzeiten sind optional zuschaltbare Zusatzspuren je Umlauf.
-   Jede Spur unterstützt eine manuelle Strg+Klick-Zeitmessung (siehe unten).
+   Jede Spur unterstützt eine manuelle Strg+Klick-Zeitmessung (siehe unten)
+   sowie ein Hover-Fadenkreuz über alle Spuren eines Umlaufs (TX in Sekunden).
 
    Performance bei großen Aufzeichnungen (viele Umläufe/Messzeilen):
    - Alle Nachschlagevorgänge je Umlauf (Grünsegment, Signal-/Detektor-
@@ -220,6 +221,64 @@
     svgEl.__measureClickHandler = handler;
     svgEl.addEventListener('click', handler, true);
     drawMeasureOverlay(svgEl, wMin, wMax, measurements.get(key));
+  }
+
+  /* ---------------- Sekunden-Fadenkreuz (Hover, alle Spuren eines Umlaufs) --------------
+     Läuft je Umlauf-Gruppe (nicht je Spur) - eine senkrechte Linie in ALLEN
+     Spuren-SVGs dieser Gruppe an derselben (auf volle Sekunde gerundeten,
+     NICHT interpolierten) x-Position, plus ein Label darunter mit der
+     seit Umlaufbeginn vergangenen Zeit (TX in Sekunden). Rein visuell/
+     ephemer (kein persistenter Zustand über Render-Durchläufe hinweg nötig,
+     anders als die Strg+Klick-Messung oben). */
+  function wireCrosshair(groupEl, wMin, wMax) {
+    if (groupEl.__crosshairMove) groupEl.removeEventListener('mousemove', groupEl.__crosshairMove);
+    if (groupEl.__crosshairLeave) groupEl.removeEventListener('mouseleave', groupEl.__crosshairLeave);
+
+    let label = groupEl.querySelector('.up-crosshair-label');
+    if (!label) {
+      label = document.createElement('div');
+      label.className = 'up-crosshair-label';
+      groupEl.appendChild(label);
+    }
+
+    const clear = () => {
+      groupEl.querySelectorAll('.lane-track svg g.crosshair-layer').forEach(g => g.remove());
+      label.style.display = 'none';
+    };
+
+    const onMove = (event) => {
+      const trackEl = event.target.closest && event.target.closest('.lane-track');
+      if (!trackEl || !groupEl.contains(trackEl)) { clear(); return; }
+      const rect = trackEl.getBoundingClientRect();
+      if (!rect.width) { clear(); return; }
+      const px = event.clientX - rect.left;
+      if (px < 0 || px > rect.width) { clear(); return; }
+      const xTrack = d3.scaleLinear().domain([wMin, wMax]).range([0, rect.width]);
+      let t = Math.round(xTrack.invert(px) / 1000) * 1000;
+      t = Math.max(wMin, Math.min(wMax, t));
+
+      groupEl.querySelectorAll('.lane-track svg').forEach(svg => {
+        const w = svg.clientWidth, h = svg.clientHeight;
+        if (!w || !h) return;
+        const x = d3.scaleLinear().domain([wMin, wMax]).range([0, w]);
+        const lx = x(t);
+        let g = d3.select(svg).select('g.crosshair-layer');
+        if (g.empty()) g = d3.select(svg).append('g').attr('class', 'crosshair-layer').style('pointer-events', 'none');
+        g.selectAll('*').remove();
+        g.append('line').attr('class', 'crosshair-line-halo').attr('x1', lx).attr('x2', lx).attr('y1', 0).attr('y2', h);
+        g.append('line').attr('class', 'crosshair-line').attr('x1', lx).attr('x2', lx).attr('y1', 0).attr('y2', h);
+      });
+
+      const groupRect = groupEl.getBoundingClientRect();
+      label.textContent = String(Math.round((t - wMin) / 1000));
+      label.style.left = `${rect.left - groupRect.left + xTrack(t)}px`;
+      label.style.display = 'block';
+    };
+
+    groupEl.addEventListener('mousemove', onMove);
+    groupEl.addEventListener('mouseleave', clear);
+    groupEl.__crosshairMove = onMove;
+    groupEl.__crosshairLeave = clear;
   }
 
   /* ---------------- ÖV-Fahrzeiten je Signalgruppe ---------------- */
@@ -549,6 +608,8 @@
         wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
         subCursor++;
       });
+
+      wireCrosshair(group, r.start, r.end);
     });
 
     els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');

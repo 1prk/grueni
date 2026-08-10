@@ -183,9 +183,17 @@ tr.oe-hidden{ display:none; }
 
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }
-.up-group{ padding:7px 0 10px; border-bottom:1px solid var(--border); }
+.up-group{ position:relative; padding:7px 0 22px; border-bottom:1px solid var(--border); }
 .up-group:last-child{ border-bottom:none; }
 .up-group:hover{ background:var(--bg-surface-2); }
+
+/* Hover-Fadenkreuz (alle Spuren eines Umlaufs), siehe wireCrosshair() */
+.up-crosshair-label{
+  position:absolute; bottom:2px; display:none; transform:translateX(-50%);
+  font-family:var(--mono); font-size:10px; font-weight:700; color:var(--text);
+  background:var(--bg-surface); border:1px solid var(--border-strong); border-radius:3px;
+  padding:1px 5px; pointer-events:none; white-space:nowrap; z-index:2;
+}
 
 /* ---------- Stammdaten LSA: Phasenmatrix ---------- */
 .phase-matrix-wrap{ overflow-x:auto; }
