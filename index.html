@@ -461,12 +461,12 @@
           </div>
           <div class="cfg-grid">
             <div class="cfg-field">
-              <label>Variablen <span class="cfg-field-hint">(Alias für Detektor-/APW-/ÖPNV-Spalten – Detektoren als WAHR/FALSCH, APW/ÖPNV als Zahl)</span></label>
+              <label>Variablen <span class="cfg-field-hint">(Alias für Signalgruppen-/Detektor-Spalten (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder APW/ÖPNV-Spalten (Zahl))</span></label>
               <div id="upVarRows" class="up-formula-list"></div>
               <button type="button" id="upAddVarBtn" class="btn">+ Variable hinzufügen</button>
             </div>
             <div class="cfg-field">
-              <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „RFZ_S1 &lt; 999 AND D1“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern)</span></label>
+              <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN, TX) &gt; 45 AND Zustand(D1, TX) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det, TX), Dauer(sg|det, TX), DauerSeit(sg|det, zustand, TX) · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · TX = aktueller Auswertungszeitpunkt (immer verfügbar))</span></label>
               <div id="upFormulaRows" class="up-formula-list"></div>
               <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
             </div>

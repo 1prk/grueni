@@ -1,16 +1,20 @@
 /* GZ.views.formulaBuilder — Tab "Umlaufprüfung": Formel-Builder für
-   synthetische Detektoren. Variablen sind Aliase auf bestehende Detektor-
-   (WAHR/FALSCH über die Belegungslogik) bzw. APW-/ÖPNV-Spalten (Zahl, roher
-   Wert); Formeln kombinieren sie über +,-,*,/,Vergleiche,AND/OR/NOT/Klammern
-   (siehe GZ.exprEngine) und müssen zu WAHR/FALSCH auswerten. Tippen validiert
-   nur (Syntax/Typen, keine Datenauswertung) - erst "Berechnen" wertet über
-   alle TX aus und liefert je gültiger Formel eine boolesche Rohreihe, die
-   umlaufpruefung.js über getSyntheticColumns() als zusätzliche, farblich
-   abgesetzte Detektor-Spalte (Kürzel FORMEL) einbindet. */
+   synthetische Detektoren. Variablen sind Aliase auf bestehende Signalgruppen-
+   (SG), Detektor- (DET) bzw. APW-/ÖPNV-Spalten. SG/DET sind Objekt-Handles
+   (siehe GZ.exprEngine): kein direkter WAHR/FALSCH-Wert mehr, sondern über
+   die Primitiven Zustand/Dauer/DauerSeit auszuwerten (z.B. "Zustand(D1,TX)
+   == BELEGT" statt früher bloß "D1"). APW/ÖPNV bleiben Zahl (roher Wert).
+   Formeln kombinieren alles über +,-,*,/,Vergleiche,AND/OR/NOT/Klammern und
+   müssen zu WAHR/FALSCH auswerten. Tippen validiert nur (Syntax/Typen, keine
+   Datenauswertung) - erst "Berechnen" wertet über alle TX aus und liefert je
+   gültiger Formel eine boolesche Rohreihe, die umlaufpruefung.js über
+   getSyntheticColumns() als zusätzliche, farblich abgesetzte Detektor-Spalte
+   (Kürzel FORMEL) einbindet. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
-  const { wzIstBelegt } = GZ.wartezeitLogic;
+  const { buildSegments, makePointSegmentSweep } = GZ.segments;
+  const { categorizeDetRaw } = GZ.parser;
   const { compile } = GZ.exprEngine;
 
   const SYNTH_INDEX_BASE = 1000000; // weit jenseits jedes realen Spaltenindex
@@ -22,8 +26,15 @@
   let syntheticCols = []; // [{index, kuerzel:'FORMEL', name, beschreibung, rawSeries}]
   let debounceTimers = new Map(); // formulaId -> timeout handle
 
-  const RESERVED = new Set(['AND', 'OR', 'NOT']);
+  // Case-insensitive (AND/OR/NOT, wie im Tokenizer) bzw. exakt (TX und die
+  // Zustands-/Funktionsnamen, ebenfalls exakt wie im Tokenizer/PRIMITIVES von
+  // GZ.exprEngine) reservierte Wörter - als Alias verboten, sonst wäre die
+  // Variable in Formeln unerreichbar (der Tokenizer erkennt z.B. "GRUEN"
+  // immer als Zustands-Literal, unabhängig davon, was in varTypes steht).
+  const RESERVED_CI = new Set(['AND', 'OR', 'NOT']);
+  const RESERVED_EXACT = new Set(['TX', 'GRUEN', 'ROT', 'GELB', 'ROTGELB', 'DUNKEL', 'BELEGT', 'FREI', 'Zustand', 'Dauer', 'DauerSeit']);
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
 
   function init(root) {
     els = {
@@ -40,17 +51,22 @@
     els.calcBtn.onclick = berechnen;
   }
 
-  // Quellspalten für Variablen: Detektoren (-> WAHR/FALSCH) und APW/ÖPNV
-  // (-> Zahl). Bewusst OHNE bereits berechnete Formel-Spalten selbst (keine
-  // Formeln-referenzieren-Formeln-Verkettung - hält Auswertungsreihenfolge
-  // und Zyklen-Vermeidung trivial).
+  // Quellspalten für Variablen: Signalgruppen (SG) und Detektoren (DET) als
+  // Objekt-Handles, APW/ÖPNV als Zahl. Bewusst OHNE bereits berechnete
+  // Formel-Spalten selbst (keine Formeln-referenzieren-Formeln-Verkettung -
+  // hält Auswertungsreihenfolge und Zyklen-Vermeidung trivial).
   function sourceCols() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return [];
-    return a.otherColumns.filter(c => c.kuerzel === 'DET' || c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
+    const sgCols = a.allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' }));
+    return sgCols.concat(a.otherColumns.filter(c => c.kuerzel === 'DET' || c.kuerzel === 'APW' || c.kuerzel === 'OEPNV'));
   }
 
-  function varTypeForCol(col) { return col.kuerzel === 'DET' ? 'BOOL' : 'NUM'; }
+  function varTypeForCol(col) {
+    if (col.kuerzel === 'SG') return 'SG';
+    if (col.kuerzel === 'DET') return 'DET';
+    return 'NUM'; // APW/OEPNV
+  }
 
   function addVar() {
     const cols = sourceCols();
@@ -82,11 +98,11 @@
     vars.forEach(v => {
       const alias = v.alias.trim();
       if (!alias) return;
-      if (!ALIAS_RE.test(alias) || RESERVED.has(alias.toUpperCase())) { aliasErrors.push(`"${alias}" ist kein gültiger Bezeichner`); return; }
+      if (!ALIAS_RE.test(alias) || isReserved(alias)) { aliasErrors.push(`"${alias}" ist kein gültiger Bezeichner`); return; }
       if (seen.has(alias)) { aliasErrors.push(`"${alias}" doppelt vergeben`); return; }
       seen.add(alias);
       const col = cols.find(c => c.index === v.colIndex);
-      types[alias] = col ? varTypeForCol(col) : 'BOOL';
+      types[alias] = col ? varTypeForCol(col) : 'NUM';
     });
     return { types, aliasErrors };
   }
@@ -95,7 +111,7 @@
     const cols = sourceCols();
     const colOptions = selectedIdx => cols.length
       ? cols.map(c => `<option value="${c.index}" ${c.index === selectedIdx ? 'selected' : ''}>${esc(c.kuerzel)} ${esc(c.name)}</option>`).join('')
-      : '<option value="">– keine Detektor-/APW-/ÖPNV-Spalten –</option>';
+      : '<option value="">– keine Signalgruppen-/Detektor-/APW-/ÖPNV-Spalten –</option>';
     els.varRows.innerHTML = vars.map(v => `
       <div class="up-var-row" data-id="${v.id}">
         <input type="text" class="up-var-alias mono-input" value="${esc(v.alias)}" placeholder="Alias, z.B. RFZ_S1">
@@ -118,7 +134,7 @@
     els.formulaRows.innerHTML = formulas.map(f => `
       <div class="up-formula-row" data-id="${f.id}">
         <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
-        <input type="text" class="up-formula-expr mono-input" value="${esc(f.exprText)}" placeholder="z.B. RFZ_S1 < 999 AND D1">
+        <input type="text" class="up-formula-expr mono-input" value="${esc(f.exprText)}" placeholder="z.B. DauerSeit(K1, GRUEN, TX) &gt; 45 AND Zustand(D1, TX) == BELEGT">
         <span class="up-formula-status"></span>
         <button type="button" class="oe-row-remove up-formula-remove">✕</button>
       </div>`).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
@@ -150,7 +166,7 @@
       statusEl.title = 'Variablen-Fehler: ' + aliasErrors.join('; ');
       return;
     }
-    const result = compile(f.exprText, types);
+    const result = compile(f.exprText, { ...types, TX: 'NUM' });
     if (result.ok) {
       statusEl.textContent = '✓';
       statusEl.className = 'up-formula-status ok';
@@ -177,7 +193,7 @@
       const alias = v.alias.trim();
       let msg = '';
       if (!alias) msg = 'Alias fehlt';
-      else if (!ALIAS_RE.test(alias) || RESERVED.has(alias.toUpperCase())) msg = 'Ungültiger Bezeichner';
+      else if (!ALIAS_RE.test(alias) || isReserved(alias)) msg = 'Ungültiger Bezeichner';
       else {
         const dupCount = vars.filter(x => x.alias.trim() === alias).length;
         if (dupCount > 1) msg = 'Alias doppelt vergeben';
@@ -188,13 +204,28 @@
     });
   }
 
+  // Baut für eine SG-/DET-Variable EINMAL (nicht pro Zeile) ihre Segmente +
+  // einen fortlaufenden Punkt-Sweep (GZ.segments.makePointSegmentSweep) - SG
+  // nutzt die in allStats bereits vorberechneten Segmente, DET wird einmal
+  // frisch gebaut (analog zu umlaufpruefung.js' detSegsByCol). Das Handle-
+  // Objekt selbst bleibt über den gesamten Berechnen()-Durchlauf stabil; nur
+  // sein interner Sweep-Zeiger rückt pro Zeile vor (siehe advance() unten).
+  function buildObjectHandle(a, type, col) {
+    if (type === 'SG') {
+      const sgEntry = a.allStats.find(s => s.col.index === col.index);
+      return { class: 'SG', sweep: makePointSegmentSweep(sgEntry ? sgEntry.segs : []) };
+    }
+    const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);
+    return { class: 'DET', sweep: makePointSegmentSweep(segs) };
+  }
+
   // Wertet ALLE aktuell gültigen Formeln über die gesamte Aufzeichnung aus
   // (eine boolesche Rohreihe je TX) und ersetzt syntheticCols vollständig -
   // erst hier, nicht während des Tippens (siehe validateFormulaRow oben).
   function berechnen() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
-    const { times, seriesByCol } = a;
+    const { times, seriesByCol, cycleStarts } = a;
     const { types, aliasErrors } = currentVarTypes();
     const cols = sourceCols();
 
@@ -207,22 +238,37 @@
     const scopeSpecs = vars.map(v => {
       const alias = v.alias.trim();
       const col = cols.find(c => c.index === v.colIndex);
-      const type = col ? varTypeForCol(col) : 'BOOL';
+      const type = col ? varTypeForCol(col) : 'NUM';
+      if (type === 'SG' || type === 'DET') return { alias, type, handle: buildObjectHandle(a, type, col) };
       return { alias, type, series: col ? seriesByCol.get(col.index) : null };
     }).filter(s => s.alias);
+
+    // TX = Sekunden seit Umlaufbeginn des aktuellen Zyklus, per fortlaufendem
+    // Zeiger über cycleStarts (wie überall sonst im Code) statt Binärsuche
+    // je Zeile - amortisiert O(n) über die gesamte Aufzeichnung. Dient den
+    // Zustand/Dauer/DauerSeit-Primitiven rein deklarativ (siehe exprEngine.js
+    // Kopfkommentar) - der eigentliche Auswertungszeitpunkt läuft über das
+    // jeweilige Objekt-Handle (handle.sweep.advance() unten), nicht über TX.
+    const varTypesWithTx = { ...types, TX: 'NUM' };
 
     const computed = [];
     let skipped = 0;
     formulas.forEach(f => {
       const name = f.name.trim() || `F${f.id}`;
-      const compiled = compile(f.exprText, types);
+      const compiled = compile(f.exprText, varTypesWithTx);
       if (!compiled.ok) { skipped++; return; }
       const rawSeries = new Array(times.length);
+      let cyclePtr = 0;
       for (let i = 0; i < times.length; i++) {
-        const scope = {};
+        const t = times[i];
+        while (cyclePtr + 1 < cycleStarts.length && cycleStarts[cyclePtr + 1] <= t) cyclePtr++;
+        const txSeconds = cycleStarts.length ? Math.round((t - cycleStarts[cyclePtr]) / 1000) : 0;
+
+        const scope = { TX: txSeconds };
         scopeSpecs.forEach(s => {
+          if (s.handle) { s.handle.sweep.advance(t); scope[s.alias] = s.handle; return; }
           const raw = s.series ? (s.series[i] || '') : '';
-          scope[s.alias] = s.type === 'BOOL' ? wzIstBelegt(raw) : (raw.trim() === '' ? NaN : Number(raw));
+          scope[s.alias] = raw.trim() === '' ? NaN : Number(raw);
         });
         rawSeries[i] = compiled.run(scope) ? '1' : '0';
       }

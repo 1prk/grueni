@@ -300,11 +300,33 @@
     };
   }
 
+  // Punkt-Sweep: welches (einzelne) Segment enthält einen bestimmten
+  // Zeitpunkt? Anders als makeIntervalSweep/-IndexSweep (Fenster-Overlap)
+  // für punktuelle Nachschlagen gedacht - Formel-Builder-Primitiven
+  // (Zustand/Dauer/DauerSeit) rufen advance(t) einmal je Zeile auf (t
+  // aufsteigend, amortisiert O(n) wie die anderen Sweeps) und lesen danach
+  // segment()/time() beliebig oft, ohne den Zeitpunkt erneut durchreichen zu
+  // müssen. Segmente müssen wie von buildSegments() geliefert lückenlos/
+  // nicht überlappend sein.
+  function makePointSegmentSweep(segs) {
+    let ptr = 0, curSeg = null, curT = null;
+    return {
+      advance(t) {
+        curT = t;
+        while (ptr < segs.length && segs[ptr].end <= t) ptr++;
+        const s = segs[ptr];
+        curSeg = (s && t >= s.start) ? s : null;
+      },
+      segment() { return curSeg; },
+      time() { return curT; }
+    };
+  }
+
   GZ.segments = {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
     findSplAt, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
-    computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep
+    computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep, makePointSegmentSweep
   };
 })(window.GZ = window.GZ || {});
