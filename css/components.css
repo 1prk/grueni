@@ -181,6 +181,18 @@ tr.oe-hidden{ display:none; }
 .oe-row-remove{ font-size:11px; padding:4px 9px; color:var(--sig-red); border-color:var(--sig-red); }
 .oe-row-remove:hover{ background:var(--crit-bg); }
 
+/* ---------- Umlaufprüfung: Formel-Builder ---------- */
+.up-formula-list{ display:flex; flex-direction:column; gap:6px; }
+.up-var-row, .up-formula-row{ display:flex; align-items:center; gap:6px; }
+.up-var-row .up-var-alias{ width:120px; flex-shrink:0; }
+.up-var-row .up-var-col{ flex:1; min-width:0; }
+.up-formula-row .up-formula-name{ width:90px; flex-shrink:0; }
+.up-formula-row .up-formula-expr{ flex:1; min-width:0; }
+.up-var-status, .up-formula-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
+.up-var-status.ok, .up-formula-status.ok{ color:var(--sig-green); }
+.up-var-status.err, .up-formula-status.err{ color:var(--sig-red); }
+.mono-input{ font-family:var(--mono); }
+
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }
 .up-group{ position:relative; padding:7px 0 22px; border-bottom:1px solid var(--border); }

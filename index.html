@@ -447,6 +447,26 @@
           <div id="upHint" class="hint"></div>
         </div>
 
+        <div class="panel">
+          <div class="panel-head">
+            <span>Formeln (synthetische Detektoren)</span>
+            <button type="button" id="upFormulaCalcBtn" class="btn primary">Berechnen</button>
+          </div>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <label>Variablen <span class="cfg-field-hint">(Alias für Detektor-/APW-/ÖPNV-Spalten – Detektoren als WAHR/FALSCH, APW/ÖPNV als Zahl)</span></label>
+              <div id="upVarRows" class="up-formula-list"></div>
+              <button type="button" id="upAddVarBtn" class="btn">+ Variable hinzufügen</button>
+            </div>
+            <div class="cfg-field">
+              <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „RFZ_S1 &lt; 999 AND D1“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern)</span></label>
+              <div id="upFormulaRows" class="up-formula-list"></div>
+              <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
+            </div>
+          </div>
+          <div id="upFormulaHint" class="hint"></div>
+        </div>
+
         <div class="panel" id="upTablePanel" style="display:none;">
           <div class="panel-head">
             <span>Umläufe — <span id="upSgLabel"></span></span>
@@ -469,6 +489,7 @@
             <span class="item"><span class="swatch" style="background:var(--sig-dark)"></span>Dunkel</span>
             <span class="item"><span class="swatch" style="background:var(--accent)"></span>Detektor belegt</span>
             <span class="item"><span class="swatch" style="background:var(--text-faint);height:2px;align-self:center;"></span>Detektor frei (Grundlinie)</span>
+            <span class="item"><span class="swatch" style="background:var(--formula-on)"></span>Formel wahr (synthetischer Detektor, siehe „Formeln“)</span>
             <span class="item"><span class="swatch" style="background:linear-gradient(90deg,var(--apw-a) 50%,var(--apw-b) 50%);"></span>APW/ÖPNV-Wert: Rohwert je Zeitabschnitt (alternierende Farbe)</span>
             <span class="item"><span class="up-anom" style="font-family:var(--mono);">26</span> Auffälliger Umlauf (TF)</span>
             <span class="item"><span class="swatch" style="background:var(--fz-soll)"></span>tFZ: Sollfahrzeit-Anteil</span>
@@ -501,6 +522,7 @@
 <script src="js/core/segments.js"></script>
 <script src="js/core/wartezeitLogic.js"></script>
 <script src="js/core/oepnvLogic.js"></script>
+<script src="js/core/exprEngine.js"></script>
 <script src="js/core/xlsxWriter.js"></script>
 <script src="js/core/phases.js"></script>
 <script src="js/core/sampleData.js"></script>
@@ -520,6 +542,7 @@
 <script src="js/views/phasenauswertung.js"></script>
 <script src="js/views/wartezeit.js"></script>
 <script src="js/views/oepnvQa.js"></script>
+<script src="js/views/formulaBuilder.js"></script>
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/app.js"></script>
 </body>

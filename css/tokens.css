@@ -56,6 +56,12 @@
   --apw-a:#7c1f84;
   --apw-b:#eebaf3;
 
+  /* Umlaufprüfung: synthetische Formel-Spalten (Formel-Builder) - eigener
+     Jade-/Grünton zwischen --sig-green und --fz-soll, damit ein berechneter
+     "Detektor" auf einen Blick von echten Detektoren (--accent) und
+     APW-Werten (--apw-*) unterscheidbar bleibt. */
+  --formula-on:#159378;
+
   --radius-sm:4px;
   --radius-md:8px;
   --radius-lg:14px;

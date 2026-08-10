@@ -3,6 +3,8 @@
    ihren eigenen Umlauf skaliert (nicht auf ein gemeinsames Zeitfenster).
    Mehrere Signalgruppen gleichzeitig (je eine Hauptzeile), Detektoren/APW-
    Werte/ÖV-Fahrzeiten sind optional zuschaltbare Zusatzspuren je Umlauf.
+   Synthetische Formel-Spalten (Formel-Builder, siehe formulaBuilder.js) laufen
+   als zusätzliche "Detektoren" mit eigener Farbe in derselben Liste mit.
    Jede Spur unterstützt eine manuelle Strg+Klick-Zeitmessung (siehe unten)
    sowie ein Hover-Fadenkreuz über alle Spuren eines Umlaufs (TX in Sekunden).
 
@@ -86,10 +88,72 @@
     });
   }
 
-  function populateControls() {
+  // Formel-Builder-Ergebnisse (siehe formulaBuilder.js): read-only Zugriff,
+  // NICHT die geteilte Analyse mutieren (gleiches Muster wie
+  // GZ.views.oepnvQa.getRowsForSg). Leer, solange keine Formeln berechnet
+  // wurden oder das Modul (noch) nicht geladen ist.
+  function formulaCols() {
+    return GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getSyntheticColumns() : [];
+  }
+
+  // Baut die "Detektor(en) zuschalten"-Liste aus echten DET-Spalten UND
+  // synthetischen Formel-Spalten (Kürzel FORMEL) - beide teilen sich dieselbe
+  // WAHR/FALSCH-Belegungslogik (categorizeDetRaw) und damit Anzeige-/Filter-
+  // Infrastruktur. Erhält den bisherigen Checkbox-Zustand, damit ein Klick
+  // auf "Berechnen" im Formel-Builder nicht die laufende Auswahl verwirft.
+  function refreshDetChecks() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const cols = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
+    const prevChecked = new Set([...els.detChecks.querySelectorAll('input:checked')].map(i => i.value));
+    els.detChecks.innerHTML = cols.length
+      ? cols.map((c, i) => {
+          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
+          const checked = prevChecked.size ? prevChecked.has(String(c.index)) : i === 0;
+          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> <span class="filter-kuerzel">${esc(c.kuerzel)}</span> ${esc(label)}</label>`;
+        }).join('')
+      : '<div class="cfg-empty">Keine Detektor-Spalten (DET) in den Daten erkannt.</div>';
+    els.detChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
+  }
+
+  // Dito für die Filterliste (siehe computeMatchingCycles): Formel-Spalten
+  // sind wie SG-Spalten praktisch immer dicht befüllt (jede Sekunde ein
+  // Wert) - "hat einen Rohwert" wäre für sie sinnlos, daher unten mit
+  // eigenem kuerzel:'FORMEL' getaggt und in computeMatchingCycles per
+  // Belegt-Sweep statt Rohwert-Scan geprüft (derselbe Grund wie beim
+  // SG-Freigabe-Sweep).
+  function refreshFilterChecks() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
     const { allStats, otherColumns } = a;
+    const sgFilterCols = allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' }));
+    const filterableCols = sgFilterCols.concat(otherColumns).concat(formulaCols());
+    const prevFilterChecked = new Set([...els.filterChecks.querySelectorAll('input:checked')].map(i => i.value));
+    els.filterChecks.innerHTML = filterableCols.length
+      ? filterableCols.map(c => {
+          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
+          const checked = prevFilterChecked.has(String(c.index));
+          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> <span class="filter-kuerzel">${esc(c.kuerzel)}</span> ${esc(label)}</label>`;
+        }).join('')
+      : '<div class="cfg-empty">Keine weiteren Spalten erkannt.</div>';
+    els.filterChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { windowStartIdx = 0; render(); });
+  }
+
+  // Nach "Berechnen" im Formel-Builder aufgerufen: Checklisten (die jetzt
+  // ggf. neue/geänderte Formel-Spalten enthalten) neu aufbauen und neu
+  // rendern - bewusst OHNE Fensterposition/Messungen zurückzusetzen (anders
+  // als populateControls() bei einem komplett neuen Datenimport).
+  function refreshFormulaColumns() {
+    if (!els) return;
+    refreshDetChecks();
+    refreshFilterChecks();
+    render();
+  }
+
+  function populateControls() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const { allStats } = a;
     measurements = new Map();
 
     const prevSgChecked = new Set([...els.sgChecks.querySelectorAll('input:checked')].map(i => i.value));
@@ -99,15 +163,9 @@
       return `<label class="det-check"><input type="checkbox" value="${i}" ${checked ? 'checked' : ''}> ${esc(label)}</label>`;
     }).join('');
 
-    const detCols = otherColumns.filter(c => c.kuerzel === 'DET');
-    els.detChecks.innerHTML = detCols.length
-      ? detCols.map((c, i) => {
-          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
-          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${i === 0 ? 'checked' : ''}> ${esc(label)}</label>`;
-        }).join('')
-      : '<div class="cfg-empty">Keine Detektor-Spalten (DET) in den Daten erkannt.</div>';
+    refreshDetChecks();
 
-    const apwCols = otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
+    const apwCols = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
     els.apwChecks.innerHTML = apwCols.length
       ? apwCols.map(c => {
           const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
@@ -115,20 +173,7 @@
         }).join('')
       : '<div class="cfg-empty">Keine APW-/ÖPNV-Wert-Spalten erkannt.</div>';
 
-    // Filterbare Spalten: Signalgruppen (SG, aus allStats - haben von Haus
-    // aus kein "kuerzel", daher hier synthetisch getaggt) UND alle otherColumns
-    // (DET/APW/OEPNV/…), damit z.B. "nur Umläufe zeigen, in denen SG S1 einen
-    // Wert hat" möglich ist - vorher fehlten SG-Spalten hier komplett.
-    const sgFilterCols = allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' }));
-    const filterableCols = sgFilterCols.concat(otherColumns);
-    const prevFilterChecked = new Set([...els.filterChecks.querySelectorAll('input:checked')].map(i => i.value));
-    els.filterChecks.innerHTML = filterableCols.length
-      ? filterableCols.map(c => {
-          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
-          const checked = prevFilterChecked.has(String(c.index));
-          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> <span class="filter-kuerzel">${esc(c.kuerzel)}</span> ${esc(label)}</label>`;
-        }).join('')
-      : '<div class="cfg-empty">Keine weiteren Spalten erkannt.</div>';
+    refreshFilterChecks();
 
     windowStartIdx = 0;
     showAll = false;
@@ -141,10 +186,8 @@
 
   function wireEvents() {
     els.sgChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
-    els.detChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.apwChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.fzToggle.onchange = render;
-    els.filterChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { windowStartIdx = 0; render(); });
   }
 
   function windowRange(n) {
@@ -314,13 +357,17 @@
   }
 
   // Filtern: liefert die Indizes aller Umläufe, die JEDE gewählte Spalte
-  // erfüllen (UND-Verknüpfung). Zwei Prüfarten je nach Spaltentyp:
+  // erfüllen (UND-Verknüpfung). Drei Prüfarten je nach Spaltentyp:
   // - SG (Signalgruppe): Rohwert ist praktisch immer durchgängig befüllt
   //   (jede Sekunde ein Signalzustand) - "hat einen Rohwert" wäre also fast
   //   immer wahr und würde nie etwas herausfiltern. Sinnvoll ist hier
   //   stattdessen "hatte der Umlauf eine Freigabe (Grünphase) dieser SG?" -
   //   dieselbe Prüfung, die auch An/Ab/TF je Umlauf verwendet (greenSweep
   //   über die bereits vorberechneten stats.greens).
+  // - FORMEL (Formel-Builder): ebenfalls dicht befüllt (jede Sekunde WAHR
+  //   oder FALSCH, siehe formulaBuilder.js berechnen()) - aus demselben Grund
+  //   wie bei SG kein Rohwert-Scan, sondern "war die Formel irgendwann im
+  //   Umlauf WAHR?" (Belegt-Segmente überlappen das Umlauf-Fenster).
   // - DET/APW/OEPNV (otherColumns): Lücken sind hier echte Information (kein
   //   Fahrzeug/keine Anmeldung) - "mindestens ein nicht-leerer Rohwert im
   //   Umlauf" bleibt die richtige Prüfung.
@@ -328,10 +375,15 @@
   // Sweeps oben) statt pro Umlauf neu zu scannen.
   function computeMatchingCycles(filterCols, allStats, cycleStarts, tMax, times, seriesByCol) {
     const n = cycleStarts.length;
-    const rawCols = filterCols.filter(c => c.kuerzel !== 'SG');
+    const rawCols = filterCols.filter(c => c.kuerzel !== 'SG' && c.kuerzel !== 'FORMEL');
     const greenSweeps = filterCols.filter(c => c.kuerzel === 'SG').map(c => {
       const sgEntry = allStats.find(s => s.col.index === c.index);
       return sgEntry ? makeIndexSweep(sgEntry.stats.greens) : () => -1;
+    });
+    const belegtSweeps = filterCols.filter(c => c.kuerzel === 'FORMEL').map(c => {
+      const segs = buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw).filter(s => s.cat === 'BELEGT');
+      const sweep = makeIntervalSweep(segs);
+      return (start, end) => sweep(start, end).length > 0;
     });
     const matches = [];
     let ptr = 0;
@@ -350,7 +402,8 @@
         return false;
       });
       const greenOk = greenSweeps.every(sweep => sweep(start, end) !== -1);
-      if (rawOk && greenOk) matches.push(i);
+      const formulaOk = belegtSweeps.every(sweep => sweep(start, end));
+      if (rawOk && greenOk && formulaOk) matches.push(i);
     }
     return matches;
   }
@@ -358,7 +411,15 @@
   function render() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
-    const { allStats, cycleStarts, tMax, times, splValues, seriesByCol, otherColumns } = a;
+    const { allStats, cycleStarts, tMax, times, splValues, seriesByCol: seriesByColReal, otherColumns: otherColumnsReal } = a;
+
+    // Synthetische Formel-Spalten NICHT in die geteilte Analyse mutieren -
+    // stattdessen hier lokal einmischen (seriesByCol bleibt bei leerer
+    // formulaCols()-Liste dieselbe Map-Referenz, keine unnötige Kopie).
+    const fCols = formulaCols();
+    const otherColumns = fCols.length ? otherColumnsReal.concat(fCols) : otherColumnsReal;
+    const seriesByCol = fCols.length ? new Map(seriesByColReal) : seriesByColReal;
+    fCols.forEach(c => seriesByCol.set(c.index, c.rawSeries));
 
     if (!cycleStarts || cycleStarts.length < 2) {
       els.tablePanel.style.display = 'none';
@@ -581,12 +642,14 @@
       });
 
       detCols.forEach((c, ci) => {
+        const isFormula = c.kuerzel === 'FORMEL';
         const subSvg = subRows[subCursor].querySelector('.lane-track svg');
         renderLane(subSvg, {
           wMin: r.start, wMax: r.end, segs: r.detVisSegs[ci],
           baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
           width: subSize.width, height: subSize.height,
-          segTitle: s => `${esc(c.name)} – ${s.cat === 'BELEGT' ? 'Belegt' : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
+          fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
+          segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
         });
         wireMeasure(subSvg, r.start, r.end, `${r.i}|det|${c.index}`);
         subCursor++;
@@ -618,5 +681,5 @@
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.umlaufpruefung = { init, populateControls, render };
+  GZ.views.umlaufpruefung = { init, populateControls, render, refreshFormulaColumns };
 })(window.GZ = window.GZ || {});
