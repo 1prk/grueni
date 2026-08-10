@@ -114,12 +114,18 @@
         }).join('')
       : '<div class="cfg-empty">Keine APW-/ÖPNV-Wert-Spalten erkannt.</div>';
 
+    // Filterbare Spalten: Signalgruppen (SG, aus allStats - haben von Haus
+    // aus kein "kuerzel", daher hier synthetisch getaggt) UND alle otherColumns
+    // (DET/APW/OEPNV/…), damit z.B. "nur Umläufe zeigen, in denen SG S1 einen
+    // Wert hat" möglich ist - vorher fehlten SG-Spalten hier komplett.
+    const sgFilterCols = allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' }));
+    const filterableCols = sgFilterCols.concat(otherColumns);
     const prevFilterChecked = new Set([...els.filterChecks.querySelectorAll('input:checked')].map(i => i.value));
-    els.filterChecks.innerHTML = otherColumns.length
-      ? otherColumns.map(c => {
+    els.filterChecks.innerHTML = filterableCols.length
+      ? filterableCols.map(c => {
           const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
           const checked = prevFilterChecked.has(String(c.index));
-          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> ${esc(label)}</label>`;
+          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> <span class="filter-kuerzel">${esc(c.kuerzel)}</span> ${esc(label)}</label>`;
         }).join('')
       : '<div class="cfg-empty">Keine weiteren Spalten erkannt.</div>';
 
@@ -322,7 +328,10 @@
     const filterIdxs = [...els.filterChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
     const detCols = detIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
     const apwCols = apwIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
-    const filterCols = filterIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
+    // Filter-Spalten können SG-Spalten (allStats) ODER otherColumns
+    // (DET/APW/OEPNV/…) sein - siehe populateControls().
+    const filterableCols = allStats.map(s => s.col).concat(otherColumns);
+    const filterCols = filterIdxs.map(idx => filterableCols.find(c => c.index === idx)).filter(Boolean);
 
     const detSegsByCol = new Map();
     detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
