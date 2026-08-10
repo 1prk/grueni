@@ -50,6 +50,12 @@
   --fz-soll:#0089a3;
   --fz-verlust:#e6007e;
 
+  /* Umlaufprüfung: APW/ÖPNV-Rohwert-Spur - alternierend je Segment (nicht
+     semantisch wie fz-soll/-verlust, nur zur Abgrenzung benachbarter
+     Zeitabschnitte mit unterschiedlichem Rohwert, z.B. Countdown 10,9,8...). */
+  --apw-a:#7c1f84;
+  --apw-b:#eebaf3;
+
   --radius-sm:4px;
   --radius-md:8px;
   --radius-lg:14px;

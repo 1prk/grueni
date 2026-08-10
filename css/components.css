@@ -185,10 +185,6 @@ tr.oe-hidden{ display:none; }
 .up-group{ padding:7px 0 10px; border-bottom:1px solid var(--border); }
 .up-group:last-child{ border-bottom:none; }
 .up-group:hover{ background:var(--bg-surface-2); }
-.up-apw-row{ display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 0 100px; font-size:10.5px; font-family:var(--mono); }
-.up-apw-pill{ padding:1px 7px; border:1px solid var(--border-strong); border-radius:10px; color:var(--text-muted); background:var(--bg-surface-2); }
-.up-apw-pill.changed{ border-color:var(--req-marker); color:var(--req-marker); background:var(--req-marker-bg); font-weight:700; }
-.up-apw-pill.empty{ opacity:.5; }
 
 /* ---------- Stammdaten LSA: Phasenmatrix ---------- */
 .phase-matrix-wrap{ overflow-x:auto; }

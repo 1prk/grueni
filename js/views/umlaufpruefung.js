@@ -327,6 +327,18 @@
     const detSegsByCol = new Map();
     detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
 
+    // APW/ÖPNV-Rohwert-Spalten: ein Segment je zusammenhängendem Zeitabschnitt
+    // mit demselben Rohwert (cat = getrimmter Rohwert selbst statt einer
+    // festen Kategorie) - zeigt den Wert direkt an, statt nur "geändert?".
+    // idx je Segment (fortlaufend über die gesamte Spalte) treibt die
+    // alternierende Kontrastfarbe in fillFor unten.
+    const apwSegsByCol = new Map();
+    apwCols.forEach(c => {
+      const segs = buildSegments(times, seriesByCol.get(c.index), v => v.trim());
+      segs.forEach((s, idx) => { s.idx = idx; });
+      apwSegsByCol.set(c.index, segs);
+    });
+
     const n = cycleStarts.length;
     const matchingCycles = filterCols.length ? computeMatchingCycles(filterCols, cycleStarts, tMax, times, seriesByCol) : null;
     const effectiveCount = matchingCycles ? matchingCycles.length : n;
@@ -350,7 +362,8 @@
     // weiterhin aufsteigend durchlaufen werden.
     const detSweeps = new Map();
     detCols.forEach(c => detSweeps.set(c.index, makeIntervalSweep(detSegsByCol.get(c.index))));
-    let rowPtr = 0; // Zeiger in times[] für den APW-Rohwert-Sweep
+    const apwSweeps = new Map();
+    apwCols.forEach(c => apwSweeps.set(c.index, makeIntervalSweep(apwSegsByCol.get(c.index))));
 
     const rowData = [];
     cycleIdxList.forEach(i => {
@@ -377,35 +390,9 @@
       });
 
       const detVisSegs = detCols.map(c => detSweeps.get(c.index)(start, end));
+      const apwVisSegs = apwCols.map(c => apwSweeps.get(c.index)(start, end));
 
-      // Zeilenbereich [rowPtr, rowEnd) dieses Umlaufs in times[] - EIN
-      // fortlaufender Sweep für alle APW-Spalten zusammen (statt je Spalte
-      // einen Vollscan über times[]).
-      while (rowPtr < times.length && times[rowPtr] < start) rowPtr++;
-      const rowFrom = rowPtr;
-      while (rowPtr < times.length && times[rowPtr] < end) rowPtr++;
-      const rowTo = rowPtr;
-
-      const apwHtml = apwCols.length ? `<div class="up-apw-row">${apwCols.map(c => {
-        const vals = seriesByCol.get(c.index);
-        let first = null, last = null;
-        const seen = new Set();
-        for (let k = rowFrom; k < rowTo; k++) {
-          const v = (vals[k] || '').trim();
-          if (v === '') continue;
-          if (first === null) first = v;
-          last = v;
-          seen.add(v);
-        }
-        const changed = seen.size > 1;
-        const label = c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name;
-        const cls = first === null ? 'empty' : (changed ? 'changed' : '');
-        const info = first === null ? 'kein Wert im Umlauf' : (changed ? `geändert: ${esc(first)} → ${esc(last)}` : `unverändert (${esc(first)})`);
-        const symbol = first === null ? '–' : (changed ? '●' : '○');
-        return `<span class="up-apw-pill ${cls}" title="${esc(label)}: ${info}">${esc(c.name)} ${symbol}</span>`;
-      }).join(' ')}</div>` : '';
-
-      rowData.push({ i, start, end, spl, tu, sgRows, detVisSegs, apwHtml });
+      rowData.push({ i, start, end, spl, tu, sgRows, detVisSegs, apwVisSegs });
     });
 
     if (rowData.length === 0) {
@@ -447,7 +434,12 @@
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
         </div>`).join('')}
-        ${r.apwHtml}
+        ${apwCols.map(c => `
+        <div class="lane-row up-sub-row">
+          <div class="lane-name" title="${esc(c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name)}">↳${esc(c.name)}</div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-track up-sub-track"><svg></svg></div>
+        </div>`).join('')}
       </div>`).join('');
 
     // Größe je EINMAL messen (erzwingt Reflow) statt je Zeile - sonst
@@ -511,6 +503,23 @@
           segTitle: s => `${esc(c.name)} – ${s.cat === 'BELEGT' ? 'Belegt' : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
         });
         wireMeasure(subSvg, r.start, r.end, `${r.i}|det|${c.index}`);
+        subCursor++;
+      });
+
+      apwCols.forEach((c, ci) => {
+        const subSvg = subRows[subCursor].querySelector('.lane-track svg');
+        renderLane(subSvg, {
+          wMin: r.start, wMax: r.end, segs: r.apwVisSegs[ci],
+          baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+          width: subSize.width, height: subSize.height,
+          fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
+          segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
+          segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
+          segTitle: d => d.cat === 'LUECKE'
+            ? `Datenlücke: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}`
+            : `${esc(c.name)}: ${esc(d.cat)} (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}, ${Math.round((d.end - d.start) / 1000)}s)`
+        });
+        wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
         subCursor++;
       });
     });
