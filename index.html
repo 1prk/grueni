@@ -424,8 +424,8 @@
           <div class="panel-head">Umlaufprüfung — Auswahl</div>
           <div class="cfg-grid">
             <div class="cfg-field">
-              <label for="upSgSelect">Signalgruppe</label>
-              <select id="upSgSelect"></select>
+              <label>Signalgruppe(n) <span class="cfg-field-hint">(mehrere = gestapelte Hauptzeilen je Umlauf)</span></label>
+              <div id="upSgChecks" class="det-checks"></div>
             </div>
             <div class="cfg-field">
               <label>Detektor(en) zuschalten <span class="cfg-field-hint">(Rohzustand als Mini-Zeitleiste je Umlauf)</span></label>
@@ -470,11 +470,10 @@
             <span class="item"><span class="swatch" style="background:var(--fz-soll)"></span>tFZ: Sollfahrzeit-Anteil</span>
             <span class="item"><span class="swatch" style="background:var(--fz-verlust)"></span>tFZ: Verlustzeit-Anteil</span>
             <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#fbd9ec 0 3px,var(--fz-verlust) 3px 4px)"></span>ZwL: Zwangslöschzeit-Fenster</span>
+            <span class="item"><span style="display:inline-block;width:16px;border-top:1.5px dashed var(--text);"></span>Strg+Klick: manuelle Zeitmessung (2× klicken für Differenz)</span>
           </div>
           <div class="lane-row lane-header up-main-row" style="padding:8px 16px 0;">
-            <div class="lane-name">Umlauf</div>
-            <div class="lane-num">SPL</div>
-            <div class="lane-num">TU</div>
+            <div class="lane-name">Signalgruppe</div>
             <div class="lane-num">An</div>
             <div class="lane-num">Ab</div>
             <div class="lane-num">TF</div>

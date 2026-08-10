@@ -52,11 +52,20 @@
 .oe-chart-row-head{ font-family:var(--mono); font-size:12.5px; font-weight:700; display:flex; justify-content:space-between; align-items:baseline; padding:0 16px; }
 .axis.oe-chart-axis{ margin:2px 16px 4px; }
 
+.up-group-caption{ font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--text-muted); padding:10px 16px 4px; }
+.up-group-caption .win-label{ display:inline; font-weight:400; color:var(--text-faint); margin-left:8px; min-width:0; }
 .up-main-row .lane-name{ width:auto; min-width:46px; font-weight:700; }
 .up-main-row .lane-num{ width:36px; }
 .up-sub-row{ margin-top:4px; margin-bottom:0; }
 .up-sub-row .lane-name{ width:auto; min-width:46px; font-size:10.5px; font-weight:600; color:var(--text-muted); }
 .up-sub-row .lane-num{ width:36px; }
+
+/* Manuelle Zeitmessung (Strg+Klick), siehe umlaufpruefung.js wireMeasure() */
+.lane-track svg{ cursor:default; }
+.measure-cap-halo, .measure-line-halo{ stroke:#fff; stroke-width:3; }
+.measure-cap{ stroke:var(--text); stroke-width:1.4; }
+.measure-line{ stroke:var(--text); stroke-width:1.2; stroke-dasharray:2,2; }
+.measure-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:var(--text); text-anchor:middle; paint-order:stroke; stroke:#fff; stroke-width:2.5px; }
 
 /* ---------- Grünzeit-Trend / Wartezeit: Streudiagramm & CDF ---------- */
 .trend-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px 0; font-size:11.5px; color:var(--text-muted); flex-wrap:wrap; }

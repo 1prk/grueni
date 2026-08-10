@@ -1,7 +1,9 @@
 /* GZ.views.umlaufpruefung — Tab "Umlaufprüfung": eine Zeile je Umlauf (TX=0-
    Grenze) im Erscheinungsbild des Signalzeitendiagramms, aber jede Zeile auf
    ihren eigenen Umlauf skaliert (nicht auf ein gemeinsames Zeitfenster).
-   Detektoren/APW-Werte sind optional zuschaltbare Zusatzspuren je Umlauf.
+   Mehrere Signalgruppen gleichzeitig (je eine Hauptzeile), Detektoren/APW-
+   Werte/ÖV-Fahrzeiten sind optional zuschaltbare Zusatzspuren je Umlauf.
+   Jede Spur unterstützt eine manuelle Strg+Klick-Zeitmessung (siehe unten).
 
    Performance bei großen Aufzeichnungen (viele Umläufe/Messzeilen):
    - Alle Nachschlagevorgänge je Umlauf (Grünsegment, Signal-/Detektor-
@@ -30,10 +32,16 @@
   let els = null;
   let windowCount = 20, windowStartIdx = 0, showAll = false;
 
+  // Manuelle Zeitmessung (Strg+Klick): Zustand pro (Umlauf, Spur) über
+  // Render-Durchläufe hinweg - siehe wireMeasure()/measureClickHandler().
+  // Schlüssel: "<Umlaufindex>|<Spurart>|<Bezeichner>", Wert: {a, b} in ms
+  // (Unix-Zeit), b ist null solange nur eine Marke gesetzt ist.
+  let measurements = new Map();
+
   function init(root) {
     els = {
       root,
-      sgSelect: root.querySelector('#upSgSelect'),
+      sgChecks: root.querySelector('#upSgChecks'),
       detChecks: root.querySelector('#upDetChecks'),
       apwChecks: root.querySelector('#upApwChecks'),
       fzToggle: root.querySelector('#upFzToggle'),
@@ -80,13 +88,14 @@
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
     const { allStats, otherColumns } = a;
+    measurements = new Map();
 
-    const prevSg = els.sgSelect.value;
-    els.sgSelect.innerHTML = allStats.map(({ col }, i) => {
+    const prevSgChecked = new Set([...els.sgChecks.querySelectorAll('input:checked')].map(i => i.value));
+    els.sgChecks.innerHTML = allStats.map(({ col }, i) => {
       const label = col.beschreibung && col.beschreibung !== col.name ? `${col.name} – ${col.beschreibung}` : col.name;
-      return `<option value="${i}">${esc(label)}</option>`;
+      const checked = prevSgChecked.size ? prevSgChecked.has(String(i)) : i === 0;
+      return `<label class="det-check"><input type="checkbox" value="${i}" ${checked ? 'checked' : ''}> ${esc(label)}</label>`;
     }).join('');
-    if (prevSg && allStats[prevSg]) els.sgSelect.value = prevSg;
 
     const detCols = otherColumns.filter(c => c.kuerzel === 'DET');
     els.detChecks.innerHTML = detCols.length
@@ -114,7 +123,7 @@
   }
 
   function wireEvents() {
-    els.sgSelect.onchange = render;
+    els.sgChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.detChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.apwChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.fzToggle.onchange = render;
@@ -126,40 +135,84 @@
     return { from, to: Math.min(from + windowCount, n) };
   }
 
-  function render() {
-    const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const { allStats, cycleStarts, tMax, times, splValues, seriesByCol, otherColumns } = a;
-    const sgIdx = Number(els.sgSelect.value);
-    const sgEntry = allStats[sgIdx];
+  /* ---------------- Manuelle Zeitmessung (Strg+Klick) ---------------- */
+  // 3-Klick-Zyklus je Spur: leer -> erste Marke -> zweite Marke (Differenz
+  // wird angezeigt) -> nächster Strg+Klick verwirft beide und beginnt an der
+  // geklickten Stelle neu. Zeiten werden auf die volle Sekunde gerundet.
+  function measureClickHandler(svgEl, wMin, wMax, key) {
+    return function (event) {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const width = svgEl.clientWidth;
+      if (!width) return;
+      const rect = svgEl.getBoundingClientRect();
+      const px = event.clientX - rect.left;
+      const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
+      let t = Math.round(x.invert(px) / 1000) * 1000;
+      t = Math.max(wMin, Math.min(wMax, t));
 
-    if (!sgEntry || !cycleStarts || cycleStarts.length < 2) {
-      els.tablePanel.style.display = 'none';
-      els.diagramControls.style.display = 'none';
-      els.hint.textContent = 'Zu wenige erkannte Umläufe (TX=0-Wechsel) für diese Auswertung.';
-      return;
-    }
+      const cur = measurements.get(key);
+      let next;
+      if (!cur || cur.a == null) next = { a: t, b: null };
+      else if (cur.b == null) next = { a: cur.a, b: t };
+      else next = { a: t, b: null };
+      measurements.set(key, next);
+      drawMeasureOverlay(svgEl, wMin, wMax, next);
+    };
+  }
 
-    const TU = computeGlobalTU(cycleStarts);
-    const { segs, stats } = sgEntry;
-    const flags = getFlaggedAnomalies(stats, GZ.state.anomalyCtx()); // parallel zu stats.greens
+  function drawMeasureOverlay(svgEl, wMin, wMax, mark) {
+    const width = svgEl.clientWidth, height = svgEl.clientHeight;
+    if (!width || !height) return;
+    const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
+    let g = d3.select(svgEl).select('g.measure-layer');
+    if (g.empty()) g = d3.select(svgEl).append('g').attr('class', 'measure-layer').style('pointer-events', 'none');
+    g.selectAll('*').remove();
+    if (!mark || mark.a == null) return;
 
-    const detIdxs = [...els.detChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
-    const apwIdxs = [...els.apwChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
-    const detCols = detIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
-    const apwCols = apwIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
+    const capTop = height * 0.12, capBot = height * 0.88;
+    const drawCap = (t) => {
+      const px = x(t);
+      g.append('line').attr('class', 'measure-cap-halo').attr('x1', px).attr('x2', px).attr('y1', capTop).attr('y2', capBot);
+      g.append('line').attr('class', 'measure-cap').attr('x1', px).attr('x2', px).attr('y1', capTop).attr('y2', capBot);
+    };
+    drawCap(mark.a);
+    if (mark.b == null) return;
+    drawCap(mark.b);
 
-    const detSegsByCol = new Map();
-    detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
+    const t0 = Math.min(mark.a, mark.b), t1 = Math.max(mark.a, mark.b);
+    const xa = x(t0), xb = x(t1);
+    [['measure-line-halo'], ['measure-line']].forEach(([cls]) => {
+      g.append('line').attr('class', cls).attr('x1', xa).attr('x2', xb).attr('y1', height / 2).attr('y2', height / 2);
+    });
+    const secs = Math.round((t1 - t0) / 1000);
+    g.append('text').attr('class', 'measure-label')
+      .attr('x', (xa + xb) / 2).attr('y', height / 2).attr('dy', '-4')
+      .text(`${secs}s`)
+      .append('title').text(`${fmtTimeShort(t0)}–${fmtTimeShort(t1)} (${secs}s)`);
+  }
 
-    // ÖV-Fahrzeiten (tFZ/ZwL): übernimmt die im Tab "ÖPNV" für diese
-    // Signalgruppe konfigurierten Zeilen (Sollfahrzeit/Zwangslöschzeit,
-    // An-/Abmeldedetektoren) und berechnet die Anmeldung/Abmeldung-Ereignisse
-    // einmal über die gesamte Aufzeichnung (wie die Detektor-Segmente oben),
-    // um sie anschließend je Umlauf-Fenster einzuschwenken.
-    const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
-    const oepnvRows = (fzEnabled && GZ.views.oepnvQa) ? GZ.views.oepnvQa.getRowsForSg(sgIdx) : [];
-    const fzData = oepnvRows.map(orow => {
+  // Nach jedem renderLane()-Aufruf: Klick-Handler (neu) verdrahten und den
+  // gespeicherten Messwert dieser Spur (falls vorhanden) neu einzeichnen -
+  // renderLane() leert das SVG bei jedem Aufruf, daher muss die Übermalung
+  // danach passieren, nicht davor.
+  function wireMeasure(svgEl, wMin, wMax, key) {
+    if (svgEl.__measureClickHandler) svgEl.removeEventListener('click', svgEl.__measureClickHandler, true);
+    const handler = measureClickHandler(svgEl, wMin, wMax, key);
+    svgEl.__measureClickHandler = handler;
+    svgEl.addEventListener('click', handler, true);
+    drawMeasureOverlay(svgEl, wMin, wMax, measurements.get(key));
+  }
+
+  /* ---------------- ÖV-Fahrzeiten je Signalgruppe ---------------- */
+  // Übernimmt die im Tab "ÖPNV" für die gegebene Signalgruppe konfigurierten
+  // Zeilen und berechnet die Anmeldung/Abmeldung-Ereignisse einmal über die
+  // gesamte Aufzeichnung (wie die Detektor-Segmente), für den Sweep je
+  // Umlauf-Fenster. Siehe computeOepnvEvents (GZ.oepnvLogic) für die Logik.
+  function buildFzRowsForSg(sgIdx, times, seriesByCol, splValues) {
+    const oepnvRows = GZ.views.oepnvQa ? GZ.views.oepnvQa.getRowsForSg(sgIdx) : [];
+    return oepnvRows.map(orow => {
       const anOccupied = times.map((_, i) => orow.anDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
       const abOccupied = times.map((_, i) => orow.abDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
       const { events, unresolved } = computeOepnvEvents(times, anOccupied, abOccupied, splValues, [], orow.sollfahrzeitSek, orow.zwangsloeschSek);
@@ -182,9 +235,57 @@
         fzSweep: makeIntervalSweep(fzSegs), zwlSweep: makeIntervalSweep(zwlSegs)
       };
     });
-    els.hint.textContent = (fzEnabled && oepnvRows.length === 0)
-      ? `Keine ÖPNV-Konfiguration für „${sgEntry.col.name}“ gefunden – bitte im Tab „ÖPNV“ eine Signalgruppe mit dieser Auswahl anlegen.`
+  }
+
+  function render() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const { allStats, cycleStarts, tMax, times, splValues, seriesByCol, otherColumns } = a;
+
+    if (!cycleStarts || cycleStarts.length < 2) {
+      els.tablePanel.style.display = 'none';
+      els.diagramControls.style.display = 'none';
+      els.hint.textContent = 'Zu wenige erkannte Umläufe (TX=0-Wechsel) für diese Auswertung.';
+      return;
+    }
+
+    const sgIdxs = [...els.sgChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
+    if (sgIdxs.length === 0) {
+      els.tablePanel.style.display = 'none';
+      els.diagramControls.style.display = 'none';
+      els.hint.textContent = 'Bitte mindestens eine Signalgruppe auswählen.';
+      return;
+    }
+
+    const TU = computeGlobalTU(cycleStarts);
+    const anomalyCtx = GZ.state.anomalyCtx();
+    const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
+
+    const sgData = sgIdxs.map(sgIdx => {
+      const sgEntry = allStats[sgIdx];
+      if (!sgEntry) return null;
+      const { segs, stats } = sgEntry;
+      return {
+        sgIdx, sgEntry, segs, stats,
+        flags: getFlaggedAnomalies(stats, anomalyCtx),
+        greenSweep: makeIndexSweep(stats.greens),
+        segSweep: makeIntervalSweep(segs),
+        fzRows: fzEnabled ? buildFzRowsForSg(sgIdx, times, seriesByCol, splValues) : []
+      };
+    }).filter(Boolean);
+
+    const missingFz = fzEnabled ? sgData.filter(sd => sd.fzRows.length === 0).map(sd => sd.sgEntry.col.name) : [];
+    els.hint.textContent = missingFz.length
+      ? `Keine ÖPNV-Konfiguration für: ${missingFz.join(', ')} – bitte im Tab „ÖPNV“ anlegen.`
       : '';
+
+    const detIdxs = [...els.detChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
+    const apwIdxs = [...els.apwChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
+    const detCols = detIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
+    const apwCols = apwIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
+
+    const detSegsByCol = new Map();
+    detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
 
     const n = cycleStarts.length;
     const { from, to } = windowRange(n);
@@ -198,8 +299,6 @@
     // Sweeps: bei aufsteigend durchlaufenen, disjunkten [start,end)-Fenstern
     // (ein Aufruf je sichtbarem Umlauf) amortisiert O(Datenmenge) statt eines
     // Vollscans pro Umlauf - siehe Datei-Kommentar oben.
-    const greenSweep = makeIndexSweep(stats.greens);
-    const segSweep = makeIntervalSweep(segs);
     const detSweeps = new Map();
     detCols.forEach(c => detSweeps.set(c.index, makeIntervalSweep(detSegsByCol.get(c.index))));
     let rowPtr = 0; // Zeiger in times[] für den APW-Rohwert-Sweep
@@ -211,18 +310,24 @@
       const spl = findSplAt(start, times, splValues) || '–';
       const tu = Math.round((end - start) / 1000);
 
-      const gIdx = greenSweep(start, end);
-      let an = '–', ab = '–', tf = '–', anomClass = '';
-      if (gIdx !== -1) {
-        const seg = TU ? computeSegmentAnAbTf(stats.greens[gIdx], cycleStarts, TU) : null;
-        if (seg) { an = seg.an; ab = seg.ab; tf = seg.tf; }
-        if (flags[gIdx]) anomClass = 'up-anom';
-      }
+      const sgRows = sgData.map(sd => {
+        const gIdx = sd.greenSweep(start, end);
+        let an = '–', ab = '–', tf = '–', anomClass = '';
+        if (gIdx !== -1) {
+          const seg = TU ? computeSegmentAnAbTf(sd.stats.greens[gIdx], cycleStarts, TU) : null;
+          if (seg) { an = seg.an; ab = seg.ab; tf = seg.tf; }
+          if (sd.flags[gIdx]) anomClass = 'up-anom';
+        }
+        return {
+          sgEntry: sd.sgEntry, an, ab, tf, anomClass,
+          visSegs: sd.segSweep(start, end),
+          fzVisSegs: sd.fzRows.map(fd => fd.fzSweep(start, end)),
+          zwlVisSegs: sd.fzRows.map(fd => fd.zwlSweep(start, end)),
+          fzRows: sd.fzRows
+        };
+      });
 
-      const visSegs = segSweep(start, end);
       const detVisSegs = detCols.map(c => detSweeps.get(c.index)(start, end));
-      const fzVisSegs = fzData.map(fd => fd.fzSweep(start, end));
-      const zwlVisSegs = fzData.map(fd => fd.zwlSweep(start, end));
 
       // Zeilenbereich [rowPtr, rowEnd) dieses Umlaufs in times[] - EIN
       // fortlaufender Sweep für alle APW-Spalten zusammen (statt je Spalte
@@ -251,35 +356,36 @@
         return `<span class="up-apw-pill ${cls}" title="${esc(label)}: ${info}">${esc(c.name)} ${symbol}</span>`;
       }).join(' ')}</div>` : '';
 
-      rowData.push({ i, start, end, spl, tu, an, ab, tf, anomClass, visSegs, detVisSegs, fzVisSegs, zwlVisSegs, apwHtml });
+      rowData.push({ i, start, end, spl, tu, sgRows, detVisSegs, apwHtml });
     }
 
     els.rows.innerHTML = rowData.map(r => `
       <div class="up-group">
+        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
+        ${r.sgRows.map(sr => `
         <div class="lane-row up-main-row">
-          <div class="lane-name" title="Start: ${esc(fmtTs(new Date(r.start)))}">#${r.i + 1}</div>
-          <div class="lane-num" title="Signalprogramm (SPL)">${esc(r.spl)}</div>
-          <div class="lane-num" title="Umlaufzeit [s]">${r.tu}</div>
-          <div class="lane-num" data-field="an" title="An [s]">${r.an}</div>
-          <div class="lane-num" data-field="ab" title="Ab [s]">${r.ab}</div>
-          <div class="lane-num ${r.anomClass}" data-field="tf" title="TF [s]${r.anomClass ? ' – auffällig' : ''}">${r.tf}</div>
+          <div class="lane-name" title="${esc(sr.sgEntry.col.beschreibung && sr.sgEntry.col.beschreibung !== sr.sgEntry.col.name ? sr.sgEntry.col.beschreibung : sr.sgEntry.col.name)}">${esc(sr.sgEntry.col.name)}</div>
+          <div class="lane-num" data-field="an" title="An [s]">${sr.an}</div>
+          <div class="lane-num" data-field="ab" title="Ab [s]">${sr.ab}</div>
+          <div class="lane-num ${sr.anomClass}" data-field="tf" title="TF [s]${sr.anomClass ? ' – auffällig' : ''}">${sr.tf}</div>
           <div class="lane-track"><svg></svg></div>
         </div>
+        ${sr.fzRows.map(fd => `
+        <div class="lane-row up-sub-row">
+          <div class="lane-name" title="Theoretische Fahrzeit (${esc(sr.sgEntry.col.name)} · ${esc(fd.label)}): Soll-Anteil und Verlustzeit-Anteil">↳tFZ ${esc(fd.label)}</div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-track up-sub-track"><svg></svg></div>
+        </div>
+        <div class="lane-row up-sub-row">
+          <div class="lane-name" title="Zwangslöschzeit-Fenster (${esc(sr.sgEntry.col.name)} · ${esc(fd.label)}): Anmeldung bis Zwangslöschzeit">↳ZwL ${esc(fd.label)}</div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-track up-sub-track"><svg></svg></div>
+        </div>`).join('')}
+        `).join('')}
         ${detCols.map(c => `
         <div class="lane-row up-sub-row">
           <div class="lane-name" title="${esc(c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name)}">↳${esc(c.name)}</div>
-          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
-          <div class="lane-track up-sub-track"><svg></svg></div>
-        </div>`).join('')}
-        ${fzData.map(fd => `
-        <div class="lane-row up-sub-row">
-          <div class="lane-name" title="Theoretische Fahrzeit (${esc(fd.label)}): Soll-Anteil und Verlustzeit-Anteil">↳tFZ ${esc(fd.label)}</div>
-          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
-          <div class="lane-track up-sub-track"><svg></svg></div>
-        </div>
-        <div class="lane-row up-sub-row">
-          <div class="lane-name" title="Zwangslöschzeit-Fenster (${esc(fd.label)}): Anmeldung bis Zwangslöschzeit">↳ZwL ${esc(fd.label)}</div>
-          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
         </div>`).join('')}
         ${r.apwHtml}
@@ -295,50 +401,62 @@
 
     rowData.forEach((r, idx) => {
       const group = groupEls[idx];
-      const mainSvg = group.querySelector('.up-main-row .lane-track svg');
-      renderLane(mainSvg, {
-        wMin: r.start, wMax: r.end, segs: r.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
-        width: mainSize.width, height: mainSize.height
-      });
+      const mainRowEls = group.querySelectorAll('.up-main-row');
       const subRows = group.querySelectorAll('.up-sub-row');
-      if (detCols.length) {
-        detCols.forEach((c, ci) => {
-          const subSvg = subRows[ci].querySelector('.lane-track svg');
-          renderLane(subSvg, {
-            wMin: r.start, wMax: r.end, segs: r.detVisSegs[ci],
-            baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+      let subCursor = 0;
+
+      r.sgRows.forEach((sr, si) => {
+        const mainSvg = mainRowEls[si].querySelector('.lane-track svg');
+        renderLane(mainSvg, {
+          wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
+          width: mainSize.width, height: mainSize.height
+        });
+        wireMeasure(mainSvg, r.start, r.end, `${r.i}|main|${sr.sgEntry.col.index}`);
+
+        sr.fzRows.forEach((fd, fi) => {
+          const fzSvg = subRows[subCursor].querySelector('.lane-track svg');
+          renderLane(fzSvg, {
+            wMin: r.start, wMax: r.end, segs: sr.fzVisSegs[fi],
+            baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
             width: subSize.width, height: subSize.height,
-            segTitle: s => `${esc(c.name)} – ${s.cat === 'BELEGT' ? 'Belegt' : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
+            fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
+            segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
+            segTitle: d => d.cat === 'FZ_SOLL'
+              ? `Sollfahrzeit: ${d.sollfahrzeitSek}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+              : `Verlustzeit: ${d.verlustSek.toFixed(1)}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
           });
+          wireMeasure(fzSvg, r.start, r.end, `${r.i}|fz|${sr.sgEntry.col.index}|${fi}`);
+          subCursor++;
+
+          const zwlSvg = subRows[subCursor].querySelector('.lane-track svg');
+          renderLane(zwlSvg, {
+            wMin: r.start, wMax: r.end, segs: sr.zwlVisSegs[fi],
+            baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+            width: subSize.width, height: subSize.height,
+            fillFor: () => 'url(#gz-pat-zwl)',
+            segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
+            segLabelColorFor: () => 'var(--text)',
+            segTitle: d => `Zwangslöschzeit-Fenster: ${d.zwangsloeschSek}s ab Anmeldung (Schwelle ${fmtTimeShort(d.end)})`
+          });
+          wireMeasure(zwlSvg, r.start, r.end, `${r.i}|zwl|${sr.sgEntry.col.index}|${fi}`);
+          subCursor++;
         });
-      }
-      fzData.forEach((fd, fi) => {
-        const fzSvg = subRows[detCols.length + fi * 2].querySelector('.lane-track svg');
-        renderLane(fzSvg, {
-          wMin: r.start, wMax: r.end, segs: r.fzVisSegs[fi],
-          baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+      });
+
+      detCols.forEach((c, ci) => {
+        const subSvg = subRows[subCursor].querySelector('.lane-track svg');
+        renderLane(subSvg, {
+          wMin: r.start, wMax: r.end, segs: r.detVisSegs[ci],
+          baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
           width: subSize.width, height: subSize.height,
-          fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
-          segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
-          segTitle: d => d.cat === 'FZ_SOLL'
-            ? `Sollfahrzeit: ${d.sollfahrzeitSek}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
-            : `Verlustzeit: ${d.verlustSek.toFixed(1)}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+          segTitle: s => `${esc(c.name)} – ${s.cat === 'BELEGT' ? 'Belegt' : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
         });
-        const zwlSvg = subRows[detCols.length + fi * 2 + 1].querySelector('.lane-track svg');
-        renderLane(zwlSvg, {
-          wMin: r.start, wMax: r.end, segs: r.zwlVisSegs[fi],
-          baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-          width: subSize.width, height: subSize.height,
-          fillFor: () => 'url(#gz-pat-zwl)',
-          segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
-          segLabelColorFor: () => 'var(--text)',
-          segTitle: d => `Zwangslöschzeit-Fenster: ${d.zwangsloeschSek}s ab Anmeldung (Schwelle ${fmtTimeShort(d.end)})`
-        });
+        wireMeasure(subSvg, r.start, r.end, `${r.i}|det|${c.index}`);
+        subCursor++;
       });
     });
 
-    els.sgLabel.textContent = sgEntry.col.beschreibung && sgEntry.col.beschreibung !== sgEntry.col.name
-      ? `${sgEntry.col.name} – ${sgEntry.col.beschreibung}` : sgEntry.col.name;
+    els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');
     els.info.textContent = `${n} Umlauf/Umläufe`;
     els.tablePanel.style.display = '';
   }
