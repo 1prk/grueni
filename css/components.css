@@ -165,10 +165,17 @@ tr.wz-unresolved td{ color:var(--sig-red); font-style:italic; }
 .los-bounds-row .los-bound-field{ display:flex; align-items:center; gap:4px; }
 .los-bounds-row input[type=number]{ width:52px; font-family:var(--mono); }
 tr.oe-excluded td{ color:var(--text-faint); font-style:italic; }
-tr.oe-abgemeldet td:nth-child(4), tr.oe-abgemeldet td:nth-child(8){ color:var(--sig-red); font-weight:700; }
+tr.oe-abgemeldet td:nth-child(5), tr.oe-abgemeldet td:nth-child(9){ color:var(--sig-red); font-weight:700; }
 tr.oe-unresolved td{ color:var(--sig-red); font-style:italic; }
 tr.oe-hidden{ display:none; }
 .table-search{ width:230px; }
+.table-head-tools{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.table-scroll{ overflow-x:auto; }
+.oe-sg-row{ border:1px solid var(--border); border-radius:var(--radius-md); margin:12px 16px 0; overflow:hidden; }
+.oe-sg-row-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 12px; background:var(--bg-surface-2); border-bottom:1px solid var(--border); }
+.oe-sg-row-head select{ font-weight:700; }
+.oe-row-remove{ font-size:11px; padding:4px 9px; color:var(--sig-red); border-color:var(--sig-red); }
+.oe-row-remove:hover{ background:var(--crit-bg); }
 
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }

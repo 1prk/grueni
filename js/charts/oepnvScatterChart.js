@@ -68,7 +68,8 @@
       .on('mouseenter', function (evt, d) {
         const tx = txAtTime(d.anTime, cycleStarts);
         const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : `LOS ${losStufe(d.verlustSek, losBounds)}`;
-        tooltip.show(`<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Ist-Fahrzeit: ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit: ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
+        const sgLine = d.sgLabel ? `<div>${esc(d.sgLabel)}</div>` : '';
+        tooltip.show(`${sgLine}<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Ist-Fahrzeit: ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit: ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
         tooltip.move(evt);
       })
       .on('mousemove', evt => tooltip.move(evt))
@@ -85,7 +86,8 @@
       .on('mouseenter', function (evt, d) {
         const tx = txAtTime(d.anTime, cycleStarts);
         const status = d.excluded ? `ausgeschlossen (SPL ${esc(d.spl)})` : 'zwangsgelöscht (keine Abmeldung)';
-        tooltip.show(`<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Zwangslöschung nach ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit ≥ ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
+        const sgLine = d.sgLabel ? `<div>${esc(d.sgLabel)}</div>` : '';
+        tooltip.show(`${sgLine}<div>Anmeldung ${fmtTimeShort(d.anTime)} (TX ${tx ?? '–'})</div><div>Zwangslöschung nach ${d.istFahrzeitSek.toFixed(1)}s · Verlustzeit ≥ ${d.verlustSek.toFixed(1)}s</div><div class="tt-dev">${status}</div>`);
         tooltip.move(evt);
       })
       .on('mousemove', evt => tooltip.move(evt))
