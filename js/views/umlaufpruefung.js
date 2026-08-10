@@ -254,12 +254,26 @@
     });
   }
 
-  // Filtern: liefert die Indizes aller Umläufe, in denen JEDE gewählte Spalte
-  // mindestens einen nicht-leeren Rohwert hat (UND-Verknüpfung über mehrere
-  // gewählte Spalten). Ein einmaliger Vollscan über die Aufzeichnung (wie die
-  // Detektor-/APW-Sweeps oben) statt pro Umlauf neu zu scannen.
-  function computeMatchingCycles(filterCols, cycleStarts, tMax, times, seriesByCol) {
+  // Filtern: liefert die Indizes aller Umläufe, die JEDE gewählte Spalte
+  // erfüllen (UND-Verknüpfung). Zwei Prüfarten je nach Spaltentyp:
+  // - SG (Signalgruppe): Rohwert ist praktisch immer durchgängig befüllt
+  //   (jede Sekunde ein Signalzustand) - "hat einen Rohwert" wäre also fast
+  //   immer wahr und würde nie etwas herausfiltern. Sinnvoll ist hier
+  //   stattdessen "hatte der Umlauf eine Freigabe (Grünphase) dieser SG?" -
+  //   dieselbe Prüfung, die auch An/Ab/TF je Umlauf verwendet (greenSweep
+  //   über die bereits vorberechneten stats.greens).
+  // - DET/APW/OEPNV (otherColumns): Lücken sind hier echte Information (kein
+  //   Fahrzeug/keine Anmeldung) - "mindestens ein nicht-leerer Rohwert im
+  //   Umlauf" bleibt die richtige Prüfung.
+  // Ein einmaliger Vollscan über die Aufzeichnung (wie die Detektor-/APW-
+  // Sweeps oben) statt pro Umlauf neu zu scannen.
+  function computeMatchingCycles(filterCols, allStats, cycleStarts, tMax, times, seriesByCol) {
     const n = cycleStarts.length;
+    const rawCols = filterCols.filter(c => c.kuerzel !== 'SG');
+    const greenSweeps = filterCols.filter(c => c.kuerzel === 'SG').map(c => {
+      const sgEntry = allStats.find(s => s.col.index === c.index);
+      return sgEntry ? makeIndexSweep(sgEntry.stats.greens) : () => -1;
+    });
     const matches = [];
     let ptr = 0;
     for (let i = 0; i < n; i++) {
@@ -269,14 +283,15 @@
       const rowFrom = ptr;
       while (ptr < times.length && times[ptr] < end) ptr++;
       const rowTo = ptr;
-      const ok = filterCols.every(c => {
+      const rawOk = rawCols.every(c => {
         const vals = seriesByCol.get(c.index);
         for (let k = rowFrom; k < rowTo; k++) {
           if ((vals[k] || '').trim() !== '') return true;
         }
         return false;
       });
-      if (ok) matches.push(i);
+      const greenOk = greenSweeps.every(sweep => sweep(start, end) !== -1);
+      if (rawOk && greenOk) matches.push(i);
     }
     return matches;
   }
@@ -329,8 +344,11 @@
     const detCols = detIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
     const apwCols = apwIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
     // Filter-Spalten können SG-Spalten (allStats) ODER otherColumns
-    // (DET/APW/OEPNV/…) sein - siehe populateControls().
-    const filterableCols = allStats.map(s => s.col).concat(otherColumns);
+    // (DET/APW/OEPNV/…) sein - siehe populateControls(). SG-Spalten führen
+    // von Haus aus kein "kuerzel"-Feld, daher hier (wie dort) synthetisch
+    // mit 'SG' getaggt - computeMatchingCycles() unterscheidet danach die
+    // Prüfart (Freigabe-Sweep vs. Rohwert-Scan).
+    const filterableCols = allStats.map(s => ({ ...s.col, kuerzel: 'SG' })).concat(otherColumns);
     const filterCols = filterIdxs.map(idx => filterableCols.find(c => c.index === idx)).filter(Boolean);
 
     const detSegsByCol = new Map();
@@ -349,7 +367,7 @@
     });
 
     const n = cycleStarts.length;
-    const matchingCycles = filterCols.length ? computeMatchingCycles(filterCols, cycleStarts, tMax, times, seriesByCol) : null;
+    const matchingCycles = filterCols.length ? computeMatchingCycles(filterCols, allStats, cycleStarts, tMax, times, seriesByCol) : null;
     const effectiveCount = matchingCycles ? matchingCycles.length : n;
     lastEffectiveCount = effectiveCount;
     const { from, to } = windowRange(effectiveCount);
