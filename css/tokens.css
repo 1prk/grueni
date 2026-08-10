@@ -34,6 +34,22 @@
   --crit-bg:#fbeaea;
   --crit-text:#a11f1f;
 
+  /* LOS-Stufen (Qualitätsstufen ÖPNV-Anmeldung), grün(gut)->rot(schlecht).
+     A/F erhalten wegen Kontrast weiße Chip-Schrift, B-E dunkle - siehe .los-chip. */
+  --los-a:#1f8a4c;
+  --los-b:#5da53c;
+  --los-c:#9aac1f;
+  --los-d:#e0a721;
+  --los-e:#c76a1f;
+  --los-f:#c0272b;
+
+  /* Umlaufprüfung: ÖV-Fahrzeiten-Zusatzspuren (Sollfahrzeit/Verlustzeit/
+     Zwangslöschzeit-Fenster) - bewusst kräftige, mit nichts sonst
+     kollidierende Farben (kein Rot/Grün/Gelb der Signalfarben, kein Blau
+     der Detektor-/Accent-Farbe, kein Lila der Anforderungs-Marker). */
+  --fz-soll:#0089a3;
+  --fz-verlust:#e6007e;
+
   --radius-sm:4px;
   --radius-md:8px;
   --radius-lg:14px;

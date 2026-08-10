@@ -132,9 +132,15 @@
       selectedIdx: GZ.state.data.selectedIdx,
       anomalyBandsFor: entry => computeAnomalyBands(entry.stats, cycleStarts, a.tMin, a.tMax, anomalyCtx),
       reqPointsFor: col => {
-        if (!wzActivePoints || wzActivePoints.colIndex !== col.index) return [];
-        const pts = wzActivePoints.times.map(t => ({ t, unresolved: false }));
-        if (wzActivePoints.unresolvedTime != null) pts.push({ t: wzActivePoints.unresolvedTime, unresolved: true });
+        const pts = [];
+        if (wzActivePoints && wzActivePoints.colIndex === col.index) {
+          pts.push(...wzActivePoints.times.map(t => ({ t, unresolved: false })));
+          if (wzActivePoints.unresolvedTime != null) pts.push({ t: wzActivePoints.unresolvedTime, unresolved: true });
+        }
+        (GZ.state.data.oepnvActivePoints || []).filter(p => p.colIndex === col.index).forEach(p => {
+          pts.push(...p.times.map(t => ({ t, unresolved: false })));
+          if (p.unresolvedTime != null) pts.push({ t: p.unresolvedTime, unresolved: true });
+        });
         return pts;
       },
       onGreenClick: () => {}
@@ -406,6 +412,7 @@
     GZ.state.data.window.startIdx = 0;
     GZ.state.data.window.showAll = false;
     GZ.state.data.wzActivePoints = null;
+    GZ.state.data.oepnvActivePoints = [];
     const winSizeVal = parseInt(els.winSize.value, 10);
     GZ.state.data.window.count = Number.isFinite(winSizeVal) && winSizeVal > 0 ? winSizeVal : 5;
     showPhaseOverlay = false;

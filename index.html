@@ -18,7 +18,6 @@
       <div class="brand-badge"><span class="b1"></span><span class="b2"></span><span class="b3"></span><span class="b4"></span></div>
       <div>
         <div class="brand-title">Grünzeitanalyse</div>
-        <div class="brand-sub">Knotenauswertung aus OCIT-Export · läuft vollständig lokal im Browser</div>
       </div>
     </div>
     <div class="toolbar">
@@ -49,6 +48,7 @@
     <button type="button" class="tab-btn" data-tab="sd">Stammdaten LSA</button>
     <button type="button" class="tab-btn" data-tab="pa">Phasenauswertung</button>
     <button type="button" class="tab-btn" data-tab="wz">Wartezeit ab Anforderung</button>
+    <button type="button" class="tab-btn" data-tab="oe">ÖPNV — Anmeldung/Abmeldung</button>
     <button type="button" class="tab-btn" data-tab="up">Umlaufprüfung</button>
   </nav>
 
@@ -89,7 +89,7 @@
               <span class="item"><span class="swatch" style="background:repeating-linear-gradient(90deg,#d8dce1 0 3px,#f2f4f6 3px 6px);border:1px dotted var(--border-strong)"></span>Datenlücke</span>
               <span class="item"><span class="swatch" style="background:var(--sig-yellow);height:4px;align-self:center;"></span>Auffälliger Umlauf</span>
               <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
-              <span class="item"><span class="swatch" style="background:var(--req-marker);border-radius:50%;width:9px;height:9px;"></span>Anforderungsbeginn (Detektor, siehe Tab „Wartezeit“)</span>
+              <span class="item"><span class="swatch" style="background:var(--req-marker);border-radius:50%;width:9px;height:9px;"></span>Anforderungsbeginn (Detektor/Anmeldung, siehe Tab „Wartezeit“ bzw. „ÖPNV“)</span>
             </div>
             <div class="lane-row lane-header" style="padding:10px 16px 0;">
               <div class="lane-name">Signalgr.</div>
@@ -332,6 +332,90 @@
       </div>
     </div>
 
+    <!-- ============== ÖPNV — Anmeldung/Abmeldung ============== -->
+    <div class="tab-panel" id="tab-oe">
+      <div class="view">
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>ÖPNV — Anmeldung/Abmeldung — Zuweisung</span>
+            <button type="button" id="oeAddSgBtn" class="btn">+ Signalgruppe hinzufügen</button>
+          </div>
+          <div id="oeSgRows"></div>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <label>QSV-Stufen <span class="cfg-field-hint">(Obergrenzen der Verlustzeit in Sekunden, QSV F = darüber, gilt für alle Signalgruppen)</span></label>
+              <div class="los-bounds-row">
+                <span class="los-bound-field"><span class="los-chip los-A">A</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="5"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-B">B</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="10"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-C">C</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="20"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-D">D</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="35"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-E">E</span> bis <input type="number" class="oe-los-bound" min="0" step="1" value="50"> s</span>
+                <span class="los-bound-field"><span class="los-chip los-F">F</span> darüber</span>
+              </div>
+              <div class="source-note">Orientierungswerte ohne Richtlinienbezug – maßgebliche Werte bitte selbst festlegen und hier eintragen.</div>
+            </div>
+            <div class="cfg-field">
+              <label>Ausgeschlossene SPL <span class="cfg-field-hint">(kommagetrennt, gilt für alle Signalgruppen)</span></label>
+              <div class="num-row"><input type="text" id="oeSplExcl" value="0,-1,-2"></div>
+            </div>
+          </div>
+          <div id="oeHint" class="hint"></div>
+        </div>
+
+        <div class="panel" id="oeRawPanel" style="display:none;">
+          <div class="panel-head">Rohpunkte — An-/Abmeldung im Zeitverlauf</div>
+          <div style="padding:12px 16px 2px;" id="oeRawRows"></div>
+          <div class="axis oe-raw-axis" id="oeRawAxis"><svg></svg></div>
+          <div class="chart-note">Alle erkannten Flanken der gewählten Anmelde-/Abmeldedetektor(en) je Signalgruppe, unabhängig von der Paarungslogik unten – zum schnellen Abgleich der Rohdaten.</div>
+        </div>
+
+        <div class="panel" id="oeKpiPanel" style="display:none;">
+          <div class="panel-head">Kennzahlen</div>
+          <div class="kpi-grid" id="oeKpiGrid"></div>
+          <div class="los-dist" id="oeLosDist"></div>
+          <div class="table-scroll" style="padding:0 16px 16px;" id="oeSgBreakdown"></div>
+        </div>
+
+        <div class="panel" id="oeChartPanel" style="display:none;">
+          <div class="panel-head">
+            <span>Anmeldungen im Zeitverlauf — je Signalgruppe</span>
+          </div>
+          <div class="legend">
+            <span class="item"><span class="swatch" style="background:var(--los-a);border-radius:50%;width:9px;height:9px;"></span>QSV A</span>
+            <span class="item"><span class="swatch" style="background:var(--los-b);border-radius:50%;width:9px;height:9px;"></span>QSV B</span>
+            <span class="item"><span class="swatch" style="background:var(--los-c);border-radius:50%;width:9px;height:9px;"></span>QSV C</span>
+            <span class="item"><span class="swatch" style="background:var(--los-d);border-radius:50%;width:9px;height:9px;"></span>QSV D</span>
+            <span class="item"><span class="swatch" style="background:var(--los-e);border-radius:50%;width:9px;height:9px;"></span>QSV E</span>
+            <span class="item"><span class="swatch" style="background:var(--los-f);border-radius:50%;width:9px;height:9px;"></span>QSV F</span>
+            <span class="item"><span class="swatch" style="background:var(--sig-dark);width:9px;height:9px;clip-path:polygon(50% 0,100% 100%,0 100%);"></span>Zwangsgelöscht (keine Abmeldung)</span>
+            <span class="item"><span class="swatch" style="background:var(--text-faint);border-radius:50%;width:9px;height:9px;opacity:.6;"></span>Ausgeschlossen (SPL)</span>
+            <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
+          </div>
+          <div id="oeChartRows"></div>
+          <div class="chart-note">Punkt anklicken, um im Signalzeitendiagramm zum betreffenden Umlauf zu springen.</div>
+        </div>
+
+        <div class="panel" id="oeTablePanel" style="display:none;">
+          <div class="panel-head">
+            <span>Anmelde-Ereignisse</span>
+            <div class="table-head-tools">
+              <input type="text" id="oeSearch" class="table-search" placeholder="Suchen (Zeit, SPL, Ergebnis, QSV, Punkt) …">
+              <button type="button" id="oeExportBtn" class="btn">Als Excel exportieren</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+          <table>
+            <thead id="oeTableHead"></thead>
+            <tbody id="oeEventsBody"></tbody>
+          </table>
+          </div>
+          <div class="chart-note" id="oeSearchInfo"></div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ============== Umlaufprüfung ============== -->
     <div class="tab-panel" id="tab-up">
       <div class="view">
@@ -340,8 +424,8 @@
           <div class="panel-head">Umlaufprüfung — Auswahl</div>
           <div class="cfg-grid">
             <div class="cfg-field">
-              <label for="upSgSelect">Signalgruppe</label>
-              <select id="upSgSelect"></select>
+              <label>Signalgruppe(n) <span class="cfg-field-hint">(mehrere = gestapelte Hauptzeilen je Umlauf)</span></label>
+              <div id="upSgChecks" class="det-checks"></div>
             </div>
             <div class="cfg-field">
               <label>Detektor(en) zuschalten <span class="cfg-field-hint">(Rohzustand als Mini-Zeitleiste je Umlauf)</span></label>
@@ -350,6 +434,14 @@
             <div class="cfg-field">
               <label>APW / ÖPNV-Wert zuschalten <span class="cfg-field-hint">(zeigt nur, ob sich der Wert im Umlauf geändert hat)</span></label>
               <div id="upApwChecks" class="det-checks"></div>
+            </div>
+            <div class="cfg-field">
+              <label>ÖV-Fahrzeiten zuschalten <span class="cfg-field-hint">(übernimmt die im Tab „ÖPNV“ für diese Signalgruppe konfigurierten Zeilen)</span></label>
+              <label class="det-check"><input type="checkbox" id="upFzToggle"> Sollfahrzeit/Verlustzeit + Zwangslöschzeit-Fenster anzeigen</label>
+            </div>
+            <div class="cfg-field">
+              <label>Filtern <span class="cfg-field-hint">(nur Umläufe anzeigen, in denen alle gewählten Spalten einen Wert haben)</span></label>
+              <div id="upFilterChecks" class="det-checks"></div>
             </div>
           </div>
           <div id="upHint" class="hint"></div>
@@ -379,11 +471,13 @@
             <span class="item"><span class="swatch" style="background:var(--text-faint);height:2px;align-self:center;"></span>Detektor frei (Grundlinie)</span>
             <span class="item"><span class="up-apw-pill changed" style="padding:0 5px;">APW ●</span> Wert im Umlauf geändert</span>
             <span class="item"><span class="up-anom" style="font-family:var(--mono);">26</span> Auffälliger Umlauf (TF)</span>
+            <span class="item"><span class="swatch" style="background:var(--fz-soll)"></span>tFZ: Sollfahrzeit-Anteil</span>
+            <span class="item"><span class="swatch" style="background:var(--fz-verlust)"></span>tFZ: Verlustzeit-Anteil</span>
+            <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#fbd9ec 0 3px,var(--fz-verlust) 3px 4px)"></span>ZwL: Zwangslöschzeit-Fenster</span>
+            <span class="item"><span style="display:inline-block;width:16px;border-top:1.5px dashed var(--text);"></span>Strg+Klick: manuelle Zeitmessung (2× klicken für Differenz)</span>
           </div>
           <div class="lane-row lane-header up-main-row" style="padding:8px 16px 0;">
-            <div class="lane-name">Umlauf</div>
-            <div class="lane-num">SPL</div>
-            <div class="lane-num">TU</div>
+            <div class="lane-name">Signalgruppe</div>
             <div class="lane-num">An</div>
             <div class="lane-num">Ab</div>
             <div class="lane-num">TF</div>
@@ -397,7 +491,6 @@
 
   </main>
 
-  <footer class="app-footer">Client-seitige Auswertung — keine Daten verlassen den Browser.</footer>
 </div>
 
 <script src="js/vendor/d3.v7.min.js"></script>
@@ -406,6 +499,8 @@
 <script src="js/core/parser.js"></script>
 <script src="js/core/segments.js"></script>
 <script src="js/core/wartezeitLogic.js"></script>
+<script src="js/core/oepnvLogic.js"></script>
+<script src="js/core/xlsxWriter.js"></script>
 <script src="js/core/phases.js"></script>
 <script src="js/core/sampleData.js"></script>
 <script src="js/state.js"></script>
@@ -414,6 +509,8 @@
 <script src="js/charts/timelineChart.js"></script>
 <script src="js/charts/trendChart.js"></script>
 <script src="js/charts/waitScatterChart.js"></script>
+<script src="js/charts/oepnvScatterChart.js"></script>
+<script src="js/charts/oepnvRawPointsChart.js"></script>
 <script src="js/charts/phaseDurationChart.js"></script>
 <script src="js/charts/phaseOverlay.js"></script>
 <script src="js/views/navigator.js"></script>
@@ -421,6 +518,7 @@
 <script src="js/views/stammdatenLsa.js"></script>
 <script src="js/views/phasenauswertung.js"></script>
 <script src="js/views/wartezeit.js"></script>
+<script src="js/views/oepnvQa.js"></script>
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/app.js"></script>
 </body>

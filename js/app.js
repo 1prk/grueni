@@ -13,6 +13,7 @@
     gz: () => GZ.views.gruenzeitanalyse.refresh(),
     pa: () => GZ.views.phasenauswertung.refresh(),
     wz: () => GZ.views.wartezeit.recompute(),
+    oe: () => GZ.views.oepnvQa.recompute(),
     up: () => GZ.views.umlaufpruefung.render()
   };
   let activeTab = 'gz';
@@ -86,6 +87,7 @@
     GZ.views.gruenzeitanalyse.onAnalyzeComplete();
     GZ.views.phasenauswertung.onAnalyzeComplete();
     GZ.views.wartezeit.populateControls();
+    GZ.views.oepnvQa.populateControls();
     GZ.views.umlaufpruefung.populateControls();
 
     els.btnExport.disabled = false;
@@ -105,6 +107,7 @@
     GZ.views.stammdatenLsa.init(document.getElementById('tab-sd'));
     GZ.views.phasenauswertung.init(document.getElementById('tab-pa'));
     GZ.views.wartezeit.init(document.getElementById('tab-wz'));
+    GZ.views.oepnvQa.init(document.getElementById('tab-oe'));
     GZ.views.umlaufpruefung.init(document.getElementById('tab-up'));
 
     document.getElementById('btnAnalyze').addEventListener('click', analyze);
