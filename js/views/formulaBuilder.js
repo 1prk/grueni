@@ -246,6 +246,42 @@
   // einem neuen Datenimport - siehe populateControls()).
   function getSyntheticColumns() { return syntheticCols; }
 
+  // Für die Konfiguration speichern/laden (siehe umlaufpruefung.js): Spalten
+  // werden über Kürzel+Name statt Rohindex referenziert (siehe GZ.configIO)
+  // - bleibt über neue Exports derselben Anlage hinweg gültig.
+  function getConfig() {
+    const cols = sourceCols();
+    return {
+      vars: vars.map(v => {
+        const col = cols.find(c => c.index === v.colIndex);
+        return { alias: v.alias, colKuerzel: col ? col.kuerzel : null, colName: col ? col.name : null };
+      }),
+      formulas: formulas.map(f => ({ name: f.name, exprText: f.exprText }))
+    };
+  }
+
+  // Setzt Variablen/Formeln aus einer geladenen Konfiguration und berechnet
+  // sofort (damit umlaufpruefung.js im Anschluss die dann existierenden
+  // FORMEL-Spalten in seiner eigenen applyConfig() by-Name auswählen kann -
+  // siehe dortige Aufrufreihenfolge). Spalten, die es in der aktuell
+  // geladenen CSV nicht (mehr) gibt, werden übersprungen und gemeldet statt
+  // die restliche Konfiguration abzubrechen.
+  function applyConfig(cfg) {
+    if (!cfg) return { skipped: [] };
+    const cols = sourceCols();
+    const skipped = [];
+    vars = (cfg.vars || []).map(v => {
+      const col = cols.find(c => c.kuerzel === v.colKuerzel && c.name === v.colName);
+      if (!col) skipped.push(`Variable „${v.alias}“ (Spalte „${v.colName}“ nicht gefunden)`);
+      return { id: nextVarId++, alias: v.alias, colIndex: col ? col.index : (cols.length ? cols[0].index : null) };
+    });
+    formulas = (cfg.formulas || []).map(f => ({ id: nextFormulaId++, name: f.name, exprText: f.exprText }));
+    renderVarRows();
+    renderFormulaRows();
+    berechnen();
+    return { skipped };
+  }
+
   GZ.views = GZ.views || {};
-  GZ.views.formulaBuilder = { init, populateControls, getSyntheticColumns };
+  GZ.views.formulaBuilder = { init, populateControls, getSyntheticColumns, getConfig, applyConfig };
 })(window.GZ = window.GZ || {});

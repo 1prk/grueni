@@ -421,7 +421,14 @@
       <div class="view">
 
         <div class="panel">
-          <div class="panel-head">Umlaufprüfung — Auswahl</div>
+          <div class="panel-head">
+            <span>Umlaufprüfung — Auswahl</span>
+            <div class="table-head-tools">
+              <button type="button" id="upConfigSaveBtn" class="btn" title="Auswahl, Filter und Formeln als JSON-Datei speichern (ohne Rohdaten)">Konfiguration speichern</button>
+              <label class="btn" for="upConfigLoadInput">Konfiguration laden …</label>
+              <input type="file" id="upConfigLoadInput" accept=".json" style="display:none;">
+            </div>
+          </div>
           <div class="cfg-grid">
             <div class="cfg-field">
               <label>Signalgruppe(n) <span class="cfg-field-hint">(mehrere = gestapelte Hauptzeilen je Umlauf)</span></label>
@@ -523,6 +530,7 @@
 <script src="js/core/wartezeitLogic.js"></script>
 <script src="js/core/oepnvLogic.js"></script>
 <script src="js/core/exprEngine.js"></script>
+<script src="js/core/configIO.js"></script>
 <script src="js/core/xlsxWriter.js"></script>
 <script src="js/core/phases.js"></script>
 <script src="js/core/sampleData.js"></script>

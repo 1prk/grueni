@@ -60,8 +60,17 @@
       winLabel: root.querySelector('#upWinLabel'),
       btnWinNext: root.querySelector('#upBtnWinNext'),
       winSize: root.querySelector('#upWinSize'),
-      btnWinAll: root.querySelector('#upBtnWinAll')
+      btnWinAll: root.querySelector('#upBtnWinAll'),
+      configSaveBtn: root.querySelector('#upConfigSaveBtn'),
+      configLoadInput: root.querySelector('#upConfigLoadInput')
     };
+
+    els.configSaveBtn.addEventListener('click', saveConfig);
+    els.configLoadInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (file) loadConfigFile(file);
+      e.target.value = '';
+    });
 
     els.btnWinPrev.addEventListener('click', () => {
       if (showAll) return;
@@ -148,6 +157,116 @@
     refreshDetChecks();
     refreshFilterChecks();
     render();
+  }
+
+  /* ---------------- Konfiguration speichern/laden (JSON) ----------------
+     Spaltenverweise (Kürzel+Name statt Rohindex, siehe GZ.configIO) statt
+     Rohdaten - eine gespeicherte Konfiguration bleibt so über neue Exports
+     derselben Anlage hinweg anwendbar, auch wenn sich Spaltenindizes/
+     Zeilenzahl ändern. Enthält NICHT die CSV selbst (bis zu 100k Zeilen). */
+  function checkedNames(containerEl, colsForLookup) {
+    return [...containerEl.querySelectorAll('input:checked')].map(i => {
+      const col = colsForLookup.find(c => c.index === Number(i.value));
+      return col ? { kuerzel: col.kuerzel, name: col.name } : null;
+    }).filter(Boolean);
+  }
+
+  function applyCheckedNames(containerEl, colsForLookup, saved, skipped, label) {
+    const wanted = new Map((saved || []).map(ref => [ref.kuerzel + '|' + ref.name, ref]));
+    containerEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      const col = colsForLookup.find(c => c.index === Number(cb.value));
+      cb.checked = !!(col && wanted.has(col.kuerzel + '|' + col.name));
+    });
+    wanted.forEach(ref => {
+      if (!colsForLookup.find(c => c.kuerzel === ref.kuerzel && c.name === ref.name)) {
+        skipped.push(`${label} „${ref.name}“`);
+      }
+    });
+  }
+
+  function getConfig() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return null;
+    const sgCols = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', name: col.name, index: i }));
+    const detAll = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
+    const apwAll = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
+    const filterAll = sgCols.concat(a.otherColumns).concat(formulaCols());
+    return {
+      sgCols: checkedNames(els.sgChecks, sgCols),
+      detCols: checkedNames(els.detChecks, detAll),
+      apwCols: checkedNames(els.apwChecks, apwAll),
+      filterCols: checkedNames(els.filterChecks, filterAll),
+      fzEnabled: !!(els.fzToggle && els.fzToggle.checked),
+      windowSize: windowCount
+    };
+  }
+
+  // Reihenfolge wichtig: wird von loadConfigFile() erst NACH
+  // GZ.views.formulaBuilder.applyConfig() aufgerufen, damit ggf. gespeicherte
+  // FORMEL-Auswahlen bereits existierende, neu berechnete Spalten vorfinden.
+  function applyConfig(cfg) {
+    if (!cfg) return { skipped: [] };
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return { skipped: ['Keine Daten geladen'] };
+    const skipped = [];
+
+    const sgCols = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', name: col.name, index: i }));
+    applyCheckedNames(els.sgChecks, sgCols, cfg.sgCols, skipped, 'Signalgruppe');
+
+    const detAll = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
+    applyCheckedNames(els.detChecks, detAll, cfg.detCols, skipped, 'Detektor/Formel');
+
+    const apwAll = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
+    applyCheckedNames(els.apwChecks, apwAll, cfg.apwCols, skipped, 'APW/ÖPNV-Wert');
+
+    const filterAll = sgCols.concat(a.otherColumns).concat(formulaCols());
+    applyCheckedNames(els.filterChecks, filterAll, cfg.filterCols, skipped, 'Filter');
+
+    if (els.fzToggle) els.fzToggle.checked = !!cfg.fzEnabled;
+    if (cfg.windowSize) { windowCount = cfg.windowSize; els.winSize.value = windowCount; }
+    windowStartIdx = 0;
+
+    render();
+    return { skipped };
+  }
+
+  function saveConfig() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const cfg = {
+      version: 1,
+      fingerprint: GZ.configIO.buildFingerprint(a),
+      umlaufpruefung: getConfig(),
+      formulaBuilder: GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getConfig() : null
+    };
+    GZ.configIO.downloadJson('umlaufpruefung_konfiguration.json', cfg);
+  }
+
+  async function loadConfigFile(file) {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) { els.hint.textContent = 'Bitte zuerst Daten laden/analysieren.'; els.hint.className = 'hint warn'; return; }
+    let cfg;
+    try { cfg = await GZ.configIO.readJsonFile(file); }
+    catch (e) { els.hint.textContent = e.message; els.hint.className = 'hint warn'; return; }
+
+    const match = GZ.configIO.fingerprintMatches(cfg.fingerprint, a);
+    const notes = [];
+    if (!match.exact) {
+      notes.push(match.columnsMatch
+        ? 'Spaltenstruktur passt, aber andere Aufzeichnung (Zeitraum/Zeilenzahl weichen ab) – Zuordnung erfolgte über Spaltennamen.'
+        : 'Spaltenstruktur weicht von der gespeicherten Konfiguration ab – ggf. nicht alle Einstellungen übernommen.');
+    }
+
+    // Formeln ZUERST anwenden + berechnen, damit applyConfig() unten
+    // gespeicherte FORMEL-Auswahlen in der bereits aktualisierten
+    // Detektor-/Filterliste wiederfinden kann.
+    const formulaSkipped = GZ.views.formulaBuilder ? GZ.views.formulaBuilder.applyConfig(cfg.formulaBuilder).skipped : [];
+    const upSkipped = applyConfig(cfg.umlaufpruefung).skipped;
+
+    const allSkipped = formulaSkipped.concat(upSkipped);
+    els.hint.textContent = ['Konfiguration geladen.', ...notes, allSkipped.length ? `Nicht gefunden: ${allSkipped.join(', ')}.` : '']
+      .filter(Boolean).join(' ');
+    els.hint.className = 'hint' + ((notes.length || allSkipped.length) ? ' warn' : '');
   }
 
   function populateControls() {
