@@ -435,6 +435,10 @@
               <label>APW / ÖPNV-Wert zuschalten <span class="cfg-field-hint">(zeigt nur, ob sich der Wert im Umlauf geändert hat)</span></label>
               <div id="upApwChecks" class="det-checks"></div>
             </div>
+            <div class="cfg-field">
+              <label>ÖV-Fahrzeiten zuschalten <span class="cfg-field-hint">(übernimmt die im Tab „ÖPNV“ für diese Signalgruppe konfigurierten Zeilen)</span></label>
+              <label class="det-check"><input type="checkbox" id="upFzToggle"> Sollfahrzeit/Verlustzeit + Zwangslöschzeit-Fenster anzeigen</label>
+            </div>
           </div>
           <div id="upHint" class="hint"></div>
         </div>
@@ -463,6 +467,9 @@
             <span class="item"><span class="swatch" style="background:var(--text-faint);height:2px;align-self:center;"></span>Detektor frei (Grundlinie)</span>
             <span class="item"><span class="up-apw-pill changed" style="padding:0 5px;">APW ●</span> Wert im Umlauf geändert</span>
             <span class="item"><span class="up-anom" style="font-family:var(--mono);">26</span> Auffälliger Umlauf (TF)</span>
+            <span class="item"><span class="swatch" style="background:var(--fz-soll)"></span>tFZ: Sollfahrzeit-Anteil</span>
+            <span class="item"><span class="swatch" style="background:var(--fz-verlust)"></span>tFZ: Verlustzeit-Anteil</span>
+            <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#fbd9ec 0 3px,var(--fz-verlust) 3px 4px)"></span>ZwL: Zwangslöschzeit-Fenster</span>
           </div>
           <div class="lane-row lane-header up-main-row" style="padding:8px 16px 0;">
             <div class="lane-name">Umlauf</div>

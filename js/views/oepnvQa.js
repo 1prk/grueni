@@ -84,6 +84,20 @@
     return a ? a.otherColumns.filter(c => c.kuerzel === 'DET') : [];
   }
 
+  // Lesezugriff für die Umlaufprüfung (ÖV-Fahrzeiten-Zusatzspuren): die hier
+  // konfigurierten Zeilen für eine gegebene Signalgruppe, mit aufgelösten
+  // Detektor-Spalten statt roher Indizes. Nur vollständig konfigurierte
+  // Zeilen (An- UND Abmeldedetektor gesetzt).
+  function getRowsForSg(sgIdx) {
+    const detCols = currentDetCols();
+    return rows.filter(r => r.sgIdx === sgIdx).map(r => ({
+      anDetCols: detCols.filter(c => r.anIdx.has(c.index)),
+      abDetCols: detCols.filter(c => r.abIdx.has(c.index)),
+      sollfahrzeitSek: r.sollfahrzeitSek,
+      zwangsloeschSek: r.zwangsloeschSek
+    })).filter(r => r.anDetCols.length > 0 && r.abDetCols.length > 0);
+  }
+
   function addRow() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -466,5 +480,5 @@
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.oepnvQa = { init, populateControls, recompute };
+  GZ.views.oepnvQa = { init, populateControls, recompute, getRowsForSg };
 })(window.GZ = window.GZ || {});

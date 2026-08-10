@@ -53,6 +53,15 @@
       .attr('width', 6).attr('height', 6).attr('patternUnits', 'userSpaceOnUse');
     pGap.append('rect').attr('width', 6).attr('height', 6).style('fill', '#f2f4f6');
     pGap.append('rect').attr('width', 3).attr('height', 6).style('fill', '#d8dce1');
+
+    // Zwangslöschzeit-Fenster (Umlaufprüfung, ÖV-Fahrzeiten): helle
+    // Referenz-Schraffur statt Volltonfarbe, um sie optisch von den
+    // tatsächlich gemessenen Soll-/Verlustzeit-Segmenten abzuheben.
+    const pZwl = defs.append('pattern').attr('id', 'gz-pat-zwl')
+      .attr('width', 7).attr('height', 7).attr('patternUnits', 'userSpaceOnUse')
+      .attr('patternTransform', 'rotate(45)');
+    pZwl.append('rect').attr('width', 7).attr('height', 7).style('fill', '#fbd9ec');
+    pZwl.append('rect').attr('width', 3).attr('height', 7).style('fill', 'var(--fz-verlust)');
   }
 
   function defaultTitle(s) {
@@ -63,7 +72,13 @@
 
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
   //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
-  //   width, height}
+  //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, width, height}
+  // segLabelFor(d)->string: optional centered text label per Segment (z.B.
+  //   Sekundenwert), automatisch ausgeblendet wenn das Segment zu schmal ist.
+  // segLabelColorFor(d)->string: optionale Textfarbe je Label (Default: weiß
+  //   über .seg-label), z.B. für Segmente mit hellem Schraffur-Untergrund.
+  // segOpacityFor(d)->number: optionale Deckkraft je Segment (z.B. für
+  //   ausgeschlossene ÖPNV-Ereignisse), gilt für Segment UND Label.
   // width/height optional: wenn nicht angegeben, wird der Container gemessen
   // (clientWidth/-Height erzwingt einen synchronen Reflow). Wer renderLane in
   // einer Schleife für viele Spuren gleicher Größe aufruft (z. B. Umlauf-
@@ -82,7 +97,7 @@
     const {
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
       baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
-      segTitle = defaultTitle, onGreenClick, fillFor
+      segTitle = defaultTitle, onGreenClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor
     } = opts;
 
     const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
@@ -102,8 +117,20 @@
       .attr('width', d => Math.max(x(Math.min(d.end, wMax)) - x(Math.max(d.start, wMin)), 1.2))
       .attr('height', height - 3)
       .style('fill', d => (fillFor && fillFor(d)) || CAT_FILL[d.cat] || '#9aa4b0')
+      .style('opacity', d => segOpacityFor ? segOpacityFor(d) : 1)
       .style('cursor', d => (d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default');
     segSel.append('title').text(segTitle);
+
+    if (segLabelFor) {
+      svg.append('g').attr('class', 'seg-labels').selectAll('text').data(visSegs).join('text')
+        .attr('class', 'seg-label')
+        .attr('x', d => (x(Math.max(d.start, wMin)) + x(Math.min(d.end, wMax))) / 2)
+        .attr('y', height / 2).attr('dy', '0.32em')
+        .style('opacity', d => (x(Math.min(d.end, wMax)) - x(Math.max(d.start, wMin))) >= 18 ? (segOpacityFor ? segOpacityFor(d) : 1) : 0)
+        .style('fill', d => (segLabelColorFor && segLabelColorFor(d)) || null)
+        .style('pointer-events', 'none')
+        .text(d => segLabelFor(d) || '');
+    }
 
     if (onGreenClick) {
       segSel.filter(d => d.cat === 'GRUEN').on('click', function (event, d) {

@@ -25,6 +25,7 @@
   } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
   const { renderLane } = GZ.charts.timelineLane;
+  const { wzIstBelegt, computeOepnvEvents } = GZ.oepnvLogic;
 
   let els = null;
   let windowCount = 20, windowStartIdx = 0, showAll = false;
@@ -35,6 +36,7 @@
       sgSelect: root.querySelector('#upSgSelect'),
       detChecks: root.querySelector('#upDetChecks'),
       apwChecks: root.querySelector('#upApwChecks'),
+      fzToggle: root.querySelector('#upFzToggle'),
       hint: root.querySelector('#upHint'),
       tablePanel: root.querySelector('#upTablePanel'),
       sgLabel: root.querySelector('#upSgLabel'),
@@ -115,6 +117,7 @@
     els.sgSelect.onchange = render;
     els.detChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.apwChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
+    els.fzToggle.onchange = render;
   }
 
   function windowRange(n) {
@@ -136,7 +139,6 @@
       els.hint.textContent = 'Zu wenige erkannte Umläufe (TX=0-Wechsel) für diese Auswertung.';
       return;
     }
-    els.hint.textContent = '';
 
     const TU = computeGlobalTU(cycleStarts);
     const { segs, stats } = sgEntry;
@@ -149,6 +151,40 @@
 
     const detSegsByCol = new Map();
     detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
+
+    // ÖV-Fahrzeiten (tFZ/ZwL): übernimmt die im Tab "ÖPNV" für diese
+    // Signalgruppe konfigurierten Zeilen (Sollfahrzeit/Zwangslöschzeit,
+    // An-/Abmeldedetektoren) und berechnet die Anmeldung/Abmeldung-Ereignisse
+    // einmal über die gesamte Aufzeichnung (wie die Detektor-Segmente oben),
+    // um sie anschließend je Umlauf-Fenster einzuschwenken.
+    const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
+    const oepnvRows = (fzEnabled && GZ.views.oepnvQa) ? GZ.views.oepnvQa.getRowsForSg(sgIdx) : [];
+    const fzData = oepnvRows.map(orow => {
+      const anOccupied = times.map((_, i) => orow.anDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
+      const abOccupied = times.map((_, i) => orow.abDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
+      const { events, unresolved } = computeOepnvEvents(times, anOccupied, abOccupied, splValues, [], orow.sollfahrzeitSek, orow.zwangsloeschSek);
+
+      const fzSegs = [];
+      const zwlSegs = [];
+      const addPair = (anTime, endTime) => {
+        const sollEnd = anTime + orow.sollfahrzeitSek * 1000;
+        fzSegs.push({ start: anTime, end: Math.min(sollEnd, endTime), cat: 'FZ_SOLL', sollfahrzeitSek: orow.sollfahrzeitSek });
+        if (endTime > sollEnd) {
+          fzSegs.push({ start: sollEnd, end: endTime, cat: 'FZ_VERLUST', verlustSek: (endTime - sollEnd) / 1000 });
+        }
+        zwlSegs.push({ start: anTime, end: anTime + orow.zwangsloeschSek * 1000, cat: 'ZWL_WINDOW', zwangsloeschSek: orow.zwangsloeschSek });
+      };
+      events.forEach(e => addPair(e.anTime, e.endTime));
+      if (unresolved) addPair(unresolved.startTime, unresolved.startTime + orow.sollfahrzeitSek * 1000);
+
+      return {
+        label: orow.anDetCols.map(c => c.name).join('+'),
+        fzSweep: makeIntervalSweep(fzSegs), zwlSweep: makeIntervalSweep(zwlSegs)
+      };
+    });
+    els.hint.textContent = (fzEnabled && oepnvRows.length === 0)
+      ? `Keine ÖPNV-Konfiguration für „${sgEntry.col.name}“ gefunden – bitte im Tab „ÖPNV“ eine Signalgruppe mit dieser Auswahl anlegen.`
+      : '';
 
     const n = cycleStarts.length;
     const { from, to } = windowRange(n);
@@ -185,6 +221,8 @@
 
       const visSegs = segSweep(start, end);
       const detVisSegs = detCols.map(c => detSweeps.get(c.index)(start, end));
+      const fzVisSegs = fzData.map(fd => fd.fzSweep(start, end));
+      const zwlVisSegs = fzData.map(fd => fd.zwlSweep(start, end));
 
       // Zeilenbereich [rowPtr, rowEnd) dieses Umlaufs in times[] - EIN
       // fortlaufender Sweep für alle APW-Spalten zusammen (statt je Spalte
@@ -213,7 +251,7 @@
         return `<span class="up-apw-pill ${cls}" title="${esc(label)}: ${info}">${esc(c.name)} ${symbol}</span>`;
       }).join(' ')}</div>` : '';
 
-      rowData.push({ i, start, end, spl, tu, an, ab, tf, anomClass, visSegs, detVisSegs, apwHtml });
+      rowData.push({ i, start, end, spl, tu, an, ab, tf, anomClass, visSegs, detVisSegs, fzVisSegs, zwlVisSegs, apwHtml });
     }
 
     els.rows.innerHTML = rowData.map(r => `
@@ -230,6 +268,17 @@
         ${detCols.map(c => `
         <div class="lane-row up-sub-row">
           <div class="lane-name" title="${esc(c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name)}">↳${esc(c.name)}</div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-track up-sub-track"><svg></svg></div>
+        </div>`).join('')}
+        ${fzData.map(fd => `
+        <div class="lane-row up-sub-row">
+          <div class="lane-name" title="Theoretische Fahrzeit (${esc(fd.label)}): Soll-Anteil und Verlustzeit-Anteil">↳tFZ ${esc(fd.label)}</div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-track up-sub-track"><svg></svg></div>
+        </div>
+        <div class="lane-row up-sub-row">
+          <div class="lane-name" title="Zwangslöschzeit-Fenster (${esc(fd.label)}): Anmeldung bis Zwangslöschzeit">↳ZwL ${esc(fd.label)}</div>
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
         </div>`).join('')}
@@ -251,8 +300,8 @@
         wMin: r.start, wMax: r.end, segs: r.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
         width: mainSize.width, height: mainSize.height
       });
+      const subRows = group.querySelectorAll('.up-sub-row');
       if (detCols.length) {
-        const subRows = group.querySelectorAll('.up-sub-row');
         detCols.forEach((c, ci) => {
           const subSvg = subRows[ci].querySelector('.lane-track svg');
           renderLane(subSvg, {
@@ -263,6 +312,29 @@
           });
         });
       }
+      fzData.forEach((fd, fi) => {
+        const fzSvg = subRows[detCols.length + fi * 2].querySelector('.lane-track svg');
+        renderLane(fzSvg, {
+          wMin: r.start, wMax: r.end, segs: r.fzVisSegs[fi],
+          baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+          width: subSize.width, height: subSize.height,
+          fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
+          segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
+          segTitle: d => d.cat === 'FZ_SOLL'
+            ? `Sollfahrzeit: ${d.sollfahrzeitSek}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+            : `Verlustzeit: ${d.verlustSek.toFixed(1)}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+        });
+        const zwlSvg = subRows[detCols.length + fi * 2 + 1].querySelector('.lane-track svg');
+        renderLane(zwlSvg, {
+          wMin: r.start, wMax: r.end, segs: r.zwlVisSegs[fi],
+          baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+          width: subSize.width, height: subSize.height,
+          fillFor: () => 'url(#gz-pat-zwl)',
+          segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
+          segLabelColorFor: () => 'var(--text)',
+          segTitle: d => `Zwangslöschzeit-Fenster: ${d.zwangsloeschSek}s ab Anmeldung (Schwelle ${fmtTimeShort(d.end)})`
+        });
+      });
     });
 
     els.sgLabel.textContent = sgEntry.col.beschreibung && sgEntry.col.beschreibung !== sgEntry.col.name

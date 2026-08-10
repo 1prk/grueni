@@ -89,6 +89,8 @@
 .trend-sub-head{ font-family:var(--mono); font-weight:700; font-size:13px; padding:10px 16px 0; }
 .trend-sub-desc{ font-family:var(--sans); font-weight:400; font-size:11px; color:var(--text-faint); }
 
+.seg-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; text-anchor:middle; }
+
 /* d3-drawn primitives shared across charts */
 .d3-axis-x .domain{ display:none; }
 .d3-axis-x .tick line{ display:none; }
