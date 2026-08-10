@@ -31,6 +31,7 @@
 
   let els = null;
   let windowCount = 20, windowStartIdx = 0, showAll = false;
+  let lastEffectiveCount = 0; // Anzahl Umläufe nach aktuellem Filter (für Fenster-Navigation)
 
   // Manuelle Zeitmessung (Strg+Klick): Zustand pro (Umlauf, Spur) über
   // Render-Durchläufe hinweg - siehe wireMeasure()/measureClickHandler().
@@ -45,6 +46,7 @@
       detChecks: root.querySelector('#upDetChecks'),
       apwChecks: root.querySelector('#upApwChecks'),
       fzToggle: root.querySelector('#upFzToggle'),
+      filterChecks: root.querySelector('#upFilterChecks'),
       hint: root.querySelector('#upHint'),
       tablePanel: root.querySelector('#upTablePanel'),
       sgLabel: root.querySelector('#upSgLabel'),
@@ -64,9 +66,8 @@
       render();
     });
     els.btnWinNext.addEventListener('click', () => {
-      const a = GZ.state.data.currentAnalysis;
-      if (showAll || !a || !a.cycleStarts) return;
-      const maxStart = Math.max(0, a.cycleStarts.length - 1);
+      if (showAll) return;
+      const maxStart = Math.max(0, lastEffectiveCount - 1);
       windowStartIdx = Math.min(maxStart, windowStartIdx + windowCount);
       render();
     });
@@ -113,6 +114,15 @@
         }).join('')
       : '<div class="cfg-empty">Keine APW-/ÖPNV-Wert-Spalten erkannt.</div>';
 
+    const prevFilterChecked = new Set([...els.filterChecks.querySelectorAll('input:checked')].map(i => i.value));
+    els.filterChecks.innerHTML = otherColumns.length
+      ? otherColumns.map(c => {
+          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
+          const checked = prevFilterChecked.has(String(c.index));
+          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> ${esc(label)}</label>`;
+        }).join('')
+      : '<div class="cfg-empty">Keine weiteren Spalten erkannt.</div>';
+
     windowStartIdx = 0;
     showAll = false;
     els.btnWinAll.textContent = 'Alle anzeigen';
@@ -127,6 +137,7 @@
     els.detChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.apwChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.fzToggle.onchange = render;
+    els.filterChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { windowStartIdx = 0; render(); });
   }
 
   function windowRange(n) {
@@ -237,6 +248,33 @@
     });
   }
 
+  // Filtern: liefert die Indizes aller Umläufe, in denen JEDE gewählte Spalte
+  // mindestens einen nicht-leeren Rohwert hat (UND-Verknüpfung über mehrere
+  // gewählte Spalten). Ein einmaliger Vollscan über die Aufzeichnung (wie die
+  // Detektor-/APW-Sweeps oben) statt pro Umlauf neu zu scannen.
+  function computeMatchingCycles(filterCols, cycleStarts, tMax, times, seriesByCol) {
+    const n = cycleStarts.length;
+    const matches = [];
+    let ptr = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptr < times.length && times[ptr] < start) ptr++;
+      const rowFrom = ptr;
+      while (ptr < times.length && times[ptr] < end) ptr++;
+      const rowTo = ptr;
+      const ok = filterCols.every(c => {
+        const vals = seriesByCol.get(c.index);
+        for (let k = rowFrom; k < rowTo; k++) {
+          if ((vals[k] || '').trim() !== '') return true;
+        }
+        return false;
+      });
+      if (ok) matches.push(i);
+    }
+    return matches;
+  }
+
   function render() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -281,30 +319,41 @@
 
     const detIdxs = [...els.detChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
     const apwIdxs = [...els.apwChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
+    const filterIdxs = [...els.filterChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
     const detCols = detIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
     const apwCols = apwIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
+    const filterCols = filterIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
 
     const detSegsByCol = new Map();
     detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
 
     const n = cycleStarts.length;
-    const { from, to } = windowRange(n);
+    const matchingCycles = filterCols.length ? computeMatchingCycles(filterCols, cycleStarts, tMax, times, seriesByCol) : null;
+    const effectiveCount = matchingCycles ? matchingCycles.length : n;
+    lastEffectiveCount = effectiveCount;
+    const { from, to } = windowRange(effectiveCount);
+    const cycleIdxList = matchingCycles ? matchingCycles.slice(from, to) : Array.from({ length: to - from }, (_, k) => from + k);
 
     els.diagramControls.style.display = 'flex';
-    els.winLabel.textContent = showAll ? `Gesamte Aufzeichnung (${n} Umläufe erkannt)` : `Umlauf ${from + 1}–${to} von ${n}`;
+    const filterSuffix = matchingCycles ? ` (gefiltert aus ${n})` : '';
+    els.winLabel.textContent = showAll
+      ? `Gesamte Aufzeichnung (${effectiveCount} Umläufe${filterSuffix})`
+      : `Umlauf ${from + 1}–${to} von ${effectiveCount}${filterSuffix}`;
     els.btnWinPrev.disabled = showAll || from <= 0;
-    els.btnWinNext.disabled = showAll || to >= n;
+    els.btnWinNext.disabled = showAll || to >= effectiveCount;
     els.winSize.disabled = showAll;
 
     // Sweeps: bei aufsteigend durchlaufenen, disjunkten [start,end)-Fenstern
     // (ein Aufruf je sichtbarem Umlauf) amortisiert O(Datenmenge) statt eines
-    // Vollscans pro Umlauf - siehe Datei-Kommentar oben.
+    // Vollscans pro Umlauf - siehe Datei-Kommentar oben. Bleibt auch bei
+    // gefilterten (nicht-zusammenhängenden) Umlaufindizes gültig, da diese
+    // weiterhin aufsteigend durchlaufen werden.
     const detSweeps = new Map();
     detCols.forEach(c => detSweeps.set(c.index, makeIntervalSweep(detSegsByCol.get(c.index))));
     let rowPtr = 0; // Zeiger in times[] für den APW-Rohwert-Sweep
 
     const rowData = [];
-    for (let i = from; i < to; i++) {
+    cycleIdxList.forEach(i => {
       const start = cycleStarts[i];
       const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
       const spl = findSplAt(start, times, splValues) || '–';
@@ -357,11 +406,21 @@
       }).join(' ')}</div>` : '';
 
       rowData.push({ i, start, end, spl, tu, sgRows, detVisSegs, apwHtml });
+    });
+
+    if (rowData.length === 0) {
+      els.rows.innerHTML = matchingCycles
+        ? '<div class="cfg-empty" style="padding:16px;">Keine Umläufe erfüllen den Filter.</div>'
+        : '';
+      els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');
+      els.info.textContent = `${n} Umlauf/Umläufe`;
+      els.tablePanel.style.display = '';
+      return;
     }
 
     els.rows.innerHTML = rowData.map(r => `
       <div class="up-group">
-        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
+        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">${fmtTimeShort(r.start)} · SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
         ${r.sgRows.map(sr => `
         <div class="lane-row up-main-row">
           <div class="lane-name" title="${esc(sr.sgEntry.col.beschreibung && sr.sgEntry.col.beschreibung !== sr.sgEntry.col.name ? sr.sgEntry.col.beschreibung : sr.sgEntry.col.name)}">${esc(sr.sgEntry.col.name)}</div>

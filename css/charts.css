@@ -54,10 +54,15 @@
 
 .up-group-caption{ font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--text-muted); padding:10px 16px 4px; }
 .up-group-caption .win-label{ display:inline; font-weight:400; color:var(--text-faint); margin-left:8px; min-width:0; }
-.up-main-row .lane-name{ width:auto; min-width:46px; font-weight:700; }
+/* Feste, gemeinsame Breite für Haupt- UND Unterzeilen (Detektor/tFZ/ZwL) -
+   sonst richten sich unterschiedlich lange Beschriftungen (z.B. "↳ZwL D1")
+   je Zeile individuell aus (width:auto) und die Spuren rutschen gegeneinander
+   versetzt ("eingerückt") statt bündig untereinander zu stehen. */
+.up-main-row .lane-name, .up-sub-row .lane-name{ width:118px; }
+.up-main-row .lane-name{ font-weight:700; }
 .up-main-row .lane-num{ width:36px; }
 .up-sub-row{ margin-top:4px; margin-bottom:0; }
-.up-sub-row .lane-name{ width:auto; min-width:46px; font-size:10.5px; font-weight:600; color:var(--text-muted); }
+.up-sub-row .lane-name{ font-size:10.5px; font-weight:600; color:var(--text-muted); }
 .up-sub-row .lane-num{ width:36px; }
 
 /* Manuelle Zeitmessung (Strg+Klick), siehe umlaufpruefung.js wireMeasure() */
