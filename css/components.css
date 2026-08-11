@@ -259,6 +259,13 @@ tr.oe-hidden{ display:none; }
    über dem farbigen Highlight-Layer und verdeckt ihn komplett. */
 input[type=text].expr-input{ position:relative; z-index:1; width:100%; line-height:1.4; background:transparent; color:transparent; caret-color:var(--text); }
 .expr-input::placeholder{ color:var(--text-faint); opacity:1; }
+/* Browser-Standard für ::selection ignoriert bei manchen Engines das
+   color:transparent des Elements und rendert markierten Text trotzdem
+   sichtbar (meist dunkel/weiß) - das lag dann ALS ZWEITE, überlappende
+   Textebene über der bereits farbigen Zeichenkette im Highlight-Layer
+   darunter ("objektektkt"-Effekt). Explizit erzwungen: markierter Text
+   bleibt unsichtbar, nur der Auswahl-Hintergrund selbst bleibt sichtbar. */
+.expr-input::selection{ color:transparent; background:rgba(47,111,163,.35); }
 .expr-palette-btn{
   flex-shrink:0; font-family:var(--mono); font-style:italic; font-weight:700; font-size:12px;
   padding:5px 9px; border:1px solid var(--border-strong); border-radius:var(--radius-sm);
