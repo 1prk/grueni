@@ -1,10 +1,17 @@
 /* GZ.views.umlaufpruefung — Tab "Umlaufprüfung": eine Zeile je Umlauf (TX=0-
    Grenze) im Erscheinungsbild des Signalzeitendiagramms, aber jede Zeile auf
    ihren eigenen Umlauf skaliert (nicht auf ein gemeinsames Zeitfenster).
-   Mehrere Signalgruppen gleichzeitig (je eine Hauptzeile), Detektoren/APW-
-   Werte/ÖV-Fahrzeiten sind optional zuschaltbare Zusatzspuren je Umlauf.
-   Synthetische Formel-Spalten (Formel-Builder, siehe formulaBuilder.js) laufen
-   als zusätzliche "Detektoren" mit eigener Farbe in derselben Liste mit.
+   Signalgruppen/Detektoren/APW-ÖPNV-Werte/synthetische Formel-Spalten
+   (Formel-Builder, siehe formulaBuilder.js) werden über EINE vereinheitlichte,
+   durchsuchbare Objekt-Liste ausgewählt (siehe allObjects()/#upObjList) - per
+   Ziehen am Griff links frei sortierbar (objectOrder/wireObjDrag()), diese
+   Reihenfolge bestimmt direkt die Spuren-Reihenfolge im Umlauf-Output unten
+   (Signalgruppen bleiben dabei optisch Hauptzeilen mit An/Ab/TF-Werten, alle
+   anderen schmalere Nebenspuren - beides kann aber frei miteinander
+   verschachtelt werden). Die Filterung, WELCHE Umläufe angezeigt werden, ist
+   bewusst eine separate Liste mit eigenen, typabhängigen Bedingungen
+   (Zustand-Gleichheit bzw. Zahlenvergleich, siehe filterRows/
+   computeMatchingCycles()) - unabhängig von der Objekt-Auswahl/Reihenfolge.
    Jede Spur unterstützt eine manuelle Strg+Klick-Zeitmessung (siehe unten)
    sowie ein Hover-Fadenkreuz über alle Spuren eines Umlaufs (TX in Sekunden).
 
@@ -36,6 +43,24 @@
   let windowCount = 20, windowStartIdx = 0, showAll = false;
   let lastEffectiveCount = 0; // Anzahl Umläufe nach aktuellem Filter (für Fenster-Navigation)
 
+  // Vereinheitlichte Objekt-Liste (SG/DET/APW/ÖPNV/FORMEL in EINER Liste,
+  // siehe allObjects()): objectOrder ist die Anzeige-/Ausgabe-Reihenfolge
+  // ALLER bekannten Objekte (angehakt oder nicht) als Array von Schlüsseln
+  // ("<Kürzel>|<Index>", siehe objKey()) - per Ziehen am Griff links neu
+  // anordenbar (wireObjDrag()), ausgewählt = im DOM angehakt (keine
+  // separate JS-Selektionsmenge, dieselbe Konvention wie die bisherigen
+  // Checklisten). Bleibt über Render-Durchläufe hinweg bestehen, wird nur
+  // bei neuem Datenimport zurückgesetzt (populateControls()) bzw. bei neuen
+  // Formel-Spalten/Konfigurations-Import abgeglichen (reconcileObjectOrder()).
+  let objectOrder = [];
+  // Filterbedingungen (separat von der Objekt-Auswahl/Reihenfolge oben) -
+  // jede Zeile UND-verknüpft: {id, key, op, value} - op/value-Bedeutung
+  // hängt vom Objekttyp ab (Zustand-Gleichheit für SG/DET/FORMEL,
+  // Vergleichsoperator+Zahl für APW/ÖPNV), siehe defaultCondFor()/
+  // computeMatchingCycles().
+  let filterRows = [];
+  let nextFilterId = 1;
+
   // Manuelle Zeitmessung (Strg+Klick): Zustand pro (Umlauf, Spur) über
   // Render-Durchläufe hinweg - siehe wireMeasure()/measureClickHandler().
   // Schlüssel: "<Umlaufindex>|<Spurart>|<Bezeichner>", Wert: {a, b} in ms
@@ -45,11 +70,11 @@
   function init(root) {
     els = {
       root,
-      sgChecks: root.querySelector('#upSgChecks'),
-      detChecks: root.querySelector('#upDetChecks'),
-      apwChecks: root.querySelector('#upApwChecks'),
+      objList: root.querySelector('#upObjList'),
+      objSearch: root.querySelector('#upObjSearch'),
       fzToggle: root.querySelector('#upFzToggle'),
-      filterChecks: root.querySelector('#upFilterChecks'),
+      filterRowsEl: root.querySelector('#upFilterRows'),
+      addFilterBtn: root.querySelector('#upAddFilterBtn'),
       hint: root.querySelector('#upHint'),
       tablePanel: root.querySelector('#upTablePanel'),
       sgLabel: root.querySelector('#upSgLabel'),
@@ -64,6 +89,16 @@
       configSaveBtn: root.querySelector('#upConfigSaveBtn'),
       configLoadInput: root.querySelector('#upConfigLoadInput')
     };
+
+    els.objSearch.addEventListener('input', applyObjSearch);
+    els.addFilterBtn.addEventListener('click', () => {
+      const objs = allObjects();
+      if (!objs.length) return;
+      const first = objs[0];
+      filterRows.push({ id: nextFilterId++, key: objKey(first), ...defaultCondFor(first.kuerzel) });
+      renderFilterRows();
+      windowStartIdx = 0; render();
+    });
 
     els.configSaveBtn.addEventListener('click', saveConfig);
     els.configLoadInput.addEventListener('change', e => {
@@ -105,57 +140,233 @@
     return GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getSyntheticColumns() : [];
   }
 
-  // Baut die "Detektor(en) zuschalten"-Liste aus echten DET-Spalten UND
-  // synthetischen Formel-Spalten (Kürzel FORMEL) - beide teilen sich dieselbe
-  // WAHR/FALSCH-Belegungslogik (categorizeDetRaw) und damit Anzeige-/Filter-
-  // Infrastruktur. Erhält den bisherigen Checkbox-Zustand, damit ein Klick
-  // auf "Berechnen" im Formel-Builder nicht die laufende Auswahl verwirft.
-  function refreshDetChecks() {
+  // Eindeutiger, stabiler (innerhalb einer Sitzung) Schlüssel für ein
+  // Objekt - SG-Spalten haben von Haus aus kein "kuerzel"-Feld, daher wie
+  // schon beim bisherigen Filter synthetisch mit 'SG' getaggt; ihr "index"
+  // ist die Position in allStats (nicht der rohe Spaltenindex), für DET/
+  // APW/OEPNV/FORMEL ist es der echte (bei FORMEL: SYNTH_INDEX_BASE+id,
+  // siehe formulaBuilder.js berechnen() - stabil über Neuberechnungen
+  // hinweg, solange die Formel-Zeile nicht gelöscht/neu angelegt wird)
+  // Spaltenindex.
+  function objKey(c) { return c.kuerzel + '|' + c.index; }
+
+  // Alle aktuell bekannten, in der vereinheitlichten Objekt-Liste wähl-
+  // baren Objekte (Signalgruppen, Detektoren, APW/ÖPNV-Werte, synthetische
+  // Formel-Spalten) - EINE gemeinsame Liste statt dreier getrennter
+  // (ersetzt die früheren separaten SG-/DET-/APW-Checklisten). Reihenfolge
+  // hier ist nur die "natürliche" Grundreihenfolge (Datenspalten, Formeln
+  // am Ende) - die tatsächliche Anzeige-/Ausgabe-Reihenfolge liefert
+  // objectOrder (siehe reconcileObjectOrder()).
+  function allObjects() {
     const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const cols = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
-    const prevChecked = new Set([...els.detChecks.querySelectorAll('input:checked')].map(i => i.value));
-    els.detChecks.innerHTML = cols.length
-      ? cols.map((c, i) => {
-          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
-          const checked = prevChecked.size ? prevChecked.has(String(c.index)) : i === 0;
-          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> <span class="filter-kuerzel">${esc(c.kuerzel)}</span> ${esc(label)}</label>`;
-        }).join('')
-      : '<div class="cfg-empty">Keine Detektor-Spalten (DET) in den Daten erkannt.</div>';
-    els.detChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
+    if (!a) return [];
+    const sg = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', index: i, name: col.name, beschreibung: col.beschreibung }));
+    const det = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
+    const apw = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
+    return sg.concat(det, apw);
   }
 
-  // Dito für die Filterliste (siehe computeMatchingCycles): Formel-Spalten
-  // sind wie SG-Spalten praktisch immer dicht befüllt (jede Sekunde ein
-  // Wert) - "hat einen Rohwert" wäre für sie sinnlos, daher unten mit
-  // eigenem kuerzel:'FORMEL' getaggt und in computeMatchingCycles per
-  // Belegt-Sweep statt Rohwert-Scan geprüft (derselbe Grund wie beim
-  // SG-Freigabe-Sweep).
-  function refreshFilterChecks() {
-    const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const { allStats, otherColumns } = a;
-    const sgFilterCols = allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' }));
-    const filterableCols = sgFilterCols.concat(otherColumns).concat(formulaCols());
-    const prevFilterChecked = new Set([...els.filterChecks.querySelectorAll('input:checked')].map(i => i.value));
-    els.filterChecks.innerHTML = filterableCols.length
-      ? filterableCols.map(c => {
-          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
-          const checked = prevFilterChecked.has(String(c.index));
-          return `<label class="det-check"><input type="checkbox" value="${c.index}" ${checked ? 'checked' : ''}> <span class="filter-kuerzel">${esc(c.kuerzel)}</span> ${esc(label)}</label>`;
-        }).join('')
-      : '<div class="cfg-empty">Keine weiteren Spalten erkannt.</div>';
-    els.filterChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { windowStartIdx = 0; render(); });
+  function isNumericKuerzel(kuerzel) { return kuerzel === 'APW' || kuerzel === 'OEPNV'; }
+  // DET und FORMEL teilen sich dieselbe WAHR/FALSCH-artige Belegungslogik
+  // (categorizeDetRaw) und damit dieselben Zustände (BELEGT/FREI).
+  function stateOptionsFor(kuerzel) {
+    const want = kuerzel === 'SG' ? 'KAT_SG' : 'KAT_DET';
+    return Object.keys(GZ.exprEngine.KAT_TOKENS).filter(k => GZ.exprEngine.KAT_TOKENS[k] === want);
+  }
+  function defaultCondFor(kuerzel) {
+    return isNumericKuerzel(kuerzel) ? { op: '>', value: 0 } : { op: '==', value: stateOptionsFor(kuerzel)[0] };
   }
 
-  // Nach "Berechnen" im Formel-Builder aufgerufen: Checklisten (die jetzt
-  // ggf. neue/geänderte Formel-Spalten enthalten) neu aufbauen und neu
-  // rendern - bewusst OHNE Fensterposition/Messungen zurückzusetzen (anders
-  // als populateControls() bei einem komplett neuen Datenimport).
+  // Gleicht objectOrder gegen die aktuell bekannten Objekte ab: bestehende
+  // Reihenfolge bleibt erhalten (auch für nicht angehakte Objekte), neue
+  // Objekte (z.B. gerade berechnete Formeln, oder aus einer geladenen
+  // Konfiguration übrig gebliebene) werden ans Ende angehängt, nicht mehr
+  // vorhandene (gelöschte Formel, neuer Datenimport mit anderen Spalten)
+  // entfernt. Idempotent - darf beliebig oft aufgerufen werden.
+  function reconcileObjectOrder(objs) {
+    const known = new Set(objs.map(objKey));
+    const kept = objectOrder.filter(k => known.has(k));
+    const keptSet = new Set(kept);
+    objs.forEach(o => { const k = objKey(o); if (!keptSet.has(k)) kept.push(k); });
+    objectOrder = kept;
+    return objectOrder;
+  }
+
+  // Baut die vereinheitlichte Objekt-Liste (#upObjList) aus objectOrder neu
+  // auf. explicitSelected (Set von Schlüsseln) überschreibt bei Bedarf den
+  // Auswahl-Zustand komplett (nur von applyConfig() beim Laden einer
+  // Konfiguration genutzt) - normalerweise wird der bisherige DOM-Zustand
+  // (angehakte Checkboxen) erhalten, wie schon bei den früheren
+  // Checklisten. Ohne jede Vorgeschichte (erstes Rendern nach Datenimport)
+  // ist nur die erste Signalgruppe vorausgewählt.
+  function renderObjList(explicitSelected) {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const objs = allObjects();
+    const hasExplicit = explicitSelected instanceof Set;
+    const hadRows = els.objList.querySelectorAll('.obj-row').length > 0;
+    const prevChecked = hasExplicit ? explicitSelected
+      : new Set([...els.objList.querySelectorAll('input:checked')].map(cb => cb.closest('.obj-row').dataset.key));
+    reconcileObjectOrder(objs);
+    const byKey = new Map(objs.map(o => [objKey(o), o]));
+    const rows = objectOrder.map(k => byKey.get(k)).filter(Boolean);
+
+    els.objList.innerHTML = rows.length ? rows.map(c => {
+      const key = objKey(c);
+      const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
+      const checked = (hasExplicit || hadRows) ? prevChecked.has(key) : (c.kuerzel === 'SG' && c.index === 0);
+      return `<div class="obj-row" data-key="${esc(key)}">
+        <span class="obj-drag" title="Ziehen zum Sortieren">⠿</span>
+        <label class="obj-row-label">
+          <input type="checkbox" ${checked ? 'checked' : ''}>
+          <span class="filter-kuerzel">${esc(c.kuerzel)}</span>
+          <span class="obj-row-name">${esc(label)}</span>
+        </label>
+      </div>`;
+    }).join('') : '<div class="obj-list-empty">Keine Objekte erkannt.</div>';
+
+    els.objList.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
+    wireObjDrag();
+    applyObjSearch();
+  }
+
+  // Reine Sichtbarkeits-Filterung der Liste nach Name/Kürzel - beeinflusst
+  // NICHT Auswahl oder Reihenfolge (siehe Nutzeranforderung: Suche dient
+  // nur dem schnelleren Finden eines Objekts in der Liste).
+  function applyObjSearch() {
+    if (!els || !els.objSearch) return;
+    const q = els.objSearch.value.trim().toLowerCase();
+    els.objList.querySelectorAll('.obj-row').forEach(row => {
+      const hay = row.querySelector('.obj-row-name').textContent.toLowerCase() + ' ' + row.querySelector('.filter-kuerzel').textContent.toLowerCase();
+      row.classList.toggle('obj-row-hidden', !!q && !hay.includes(q));
+    });
+  }
+
+  // Ziehen-zum-Sortieren per natives HTML5 Drag&Drop, nur vom Griff (.obj-
+  // drag) auslösbar: die Zeile selbst ist standardmäßig NICHT draggable
+  // (sonst würde ein Klick auf die Checkbox/den Namen versehentlich einen
+  // Drag statt eines Checkbox-Toggles/einer Textselektion auslösen) - erst
+  // ein mousedown auf dem Griff schaltet draggable für diese eine Zeile
+  // scharf, dragend schaltet es wieder aus. Während des Ziehens wird die
+  // gezogene Zeile LIVE an die Zielposition verschoben (einfaches, robustes
+  // Muster ohne zusätzliche Bibliothek); beim Ablegen wird die jetzt im DOM
+  // sichtbare Reihenfolge 1:1 in objectOrder übernommen und die Umlauf-
+  // Ausgabe neu gerendert. Zeilen- und Listen-Level-Handler sind getrennt:
+  // Zeilen werden bei jedem renderObjList() neu erzeugt (mousedown muss
+  // daher jedes Mal neu verdrahtet werden), der Listen-Container selbst
+  // bleibt bestehen (drag-/dragover/dragend nur EINMAL verdrahtet, per
+  // Event-Delegation über e.target.closest()).
+  function wireObjDrag() {
+    els.objList.querySelectorAll('.obj-drag').forEach(handle => {
+      handle.onmousedown = () => { const row = handle.closest('.obj-row'); if (row) row.draggable = true; };
+    });
+    if (els.objList.__dragWired) return;
+    els.objList.__dragWired = true;
+    els.objList.addEventListener('dragstart', e => {
+      const row = e.target.closest('.obj-row');
+      if (!row || !row.draggable) { e.preventDefault(); return; }
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', row.dataset.key); } catch (err) { /* Firefox braucht Daten, Chrome ist tolerant */ }
+    });
+    els.objList.addEventListener('dragover', e => {
+      const draggingRow = els.objList.querySelector('.obj-row.dragging');
+      if (!draggingRow) return;
+      e.preventDefault();
+      const overRow = e.target.closest('.obj-row');
+      if (!overRow || overRow === draggingRow) return;
+      const rect = overRow.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      overRow.parentNode.insertBefore(draggingRow, before ? overRow : overRow.nextSibling);
+    });
+    els.objList.addEventListener('dragend', () => {
+      els.objList.querySelectorAll('.obj-row').forEach(r => { r.draggable = false; r.classList.remove('dragging'); });
+      objectOrder = [...els.objList.querySelectorAll('.obj-row')].map(r => r.dataset.key);
+      render();
+    });
+  }
+
+  // Baut die Filterbedingungs-Zeilen (#upFilterRows) neu auf - separat von
+  // der Objekt-Liste oben (eigene Objekt-Auswahl je Zeile per <select>,
+  // unbeeinflusst von deren Sortierung/Suche). Je Zeile eine typabhängige
+  // Bedingung: Zustand-Gleichheit (SG/DET/FORMEL) oder Operator+Zahl (APW/
+  // ÖPNV) - siehe filterCondHtml()/computeMatchingCycles().
+  function renderFilterRows() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return;
+    const objs = allObjects();
+    const objsByKey = new Map(objs.map(o => [objKey(o), o]));
+    // Verwaiste Zeilen (Objekt existiert nicht mehr, z.B. gelöschte Formel
+    // oder neuer Datenimport) still entfernen statt kaputt anzuzeigen.
+    filterRows = filterRows.filter(fr => objsByKey.has(fr.key));
+
+    const groups = [
+      { label: 'Signalgruppen', items: objs.filter(o => o.kuerzel === 'SG') },
+      { label: 'Detektoren', items: objs.filter(o => o.kuerzel === 'DET') },
+      { label: 'Formeln', items: objs.filter(o => o.kuerzel === 'FORMEL') },
+      { label: 'APW/ÖPNV-Werte', items: objs.filter(o => isNumericKuerzel(o.kuerzel)) }
+    ].filter(g => g.items.length);
+
+    els.filterRowsEl.innerHTML = filterRows.length ? filterRows.map(fr => {
+      const c = objsByKey.get(fr.key);
+      const objOptions = groups.map(g => `<optgroup label="${esc(g.label)}">${g.items.map(o =>
+        `<option value="${esc(objKey(o))}" ${objKey(o) === fr.key ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</optgroup>`).join('');
+      return `<div class="up-filter-row" data-id="${fr.id}">
+        <select class="up-filter-obj">${objOptions}</select>
+        <span class="up-filter-cond">${filterCondHtml(c.kuerzel, fr)}</span>
+        <button type="button" class="oe-row-remove up-filter-remove">✕</button>
+      </div>`;
+    }).join('') : '<div class="cfg-empty">Keine Filterbedingungen – alle Umläufe werden angezeigt.</div>';
+
+    els.filterRowsEl.querySelectorAll('.up-filter-row').forEach(rowEl => {
+      const id = Number(rowEl.dataset.id);
+      const fr = filterRows.find(x => x.id === id);
+      if (!fr) return;
+      rowEl.querySelector('.up-filter-obj').onchange = e => {
+        const newC = objsByKey.get(e.target.value);
+        fr.key = e.target.value;
+        // Bedingungstyp kann beim Objektwechsel wechseln (Zustand <-> Zahl)
+        // - Operator/Wert auf einen für den NEUEN Typ sinnvollen Default
+        // zurücksetzen, statt einen jetzt bedeutungslosen alten Wert
+        // stehenzulassen.
+        Object.assign(fr, defaultCondFor(newC.kuerzel));
+        renderFilterRows();
+        windowStartIdx = 0; render();
+      };
+      const opSel = rowEl.querySelector('.up-filter-op');
+      if (opSel) opSel.onchange = e => { fr.op = e.target.value; windowStartIdx = 0; render(); };
+      const valNum = rowEl.querySelector('.up-filter-val');
+      if (valNum) valNum.onchange = e => { fr.value = Number(e.target.value); windowStartIdx = 0; render(); };
+      const valState = rowEl.querySelector('.up-filter-val-state');
+      if (valState) valState.onchange = e => { fr.value = e.target.value; windowStartIdx = 0; render(); };
+      rowEl.querySelector('.up-filter-remove').onclick = () => {
+        filterRows = filterRows.filter(x => x.id !== id);
+        renderFilterRows();
+        windowStartIdx = 0; render();
+      };
+    });
+  }
+
+  function filterCondHtml(kuerzel, fr) {
+    if (isNumericKuerzel(kuerzel)) {
+      const ops = ['=', '!=', '>', '>=', '<', '<='];
+      return `<select class="up-filter-op">${ops.map(o => `<option value="${esc(o)}" ${o === fr.op ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>
+        <input type="number" class="up-filter-val" value="${esc(String(fr.value ?? 0))}" step="any">`;
+    }
+    const opts = stateOptionsFor(kuerzel);
+    return `<span class="filter-kuerzel">Zustand =</span>
+      <select class="up-filter-val-state">${opts.map(o => `<option value="${esc(o)}" ${o === fr.value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  }
+
+  // Nach "Berechnen" im Formel-Builder aufgerufen: Objekt-Liste + Filter-
+  // zeilen (die jetzt ggf. neue/geänderte Formel-Spalten enthalten/
+  // referenzieren) neu aufbauen und neu rendern - bewusst OHNE Fenster-
+  // position/Messungen zurückzusetzen (anders als populateControls() bei
+  // einem komplett neuen Datenimport).
   function refreshFormulaColumns() {
     if (!els) return;
-    refreshDetChecks();
-    refreshFilterChecks();
+    renderObjList();
+    renderFilterRows();
     render();
   }
 
@@ -164,38 +375,26 @@
      Rohdaten - eine gespeicherte Konfiguration bleibt so über neue Exports
      derselben Anlage hinweg anwendbar, auch wenn sich Spaltenindizes/
      Zeilenzahl ändern. Enthält NICHT die CSV selbst (bis zu 100k Zeilen). */
-  function checkedNames(containerEl, colsForLookup) {
-    return [...containerEl.querySelectorAll('input:checked')].map(i => {
-      const col = colsForLookup.find(c => c.index === Number(i.value));
-      return col ? { kuerzel: col.kuerzel, name: col.name } : null;
-    }).filter(Boolean);
-  }
-
-  function applyCheckedNames(containerEl, colsForLookup, saved, skipped, label) {
-    const wanted = new Map((saved || []).map(ref => [ref.kuerzel + '|' + ref.name, ref]));
-    containerEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      const col = colsForLookup.find(c => c.index === Number(cb.value));
-      cb.checked = !!(col && wanted.has(col.kuerzel + '|' + col.name));
-    });
-    wanted.forEach(ref => {
-      if (!colsForLookup.find(c => c.kuerzel === ref.kuerzel && c.name === ref.name)) {
-        skipped.push(`${label} „${ref.name}“`);
-      }
-    });
-  }
-
+  // objects: EIN Array (statt dreier getrennter Listen) in objectOrder-
+  // Reihenfolge - jeder Eintrag trägt "selected" (angehakt?) mit, deckt
+  // also sowohl Auswahl als auch Reihenfolge ab. filters: eine Zeile je
+  // Filterbedingung (Objekt + Operator + Wert).
   function getConfig() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return null;
-    const sgCols = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', name: col.name, index: i }));
-    const detAll = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
-    const apwAll = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
-    const filterAll = sgCols.concat(a.otherColumns).concat(formulaCols());
+    const objs = allObjects();
+    const objsByKey = new Map(objs.map(o => [objKey(o), o]));
+    const checkedKeys = new Set([...els.objList.querySelectorAll('input:checked')].map(cb => cb.closest('.obj-row').dataset.key));
+    const objectsCfg = objectOrder.map(k => objsByKey.get(k)).filter(Boolean).map(c => ({
+      kuerzel: c.kuerzel, name: c.name, selected: checkedKeys.has(objKey(c))
+    }));
+    const filtersCfg = filterRows.map(fr => {
+      const c = objsByKey.get(fr.key);
+      return c ? { kuerzel: c.kuerzel, name: c.name, op: fr.op, value: fr.value } : null;
+    }).filter(Boolean);
     return {
-      sgCols: checkedNames(els.sgChecks, sgCols),
-      detCols: checkedNames(els.detChecks, detAll),
-      apwCols: checkedNames(els.apwChecks, apwAll),
-      filterCols: checkedNames(els.filterChecks, filterAll),
+      objects: objectsCfg,
+      filters: filtersCfg,
       fzEnabled: !!(els.fzToggle && els.fzToggle.checked),
       windowSize: windowCount
     };
@@ -204,28 +403,43 @@
   // Reihenfolge wichtig: wird von loadConfigFile() erst NACH
   // GZ.views.formulaBuilder.applyConfig() aufgerufen, damit ggf. gespeicherte
   // FORMEL-Auswahlen bereits existierende, neu berechnete Spalten vorfinden.
+  // Spaltenverweise werden wie zuvor über Kürzel+Name aufgelöst (nicht den
+  // rohen Index, der sich zwischen Aufzeichnungen ändern kann) - Objekte in
+  // der gespeicherten Konfiguration, die im aktuellen Datensatz nicht
+  // (mehr) existieren, landen in "skipped"; Objekte im aktuellen Datensatz,
+  // die die gespeicherte Konfiguration nicht kennt (z.B. seither neu
+  // berechnete Formel), werden von renderObjList()/reconcileObjectOrder()
+  // automatisch ans Ende angehängt.
   function applyConfig(cfg) {
     if (!cfg) return { skipped: [] };
     const a = GZ.state.data.currentAnalysis;
     if (!a) return { skipped: ['Keine Daten geladen'] };
     const skipped = [];
+    const objs = allObjects();
+    const byNameKey = new Map(objs.map(o => [o.kuerzel + '|' + o.name, o]));
 
-    const sgCols = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', name: col.name, index: i }));
-    applyCheckedNames(els.sgChecks, sgCols, cfg.sgCols, skipped, 'Signalgruppe');
+    const orderedKeys = [];
+    const selectedKeys = new Set();
+    (cfg.objects || []).forEach(ref => {
+      const c = byNameKey.get(ref.kuerzel + '|' + ref.name);
+      if (!c) { skipped.push(`Objekt „${ref.name}“`); return; }
+      orderedKeys.push(objKey(c));
+      if (ref.selected) selectedKeys.add(objKey(c));
+    });
+    objectOrder = orderedKeys;
 
-    const detAll = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
-    applyCheckedNames(els.detChecks, detAll, cfg.detCols, skipped, 'Detektor/Formel');
-
-    const apwAll = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
-    applyCheckedNames(els.apwChecks, apwAll, cfg.apwCols, skipped, 'APW/ÖPNV-Wert');
-
-    const filterAll = sgCols.concat(a.otherColumns).concat(formulaCols());
-    applyCheckedNames(els.filterChecks, filterAll, cfg.filterCols, skipped, 'Filter');
+    filterRows = (cfg.filters || []).map(f => {
+      const c = byNameKey.get(f.kuerzel + '|' + f.name);
+      if (!c) { skipped.push(`Filter „${f.name}“`); return null; }
+      return { id: nextFilterId++, key: objKey(c), op: f.op, value: f.value };
+    }).filter(Boolean);
 
     if (els.fzToggle) els.fzToggle.checked = !!cfg.fzEnabled;
     if (cfg.windowSize) { windowCount = cfg.windowSize; els.winSize.value = windowCount; }
     windowStartIdx = 0;
 
+    renderObjList(selectedKeys);
+    renderFilterRows();
     render();
     return { skipped };
   }
@@ -286,27 +500,16 @@
   function populateControls() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
-    const { allStats } = a;
     measurements = new Map();
+    // Kompletter Neustart der Objekt-Reihenfolge/Auswahl und Filter bei
+    // einem neuen Datenimport (reconcileObjectOrder() würde ohnehin nicht
+    // mehr existierende Schlüssel verwerfen, aber ein expliziter Reset ist
+    // klarer als sich darauf zu verlassen).
+    objectOrder = [];
+    filterRows = [];
 
-    const prevSgChecked = new Set([...els.sgChecks.querySelectorAll('input:checked')].map(i => i.value));
-    els.sgChecks.innerHTML = allStats.map(({ col }, i) => {
-      const label = col.beschreibung && col.beschreibung !== col.name ? `${col.name} – ${col.beschreibung}` : col.name;
-      const checked = prevSgChecked.size ? prevSgChecked.has(String(i)) : i === 0;
-      return `<label class="det-check"><input type="checkbox" value="${i}" ${checked ? 'checked' : ''}> ${esc(label)}</label>`;
-    }).join('');
-
-    refreshDetChecks();
-
-    const apwCols = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
-    els.apwChecks.innerHTML = apwCols.length
-      ? apwCols.map(c => {
-          const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
-          return `<label class="det-check"><input type="checkbox" value="${c.index}"> ${esc(label)}</label>`;
-        }).join('')
-      : '<div class="cfg-empty">Keine APW-/ÖPNV-Wert-Spalten erkannt.</div>';
-
-    refreshFilterChecks();
+    renderObjList();
+    renderFilterRows();
 
     windowStartIdx = 0;
     showAll = false;
@@ -318,8 +521,6 @@
   }
 
   function wireEvents() {
-    els.sgChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
-    els.apwChecks.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = render);
     els.fzToggle.onchange = render;
   }
 
@@ -489,35 +690,39 @@
     });
   }
 
-  // Filtern: liefert die Indizes aller Umläufe, die JEDE gewählte Spalte
-  // erfüllen (UND-Verknüpfung). Drei Prüfarten je nach Spaltentyp:
-  // - SG (Signalgruppe): Rohwert ist praktisch immer durchgängig befüllt
-  //   (jede Sekunde ein Signalzustand) - "hat einen Rohwert" wäre also fast
-  //   immer wahr und würde nie etwas herausfiltern. Sinnvoll ist hier
-  //   stattdessen "hatte der Umlauf eine Freigabe (Grünphase) dieser SG?" -
-  //   dieselbe Prüfung, die auch An/Ab/TF je Umlauf verwendet (greenSweep
-  //   über die bereits vorberechneten stats.greens).
-  // - FORMEL (Formel-Builder): ebenfalls dicht befüllt (jede Sekunde WAHR
-  //   oder FALSCH, siehe formulaBuilder.js berechnen()) - aus demselben Grund
-  //   wie bei SG kein Rohwert-Scan, sondern "war die Formel irgendwann im
-  //   Umlauf WAHR?" (Belegt-Segmente überlappen das Umlauf-Fenster).
-  // - DET/APW/OEPNV (otherColumns): Lücken sind hier echte Information (kein
-  //   Fahrzeug/keine Anmeldung) - "mindestens ein nicht-leerer Rohwert im
-  //   Umlauf" bleibt die richtige Prüfung.
+  // Filtern: liefert die Indizes aller Umläufe, die JEDE Filterbedingung
+  // erfüllen (UND-Verknüpfung, siehe filterRows/renderFilterRows()). Zwei
+  // Prüfarten je nach Objekttyp:
+  // - Zustand (SG/DET/FORMEL): Segmente nach der gewählten Kategorie
+  //   filtern, dann existenziell prüfen ("war das Objekt irgendwann im
+  //   Umlauf in diesem Zustand?", per makeIntervalSweep) - für SG reicht
+  //   ein Filter der bereits vorhandenen allStats[i].segs (ALLE Zustände,
+  //   nicht nur die vorberechneten Grünphasen), für DET/FORMEL wie zuvor
+  //   ein frischer Segment-Aufbau über categorizeDetRaw.
+  // - Zahl (APW/ÖPNV): linearer Rohwert-Scan über die Zeilen des Umlaufs
+  //   gegen den gewählten Vergleichsoperator - Lücken/nicht-numerische
+  //   Rohwerte erfüllen nie eine Bedingung (Number('') ist NaN, jeder
+  //   Vergleich damit liefert false).
   // Ein einmaliger Vollscan über die Aufzeichnung (wie die Detektor-/APW-
   // Sweeps oben) statt pro Umlauf neu zu scannen.
-  function computeMatchingCycles(filterCols, allStats, cycleStarts, tMax, times, seriesByCol) {
+  function computeMatchingCycles(conditions, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) {
     const n = cycleStarts.length;
-    const rawCols = filterCols.filter(c => c.kuerzel !== 'SG' && c.kuerzel !== 'FORMEL');
-    const greenSweeps = filterCols.filter(c => c.kuerzel === 'SG').map(c => {
-      const sgEntry = allStats.find(s => s.col.index === c.index);
-      return sgEntry ? makeIndexSweep(sgEntry.stats.greens) : () => -1;
+    const numCmp = { '=': (a, b) => a === b, '!=': (a, b) => a !== b, '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b };
+    const stateSweeps = [];
+    const numChecks = [];
+    conditions.forEach(fr => {
+      const c = objsByKey.get(fr.key);
+      if (!c) return;
+      if (isNumericKuerzel(c.kuerzel)) {
+        numChecks.push({ index: c.index, op: fr.op, value: Number(fr.value) });
+      } else {
+        const segs = c.kuerzel === 'SG'
+          ? allStats[c.index].segs.filter(s => s.cat === fr.value)
+          : buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw).filter(s => s.cat === fr.value);
+        stateSweeps.push(makeIntervalSweep(segs));
+      }
     });
-    const belegtSweeps = filterCols.filter(c => c.kuerzel === 'FORMEL').map(c => {
-      const segs = buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw).filter(s => s.cat === 'BELEGT');
-      const sweep = makeIntervalSweep(segs);
-      return (start, end) => sweep(start, end).length > 0;
-    });
+
     const matches = [];
     let ptr = 0;
     for (let i = 0; i < n; i++) {
@@ -527,16 +732,17 @@
       const rowFrom = ptr;
       while (ptr < times.length && times[ptr] < end) ptr++;
       const rowTo = ptr;
-      const rawOk = rawCols.every(c => {
-        const vals = seriesByCol.get(c.index);
+      const stateOk = stateSweeps.every(sweep => sweep(start, end).length > 0);
+      const numOk = numChecks.every(({ index, op, value }) => {
+        const vals = seriesByCol.get(index);
+        const cmp = numCmp[op];
         for (let k = rowFrom; k < rowTo; k++) {
-          if ((vals[k] || '').trim() !== '') return true;
+          const num = Number((vals[k] || '').trim());
+          if (!Number.isNaN(num) && cmp(num, value)) return true;
         }
         return false;
       });
-      const greenOk = greenSweeps.every(sweep => sweep(start, end) !== -1);
-      const formulaOk = belegtSweeps.every(sweep => sweep(start, end));
-      if (rawOk && greenOk && formulaOk) matches.push(i);
+      if (stateOk && numOk) matches.push(i);
     }
     return matches;
   }
@@ -561,8 +767,22 @@
       return;
     }
 
-    const sgIdxs = [...els.sgChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
-    if (sgIdxs.length === 0) {
+    // Eine gemeinsame, geordnete Liste angehakter Objekte (SG UND DET/APW/
+    // OEPNV/FORMEL gemischt) statt dreier getrennter Checklisten - die
+    // Reihenfolge ergibt sich direkt aus der DOM-Reihenfolge der
+    // angehakten Checkboxen in #upObjList (per Ziehen am Griff sortierbar,
+    // siehe wireObjDrag()), sgRefs/traceRefs sind reine .filter()-
+    // Teilmengen davon und behalten daher dieselbe relative Reihenfolge -
+    // das treibt weiter unten die verschachtelte Zeilen-Reihenfolge.
+    const objsNow = allObjects();
+    const objsByKey = new Map(objsNow.map(o => [objKey(o), o]));
+    const objRefs = [...els.objList.querySelectorAll('input:checked')]
+      .map(cb => objsByKey.get(cb.closest('.obj-row').dataset.key))
+      .filter(Boolean);
+    const sgRefs = objRefs.filter(r => r.kuerzel === 'SG');
+    const traceRefs = objRefs.filter(r => r.kuerzel !== 'SG');
+
+    if (sgRefs.length === 0) {
       els.tablePanel.style.display = 'none';
       els.diagramControls.style.display = 'none';
       els.hint.textContent = 'Bitte mindestens eine Signalgruppe auswählen.';
@@ -573,7 +793,8 @@
     const anomalyCtx = GZ.state.anomalyCtx();
     const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
 
-    const sgData = sgIdxs.map(sgIdx => {
+    const sgData = sgRefs.map(r => {
+      const sgIdx = r.index;
       const sgEntry = allStats[sgIdx];
       if (!sgEntry) return null;
       const { segs, stats } = sgEntry;
@@ -591,36 +812,21 @@
       ? `Keine ÖPNV-Konfiguration für: ${missingFz.join(', ')} – bitte im Tab „ÖPNV“ anlegen.`
       : '';
 
-    const detIdxs = [...els.detChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
-    const apwIdxs = [...els.apwChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
-    const filterIdxs = [...els.filterChecks.querySelectorAll('input:checked')].map(i => Number(i.value));
-    const detCols = detIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
-    const apwCols = apwIdxs.map(idx => otherColumns.find(c => c.index === idx)).filter(Boolean);
-    // Filter-Spalten können SG-Spalten (allStats) ODER otherColumns
-    // (DET/APW/OEPNV/…) sein - siehe populateControls(). SG-Spalten führen
-    // von Haus aus kein "kuerzel"-Feld, daher hier (wie dort) synthetisch
-    // mit 'SG' getaggt - computeMatchingCycles() unterscheidet danach die
-    // Prüfart (Freigabe-Sweep vs. Rohwert-Scan).
-    const filterableCols = allStats.map(s => ({ ...s.col, kuerzel: 'SG' })).concat(otherColumns);
-    const filterCols = filterIdxs.map(idx => filterableCols.find(c => c.index === idx)).filter(Boolean);
-
-    const detSegsByCol = new Map();
-    detCols.forEach(c => detSegsByCol.set(c.index, buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw)));
-
-    // APW/ÖPNV-Rohwert-Spalten: ein Segment je zusammenhängendem Zeitabschnitt
-    // mit demselben Rohwert (cat = getrimmter Rohwert selbst statt einer
-    // festen Kategorie) - zeigt den Wert direkt an, statt nur "geändert?".
-    // idx je Segment (fortlaufend über die gesamte Spalte) treibt die
-    // alternierende Kontrastfarbe in fillFor unten.
-    const apwSegsByCol = new Map();
-    apwCols.forEach(c => {
-      const segs = buildSegments(times, seriesByCol.get(c.index), v => v.trim());
-      segs.forEach((s, idx) => { s.idx = idx; });
-      apwSegsByCol.set(c.index, segs);
+    // Nicht-SG-Spuren (DET/FORMEL/APW/OEPNV) - bis auf die Segmentierungs-
+    // Funktion (kind bestimmt außerdem die Darstellung beim SVG-Rendern
+    // weiter unten) identisch behandelt, damit sie sich frei mit den
+    // Signalgruppen verschachteln lassen.
+    const traceMeta = new Map();
+    traceRefs.forEach(r => {
+      const kind = isNumericKuerzel(r.kuerzel) ? 'apw' : (r.kuerzel === 'FORMEL' ? 'formula' : 'det');
+      const catFn = kind === 'apw' ? (v => v.trim()) : categorizeDetRaw;
+      const segs = buildSegments(times, seriesByCol.get(r.index), catFn);
+      if (kind === 'apw') segs.forEach((s, idx) => { s.idx = idx; });
+      traceMeta.set(objKey(r), { col: r, kind, sweep: makeIntervalSweep(segs) });
     });
 
     const n = cycleStarts.length;
-    const matchingCycles = filterCols.length ? computeMatchingCycles(filterCols, allStats, cycleStarts, tMax, times, seriesByCol) : null;
+    const matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
     const effectiveCount = matchingCycles ? matchingCycles.length : n;
     lastEffectiveCount = effectiveCount;
     const { from, to } = windowRange(effectiveCount);
@@ -634,16 +840,6 @@
     els.btnWinPrev.disabled = showAll || from <= 0;
     els.btnWinNext.disabled = showAll || to >= effectiveCount;
     els.winSize.disabled = showAll;
-
-    // Sweeps: bei aufsteigend durchlaufenen, disjunkten [start,end)-Fenstern
-    // (ein Aufruf je sichtbarem Umlauf) amortisiert O(Datenmenge) statt eines
-    // Vollscans pro Umlauf - siehe Datei-Kommentar oben. Bleibt auch bei
-    // gefilterten (nicht-zusammenhängenden) Umlaufindizes gültig, da diese
-    // weiterhin aufsteigend durchlaufen werden.
-    const detSweeps = new Map();
-    detCols.forEach(c => detSweeps.set(c.index, makeIntervalSweep(detSegsByCol.get(c.index))));
-    const apwSweeps = new Map();
-    apwCols.forEach(c => apwSweeps.set(c.index, makeIntervalSweep(apwSegsByCol.get(c.index))));
 
     const rowData = [];
     cycleIdxList.forEach(i => {
@@ -669,10 +865,12 @@
         };
       });
 
-      const detVisSegs = detCols.map(c => detSweeps.get(c.index)(start, end));
-      const apwVisSegs = apwCols.map(c => apwSweeps.get(c.index)(start, end));
+      const traceRows = traceRefs.map(r => {
+        const m = traceMeta.get(objKey(r));
+        return { col: m.col, kind: m.kind, visSegs: m.sweep(start, end) };
+      });
 
-      rowData.push({ i, start, end, spl, tu, sgRows, detVisSegs, apwVisSegs });
+      rowData.push({ i, start, end, spl, tu, sgRows, traceRows });
     });
 
     if (rowData.length === 0) {
@@ -685,18 +883,30 @@
       return;
     }
 
-    els.rows.innerHTML = rowData.map(r => `
-      <div class="up-group">
-        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">${fmtTimeShort(r.start)} · SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
-        ${r.sgRows.map(sr => `
+    // Zeilen-HTML je Umlauf-Gruppe: läuft EINMAL über objRefs (= die vom
+    // Nutzer festgelegte Anzeige-Reihenfolge) und zieht dabei abwechselnd
+    // aus sgRows/traceRows - deren relative Reihenfolge stimmt exakt mit
+    // sgRefs/traceRefs überein, da beide per .filter() aus derselben
+    // objRefs-Liste abgeleitet wurden. So lassen sich Signalgruppen und
+    // Detektor-/APW-/Formel-Spuren frei miteinander verschachteln statt in
+    // drei starren Blöcken zu erscheinen. Die ÖV-Fahrzeiten-Unterzeilen
+    // (tFZ/ZwL) bleiben dagegen fest an ihre Signalgruppe gebunden (kein
+    // eigener Eintrag in der Objekt-Liste) - daher weiterhin mit "↳"
+    // markiert; DET/APW/FORMEL sind jetzt gleichrangige Spuren, nicht mehr
+    // "unter" einer bestimmten Signalgruppe, daher ohne Pfeil-Präfix.
+    const laneRowsHtml = r => {
+      let sgCursor = 0, traceCursor = 0;
+      return objRefs.map(ref => {
+        if (ref.kuerzel === 'SG') {
+          const sr = r.sgRows[sgCursor++];
+          return `
         <div class="lane-row up-main-row">
           <div class="lane-name" title="${esc(sr.sgEntry.col.beschreibung && sr.sgEntry.col.beschreibung !== sr.sgEntry.col.name ? sr.sgEntry.col.beschreibung : sr.sgEntry.col.name)}">${esc(sr.sgEntry.col.name)}</div>
           <div class="lane-num" data-field="an" title="An [s]">${sr.an}</div>
           <div class="lane-num" data-field="ab" title="Ab [s]">${sr.ab}</div>
           <div class="lane-num ${sr.anomClass}" data-field="tf" title="TF [s]${sr.anomClass ? ' – auffällig' : ''}">${sr.tf}</div>
           <div class="lane-track"><svg></svg></div>
-        </div>
-        ${sr.fzRows.map(fd => `
+        </div>` + sr.fzRows.map(fd => `
         <div class="lane-row up-sub-row">
           <div class="lane-name" title="Theoretische Fahrzeit (${esc(sr.sgEntry.col.name)} · ${esc(fd.label)}): Soll-Anteil und Verlustzeit-Anteil">↳tFZ ${esc(fd.label)}</div>
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
@@ -706,20 +916,23 @@
           <div class="lane-name" title="Zwangslöschzeit-Fenster (${esc(sr.sgEntry.col.name)} · ${esc(fd.label)}): Anmeldung bis Zwangslöschzeit">↳ZwL ${esc(fd.label)}</div>
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
-        </div>`).join('')}
-        `).join('')}
-        ${detCols.map(c => `
+        </div>`).join('');
+        }
+        const tr = r.traceRows[traceCursor++];
+        const c = tr.col;
+        return `
         <div class="lane-row up-sub-row">
-          <div class="lane-name" title="${esc(c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name)}">↳${esc(c.name)}</div>
+          <div class="lane-name" title="${esc(c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name)}">${esc(c.name)}</div>
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
-        </div>`).join('')}
-        ${apwCols.map(c => `
-        <div class="lane-row up-sub-row">
-          <div class="lane-name" title="${esc(c.beschreibung && c.beschreibung !== c.name ? c.beschreibung : c.name)}">↳${esc(c.name)}</div>
-          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
-          <div class="lane-track up-sub-track"><svg></svg></div>
-        </div>`).join('')}
+        </div>`;
+      }).join('');
+    };
+
+    els.rows.innerHTML = rowData.map(r => `
+      <div class="up-group">
+        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">${fmtTimeShort(r.start)} · SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
+        ${laneRowsHtml(r)}
       </div>`).join('');
 
     // Größe je EINMAL messen (erzwingt Reflow) statt je Zeile - sonst
@@ -734,75 +947,78 @@
       const group = groupEls[idx];
       const mainRowEls = group.querySelectorAll('.up-main-row');
       const subRows = group.querySelectorAll('.up-sub-row');
-      let subCursor = 0;
+      let sgCursor = 0, subCursor = 0, traceCursor = 0;
 
-      r.sgRows.forEach((sr, si) => {
-        const mainSvg = mainRowEls[si].querySelector('.lane-track svg');
-        renderLane(mainSvg, {
-          wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
-          width: mainSize.width, height: mainSize.height
-        });
-        wireMeasure(mainSvg, r.start, r.end, `${r.i}|main|${sr.sgEntry.col.index}`);
-
-        sr.fzRows.forEach((fd, fi) => {
-          const fzSvg = subRows[subCursor].querySelector('.lane-track svg');
-          renderLane(fzSvg, {
-            wMin: r.start, wMax: r.end, segs: sr.fzVisSegs[fi],
-            baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height,
-            fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
-            segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
-            segTitle: d => d.cat === 'FZ_SOLL'
-              ? `Sollfahrzeit: ${d.sollfahrzeitSek}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
-              : `Verlustzeit: ${d.verlustSek.toFixed(1)}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+      // Dieselbe objRefs-Reihenfolge wie beim Template oben - Zeilen-DOM
+      // (per Klassenselektor in Dokumentreihenfolge) und Datenzugriff
+      // (sgRows/traceRows-Cursor) laufen synchron mit.
+      objRefs.forEach(ref => {
+        if (ref.kuerzel === 'SG') {
+          const sr = r.sgRows[sgCursor];
+          const mainSvg = mainRowEls[sgCursor].querySelector('.lane-track svg');
+          sgCursor++;
+          renderLane(mainSvg, {
+            wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
+            width: mainSize.width, height: mainSize.height
           });
-          wireMeasure(fzSvg, r.start, r.end, `${r.i}|fz|${sr.sgEntry.col.index}|${fi}`);
-          subCursor++;
+          wireMeasure(mainSvg, r.start, r.end, `${r.i}|main|${sr.sgEntry.col.index}`);
 
-          const zwlSvg = subRows[subCursor].querySelector('.lane-track svg');
-          renderLane(zwlSvg, {
-            wMin: r.start, wMax: r.end, segs: sr.zwlVisSegs[fi],
-            baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height,
-            fillFor: () => 'url(#gz-pat-zwl)',
-            segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
-            segLabelColorFor: () => 'var(--text)',
-            segTitle: d => `Zwangslöschzeit-Fenster: ${d.zwangsloeschSek}s ab Anmeldung (Schwelle ${fmtTimeShort(d.end)})`
+          sr.fzRows.forEach((fd, fi) => {
+            const fzSvg = subRows[subCursor++].querySelector('.lane-track svg');
+            renderLane(fzSvg, {
+              wMin: r.start, wMax: r.end, segs: sr.fzVisSegs[fi],
+              baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+              width: subSize.width, height: subSize.height,
+              fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
+              segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
+              segTitle: d => d.cat === 'FZ_SOLL'
+                ? `Sollfahrzeit: ${d.sollfahrzeitSek}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+                : `Verlustzeit: ${d.verlustSek.toFixed(1)}s (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)})`
+            });
+            wireMeasure(fzSvg, r.start, r.end, `${r.i}|fz|${sr.sgEntry.col.index}|${fi}`);
+
+            const zwlSvg = subRows[subCursor++].querySelector('.lane-track svg');
+            renderLane(zwlSvg, {
+              wMin: r.start, wMax: r.end, segs: sr.zwlVisSegs[fi],
+              baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+              width: subSize.width, height: subSize.height,
+              fillFor: () => 'url(#gz-pat-zwl)',
+              segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
+              segLabelColorFor: () => 'var(--text)',
+              segTitle: d => `Zwangslöschzeit-Fenster: ${d.zwangsloeschSek}s ab Anmeldung (Schwelle ${fmtTimeShort(d.end)})`
+            });
+            wireMeasure(zwlSvg, r.start, r.end, `${r.i}|zwl|${sr.sgEntry.col.index}|${fi}`);
           });
-          wireMeasure(zwlSvg, r.start, r.end, `${r.i}|zwl|${sr.sgEntry.col.index}|${fi}`);
-          subCursor++;
-        });
-      });
+          return;
+        }
 
-      detCols.forEach((c, ci) => {
-        const isFormula = c.kuerzel === 'FORMEL';
-        const subSvg = subRows[subCursor].querySelector('.lane-track svg');
-        renderLane(subSvg, {
-          wMin: r.start, wMax: r.end, segs: r.detVisSegs[ci],
-          baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-          width: subSize.width, height: subSize.height,
-          fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
-          segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
-        });
-        wireMeasure(subSvg, r.start, r.end, `${r.i}|det|${c.index}`);
-        subCursor++;
-      });
-
-      apwCols.forEach((c, ci) => {
-        const subSvg = subRows[subCursor].querySelector('.lane-track svg');
-        renderLane(subSvg, {
-          wMin: r.start, wMax: r.end, segs: r.apwVisSegs[ci],
-          baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-          width: subSize.width, height: subSize.height,
-          fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
-          segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
-          segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
-          segTitle: d => d.cat === 'LUECKE'
-            ? `Datenlücke: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}`
-            : `${esc(c.name)}: ${esc(d.cat)} (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}, ${Math.round((d.end - d.start) / 1000)}s)`
-        });
-        wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
-        subCursor++;
+        const tr = r.traceRows[traceCursor++];
+        const c = tr.col;
+        const subSvg = subRows[subCursor++].querySelector('.lane-track svg');
+        if (tr.kind === 'apw') {
+          renderLane(subSvg, {
+            wMin: r.start, wMax: r.end, segs: tr.visSegs,
+            baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+            width: subSize.width, height: subSize.height,
+            fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
+            segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
+            segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
+            segTitle: d => d.cat === 'LUECKE'
+              ? `Datenlücke: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}`
+              : `${esc(c.name)}: ${esc(d.cat)} (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}, ${Math.round((d.end - d.start) / 1000)}s)`
+          });
+          wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
+        } else {
+          const isFormula = tr.kind === 'formula';
+          renderLane(subSvg, {
+            wMin: r.start, wMax: r.end, segs: tr.visSegs,
+            baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+            width: subSize.width, height: subSize.height,
+            fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
+            segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
+          });
+          wireMeasure(subSvg, r.start, r.end, `${r.i}|det|${c.index}`);
+        }
       });
 
       wireCrosshair(group, r.start, r.end);

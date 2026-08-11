@@ -135,6 +135,45 @@ tbody tr.spl-group-row td{
 .det-check{ display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer; }
 .filter-kuerzel{ font-family:var(--mono); font-size:10px; font-weight:700; color:var(--text-faint); }
 .cfg-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; }
+.cfg-field-wide{ grid-column:1 / -1; }
+
+/* ---------- Umlaufprüfung: vereinheitlichte Objekt-Liste (SG/DET/APW/
+   ÖPNV/FORMEL in einer sortierbaren Liste statt getrennter Checklisten) -
+   Reihenfolge = Zeilen-Reihenfolge im DOM, per Ziehen am Griff links
+   (.obj-drag) neu anordenbar (siehe wireObjList() in umlaufpruefung.js);
+   ausgewählt = angehakt, unabhängig von der Suche (die nur die Sichtbarkeit
+   filtert, siehe .obj-row-hidden). */
+.obj-search{ margin-bottom:6px; }
+.obj-list{ display:flex; flex-direction:column; gap:1px; max-height:280px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm); padding:5px; background:var(--bg-surface); }
+.obj-row{ display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:var(--radius-sm); }
+.obj-row:hover{ background:var(--bg-surface-2); }
+.obj-row.obj-row-hidden{ display:none; }
+.obj-row.dragging{ opacity:.35; }
+.obj-drag{
+  flex-shrink:0; width:16px; text-align:center; color:var(--text-faint);
+  cursor:grab; font-size:13px; line-height:1; user-select:none;
+}
+.obj-drag:hover{ color:var(--text-muted); }
+.obj-drag:active{ cursor:grabbing; }
+.obj-drag-hint{ font-family:var(--mono); }
+.obj-row-label{ display:flex; align-items:center; gap:7px; flex:1; min-width:0; font-size:12.5px; cursor:pointer; }
+.obj-row-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.obj-list-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:4px 2px; }
+
+/* ---------- Umlaufprüfung: Filterbedingungen (separat von der Objekt-
+   Auswahl oben) - je Zeile ein Objekt + eine typabhängige Bedingung
+   (Zustand-Gleichheit für SG/DET/FORMEL, Operator+Zahl für APW/ÖPNV), siehe
+   renderFilterRows()/buildFilterCondEl() in umlaufpruefung.js. ---------- */
+.up-filter-rows{ display:flex; flex-direction:column; gap:6px; }
+.up-filter-row{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.up-filter-obj{ flex:1; min-width:200px; }
+.up-filter-cond{ display:flex; align-items:center; gap:5px; }
+.up-filter-row select, .up-filter-row input[type=number]{
+  font-family:var(--mono); font-size:12px; padding:4px 6px;
+  border:1px solid var(--border-strong); border-radius:var(--radius-sm);
+  background:var(--bg-surface); color:var(--text);
+}
+.up-filter-row input[type=number]{ width:80px; }
 .radio-group{ display:flex; flex-direction:column; gap:5px; }
 .radio-group label{ display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer; }
 .num-row{ display:flex; align-items:center; gap:7px; font-size:12.5px; flex-wrap:wrap; }
