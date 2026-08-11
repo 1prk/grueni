@@ -74,7 +74,10 @@
   //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
   //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, width, height}
   // segLabelFor(d)->string: optional centered text label per Segment (z.B.
-  //   Sekundenwert), automatisch ausgeblendet wenn das Segment zu schmal ist.
+  //   Sekundenwert) - immer sichtbar, unabhängig von der Segmentbreite/vom
+  //   Zoomlevel (kann bei sehr schmalen Segmenten über Nachbarsegmente
+  //   hinausragen/überlappen - das ist gewollt, besser als Werte zu
+  //   verstecken).
   // segLabelColorFor(d)->string: optionale Textfarbe je Label (Default: weiß
   //   über .seg-label), z.B. für Segmente mit hellem Schraffur-Untergrund.
   // segOpacityFor(d)->number: optionale Deckkraft je Segment (z.B. für
@@ -126,7 +129,7 @@
         .attr('class', 'seg-label')
         .attr('x', d => (x(Math.max(d.start, wMin)) + x(Math.min(d.end, wMax))) / 2)
         .attr('y', height / 2).attr('dy', '0.32em')
-        .style('opacity', d => (x(Math.min(d.end, wMax)) - x(Math.max(d.start, wMin))) >= 18 ? (segOpacityFor ? segOpacityFor(d) : 1) : 0)
+        .style('opacity', d => segOpacityFor ? segOpacityFor(d) : 1)
         .style('fill', d => (segLabelColorFor && segLabelColorFor(d)) || null)
         .style('pointer-events', 'none')
         .text(d => segLabelFor(d) || '');
