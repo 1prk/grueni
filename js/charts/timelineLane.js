@@ -72,7 +72,20 @@
 
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
   //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
-  //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, width, height}
+  //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, edgeLabelsFor,
+  //   gridStepMs, width, height}
+  // gridStepMs: optionales festes Zeitraster (z.B. 5000 = 5s-Schritte) als
+  // dünne, helle senkrechte Hilfslinien ÜBER den Segmenten (damit sie auch
+  // auf vollflächig gefüllten Segmenten wie GRUEN als Ablesehilfe sichtbar
+  // bleiben) - verankert an wMin (Sekunden seit Zeilenbeginn treffen so
+  // direkt runde Rasterwerte). Bewusst nur dort genutzt, wo eine Zeile einen
+  // kurzen, festen Zeitausschnitt zeigt (Umlaufprüfung) - bei den langen
+  // Zeitfenstern anderer renderLane()-Aufrufer (Signalzeitendiagramm,
+  // Phasenauswertung) undefined lassen, sonst entstehen tausende Linien.
+  // edgeLabelsFor(d)->{left,right}|null: wie segLabelFor, aber zwei an den
+  // Segmenträndern verankerte Beschriftungen statt einer zentrierten (z.B.
+  // An-/Ab-Sekunden einer Grünzeit) - siehe layoutEdgeLabels() unten für die
+  // Behandlung zu schmaler Segmente.
   // segLabelFor(d)->string: optional centered text label per Segment (z.B.
   //   Sekundenwert) - immer sichtbar, unabhängig von der Segmentbreite/vom
   //   Zoomlevel (kann bei sehr schmalen Segmenten über Nachbarsegmente
@@ -100,7 +113,8 @@
     const {
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
       baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
-      segTitle = defaultTitle, onGreenClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor
+      segTitle = defaultTitle, onGreenClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
+      edgeLabelsFor, gridStepMs
     } = opts;
 
     const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
@@ -123,6 +137,65 @@
       .style('opacity', d => segOpacityFor ? segOpacityFor(d) : 1)
       .style('cursor', d => (d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default');
     segSel.append('title').text(segTitle);
+
+    // Zeitraster ÜBER den Segmenten (nicht dahinter), sonst wäre es unter
+    // vollflächig deckenden Füllungen (z.B. GRUEN) unsichtbar - dünn/hell
+    // genug, um nicht mit dem Segmentinhalt zu konkurrieren.
+    if (gridStepMs) {
+      const gridTicks = [];
+      const first = Math.ceil(wMin / gridStepMs) * gridStepMs;
+      for (let t = first; t <= wMax; t += gridStepMs) gridTicks.push(t);
+      svg.append('g').attr('class', 'lane-grid').selectAll('line')
+        .data(gridTicks).join('line')
+        .attr('x1', d => x(d)).attr('x2', d => x(d)).attr('y1', 0).attr('y2', height)
+        .style('pointer-events', 'none');
+    }
+
+    // Zwei am Segmentrand verankerte Beschriftungen statt einer zentrierten
+    // (siehe edgeLabelsFor-Kopfkommentar) - z.B. An/Ab-Sekunden einer
+    // Grünzeit direkt auf dem Balken. Bei zu schmalem Segment (geschätzte
+    // Textbreite beider Labels + Mindestabstand größer als die Segment-
+    // breite) bleiben beide Labels an ihren äußeren Rändern (nie versteckt,
+    // dieselbe Philosophie wie segLabelFor), zusätzlich markiert ein kleiner
+    // Trenner in der Mitte, dass hier eng zusammengequetscht wurde, statt
+    // die beiden Zahlen kommentarlos ineinanderlaufen zu lassen.
+    if (edgeLabelsFor) {
+      const CHAR_W = 5.4; // ~0.6 * 9px Schriftgröße (var(--mono)), grobe Schätzung
+      const PAD = 3, GAP = 6, MARKER_W = 6;
+      const edgeData = visSegs.map(d => {
+        const labels = edgeLabelsFor(d);
+        if (!labels) return null;
+        const x0 = x(Math.max(d.start, wMin)), x1 = x(Math.min(d.end, wMax));
+        const segW = x1 - x0;
+        const leftW = String(labels.left).length * CHAR_W;
+        const rightW = String(labels.right).length * CHAR_W;
+        // "Eng, aber lesbar" (Marker in der Mitte) vs. "so knapp, dass sogar
+        // der Marker selbst nur zusätzlich überlappen würde" (dann lieber
+        // GAR keinen Marker zeigen, statt drei Zeichen ineinander zu
+        // quetschen - die beiden Zahlen bleiben trotzdem immer sichtbar,
+        // auch wenn sie sich dabei selbst berühren/überlappen).
+        const overflow = (leftW + rightW + GAP + 2 * PAD) > segW;
+        const showMarker = overflow && (leftW + rightW + MARKER_W) <= segW;
+        return { d, x0, x1, labels, showMarker };
+      }).filter(Boolean);
+
+      const eg = svg.append('g').attr('class', 'seg-edge-labels');
+      eg.selectAll('text.seg-edge-label-left').data(edgeData).join('text')
+        .attr('class', 'seg-edge-label seg-edge-label-left')
+        .attr('x', e => e.x0 + PAD).attr('y', height / 2).attr('dy', '0.32em')
+        .style('opacity', e => segOpacityFor ? segOpacityFor(e.d) : 1)
+        .text(e => e.labels.left);
+      eg.selectAll('text.seg-edge-label-right').data(edgeData).join('text')
+        .attr('class', 'seg-edge-label seg-edge-label-right')
+        .attr('x', e => e.x1 - PAD).attr('y', height / 2).attr('dy', '0.32em')
+        .style('opacity', e => segOpacityFor ? segOpacityFor(e.d) : 1)
+        .text(e => e.labels.right);
+      eg.selectAll('text.seg-edge-overflow').data(edgeData.filter(e => e.showMarker)).join('text')
+        .attr('class', 'seg-edge-overflow')
+        .attr('x', e => (e.x0 + e.x1) / 2).attr('y', height / 2).attr('dy', '0.32em')
+        .text('·'); // Mittelpunkt (U+00B7) statt "⋯" (U+22EF) - Letzteres fehlt in gängigen
+        // Monospace-Schriften (leeres Glyph, siehe var(--mono)) und blieb unsichtbar.
+    }
 
     if (segLabelFor) {
       svg.append('g').attr('class', 'seg-labels').selectAll('text').data(visSegs).join('text')

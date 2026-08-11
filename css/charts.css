@@ -111,6 +111,19 @@
 
 .seg-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; text-anchor:middle; }
 
+/* Zeitraster (renderLane gridStepMs) - dünn/hell genug, um nicht mit dem
+   Segmentinhalt (auch auf vollflächigem GRUEN) zu konkurrieren. */
+.lane-grid line{ stroke:rgba(0,0,0,.16); stroke-width:1; }
+:root[data-theme="dark"] .lane-grid line, .dark .lane-grid line{ stroke:rgba(255,255,255,.18); }
+
+/* Rand-verankerte Beschriftungen (renderLane edgeLabelsFor), z.B. An-/
+   Ab-Sekunden direkt auf der Grünzeit statt nur in der separaten Zahlen-
+   spalte links der Spur. */
+.seg-edge-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; pointer-events:none; paint-order:stroke; stroke:rgba(0,0,0,.35); stroke-width:2px; stroke-linejoin:round; }
+.seg-edge-label-left{ text-anchor:start; }
+.seg-edge-label-right{ text-anchor:end; }
+.seg-edge-overflow{ font-family:var(--mono); font-size:12px; font-weight:900; fill:#fff; text-anchor:middle; pointer-events:none; }
+
 /* d3-drawn primitives shared across charts */
 .d3-axis-x .domain{ display:none; }
 .d3-axis-x .tick line{ display:none; }

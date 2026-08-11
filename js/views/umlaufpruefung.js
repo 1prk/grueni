@@ -850,14 +850,21 @@
 
       const sgRows = sgData.map(sd => {
         const gIdx = sd.greenSweep(start, end);
-        let an = '–', ab = '–', tf = '–', anomClass = '';
+        let an = '–', ab = '–', tf = '–', anomClass = '', greenSeg = null;
         if (gIdx !== -1) {
-          const seg = TU ? computeSegmentAnAbTf(sd.stats.greens[gIdx], cycleStarts, TU) : null;
+          // Dieselbe Objekt-Referenz wie in visSegs (stats.greens ist per
+          // .filter() aus denselben Segment-Objekten wie segs abgeleitet,
+          // siehe computeCycleStats()) - erlaubt es edgeLabelsFor() unten,
+          // GENAU dieses Grün-Segment zu identifizieren (statt An/Ab jedem
+          // GRUEN-Segment der Zeile zuzuschreiben, falls es je Umlauf
+          // mehrere gäbe).
+          greenSeg = sd.stats.greens[gIdx];
+          const seg = TU ? computeSegmentAnAbTf(greenSeg, cycleStarts, TU) : null;
           if (seg) { an = seg.an; ab = seg.ab; tf = seg.tf; }
           if (sd.flags[gIdx]) anomClass = 'up-anom';
         }
         return {
-          sgEntry: sd.sgEntry, an, ab, tf, anomClass,
+          sgEntry: sd.sgEntry, an, ab, tf, anomClass, greenSeg,
           visSegs: sd.segSweep(start, end),
           fzVisSegs: sd.fzRows.map(fd => fd.fzSweep(start, end)),
           zwlVisSegs: sd.fzRows.map(fd => fd.zwlSweep(start, end)),
@@ -959,7 +966,8 @@
           sgCursor++;
           renderLane(mainSvg, {
             wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
-            width: mainSize.width, height: mainSize.height
+            width: mainSize.width, height: mainSize.height, gridStepMs: 5000,
+            edgeLabelsFor: d => (sr.greenSeg && d === sr.greenSeg) ? { left: sr.an, right: sr.ab } : null
           });
           wireMeasure(mainSvg, r.start, r.end, `${r.i}|main|${sr.sgEntry.col.index}`);
 
@@ -968,7 +976,7 @@
             renderLane(fzSvg, {
               wMin: r.start, wMax: r.end, segs: sr.fzVisSegs[fi],
               baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-              width: subSize.width, height: subSize.height,
+              width: subSize.width, height: subSize.height, gridStepMs: 5000,
               fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
               segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
               segTitle: d => d.cat === 'FZ_SOLL'
@@ -981,7 +989,7 @@
             renderLane(zwlSvg, {
               wMin: r.start, wMax: r.end, segs: sr.zwlVisSegs[fi],
               baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-              width: subSize.width, height: subSize.height,
+              width: subSize.width, height: subSize.height, gridStepMs: 5000,
               fillFor: () => 'url(#gz-pat-zwl)',
               segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
               segLabelColorFor: () => 'var(--text)',
@@ -999,7 +1007,7 @@
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000,
             fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
             segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
             segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
@@ -1013,7 +1021,7 @@
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000,
             fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
             segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
           });
