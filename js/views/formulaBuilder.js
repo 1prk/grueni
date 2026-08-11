@@ -858,6 +858,15 @@
       const name = f.name.trim() || `F${f.id}`;
       const compiled = compile(f.exprText, varTypesWithTx, funcDefs);
       if (!compiled.ok) { skippedList.push({ name, message: compiled.message }); return; }
+      // scopeSpecs (und damit die Objekt-Handles/Sweeps) sind über ALLE
+      // Formeln hinweg dieselben Instanzen (einmal vor der Schleife gebaut,
+      // siehe oben) - vor jedem neuen Formel-Durchlauf müssen ihre Sweeps
+      // daher zurückgesetzt werden, sonst bliebe der Zeiger vom vorherigen
+      // Durchlauf am Ende der Zeitreihe stehen und jede Formel AUSSER der
+      // ersten, die eine bestimmte Variable nutzt, würde fälschlich "kein
+      // Segment" (Zustand/Dauer/DauerSeit -> 0/null) für die gesamte
+      // Aufzeichnung liefern.
+      scopeSpecs.forEach(s => { if (s.handle) s.handle.sweep.reset(); });
       const rawSeries = new Array(times.length);
       let cyclePtr = 0;
       for (let i = 0; i < times.length; i++) {

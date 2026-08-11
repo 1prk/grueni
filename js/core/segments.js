@@ -318,7 +318,14 @@
         curSeg = (s && t >= s.start) ? s : null;
       },
       segment() { return curSeg; },
-      time() { return curT; }
+      time() { return curT; },
+      // Setzt den Zeiger auf den Anfang zurück - nötig, wenn derselbe Sweep
+      // (z.B. dasselbe Objekt-Handle in formulaBuilder.js) für MEHRERE
+      // aufeinanderfolgende Durchläufe über dieselbe (aufsteigende) Zeitreihe
+      // wiederverwendet wird (eine Formel pro Durchlauf) - ohne reset() bliebe
+      // der Zeiger vom vorherigen Durchlauf am Ende stehen und jeder weitere
+      // Durchlauf würde fälschlich "kein Segment" liefern.
+      reset() { ptr = 0; curSeg = null; curT = null; }
     };
   }
 
