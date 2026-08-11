@@ -242,30 +242,23 @@ tr.oe-hidden{ display:none; }
 .fsb-chip:hover{ opacity:1; }
 .fsb-chip.fsb-chip-det{ background:var(--accent); }
 
-/* ---------- Umlaufprüfung: Ausdrucks-Editor (Syntax-Highlighting, Fehler-
-   Markierung, Autovervollständigung, Funktions-Palette) ---------- */
-.expr-input-wrap{ position:relative; display:flex; align-items:center; gap:4px; }
-.expr-input-box{ position:relative; flex:1; min-width:0; display:flex; }
-.expr-highlight{
-  position:absolute; inset:0; pointer-events:none; overflow:hidden; white-space:pre;
-  box-sizing:border-box; border:1px solid transparent; padding:6px 9px;
-  font-family:var(--mono); font-size:12.5px; line-height:1.4;
+/* ---------- Umlaufprüfung: Ausdrucks-Editor (echte, interaktive Chips,
+   Fehler-Markierung, Autovervollständigung, Funktions-Palette) ----------
+   contenteditable statt <input> - siehe formulaBuilder.js Kopfkommentar
+   beim "Ausdrucks-Editor"-Abschnitt für die Begründung (der frühere
+   Overlay-Trick mit unsichtbarem <input> über farbigem <div> hatte einen
+   strukturellen Makel: Textauswahl wurde von manchen Browsern trotz
+   color:transparent sichtbar gerendert und überlappte mit dem Highlight
+   darunter). */
+.expr-input-wrap{ position:relative; display:flex; align-items:flex-start; gap:4px; }
+.expr-editor{
+  flex:1; min-width:0; box-sizing:border-box; border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm); background:var(--bg-surface); padding:5px 9px;
+  font-family:var(--mono); font-size:12.5px; line-height:1.7;
+  cursor:text; outline:none; min-height:32px; white-space:pre-wrap; word-break:break-word;
 }
-/* input[type=text].expr-input (statt nur .expr-input) ist bewusst so
-   spezifisch, damit color/background sicher die generische "select,
-   input[type=number], input[type=text]{...}"-Regel weiter oben schlagen
-   (Attribut-Selektor hat höhere Spezifität als eine einzelne Klasse) -
-   sonst rendert der ECHTE Input sein eigenes (undurchsichtiges) Textbild
-   über dem farbigen Highlight-Layer und verdeckt ihn komplett. */
-input[type=text].expr-input{ position:relative; z-index:1; width:100%; line-height:1.4; background:transparent; color:transparent; caret-color:var(--text); }
-.expr-input::placeholder{ color:var(--text-faint); opacity:1; }
-/* Browser-Standard für ::selection ignoriert bei manchen Engines das
-   color:transparent des Elements und rendert markierten Text trotzdem
-   sichtbar (meist dunkel/weiß) - das lag dann ALS ZWEITE, überlappende
-   Textebene über der bereits farbigen Zeichenkette im Highlight-Layer
-   darunter ("objektektkt"-Effekt). Explizit erzwungen: markierter Text
-   bleibt unsichtbar, nur der Auswahl-Hintergrund selbst bleibt sichtbar. */
-.expr-input::selection{ color:transparent; background:rgba(47,111,163,.35); }
+.expr-editor:focus{ border-color:var(--accent); }
+.expr-editor:empty::before{ content:attr(data-placeholder); color:var(--text-faint); }
 .expr-palette-btn{
   flex-shrink:0; font-family:var(--mono); font-style:italic; font-weight:700; font-size:12px;
   padding:5px 9px; border:1px solid var(--border-strong); border-radius:var(--radius-sm);
@@ -286,23 +279,39 @@ input[type=text].expr-input{ position:relative; z-index:1; width:100%; line-heig
 .expr-ac-label{ font-weight:700; color:var(--text); }
 .expr-ac-hint{ color:var(--text-faint); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+/* Nur-Text-Token (Zahlen/Operatoren/Klammern/AND-OR-NOT sowie noch nicht
+   eingerastete, gerade getippte Bezeichner) - "freier Text für Werte etc." */
 .expr-tok-num{ color:var(--accent-strong); }
 .expr-tok-kw{ color:var(--text-muted); font-weight:700; }
 .expr-tok-op{ color:var(--text); }
 .expr-tok-punc{ color:var(--text-faint); }
-.expr-tok-err{ text-decoration:underline wavy var(--sig-red); text-decoration-thickness:1.5px; text-underline-offset:3px; }
+.expr-tok-err{ text-decoration:underline wavy var(--sig-red); text-decoration-thickness:1.5px; text-underline-offset:2px; }
+/* Zustand/Funktionsname/Variable, SOLANGE noch nicht zum Chip eingerastet
+   (Cursor berührt das Token noch, siehe "touching" in formulaBuilder.js) -
+   schon farblich erkennbar, aber noch normaler, frei weitertippbarer Text. */
+.expr-tok-kat{ color:var(--formula-on); font-weight:600; }
+.expr-tok-func{ color:var(--req-marker); font-weight:600; }
+.expr-tok-var{ color:var(--accent); }
 
-/* "Chip"-Optik für benannte Symbole (Zustände/Funktionsaufrufe/Variablen):
-   Hintergrund + box-shadow (statt padding!) simulieren die Pille - echtes
-   padding auf einem Token würde nachfolgende Zeichen im Highlight-Overlay
-   nach rechts verschieben und die Pixel-Deckung mit dem (unsichtbaren)
-   echten <input> zerstören (Cursor/Klicks würden nicht mehr zum sichtbaren
-   Zeichen passen). box-shadow malt außerhalb der Box, ohne Layout-Breite
-   zu beeinflussen - dieselbe Technik wie bei Bracket-/Suchtreffer-Highlights
-   in Code-Editoren. */
-.expr-tok-kat{ color:var(--formula-on); font-weight:600; border-radius:4px; background:rgba(21,147,120,.16); box-shadow:0 0 0 3px rgba(21,147,120,.16); }
-.expr-tok-func{ color:var(--req-marker); font-weight:600; border-radius:4px; background:rgba(124,79,209,.14); box-shadow:0 0 0 3px rgba(124,79,209,.14); }
-.expr-tok-var{ color:var(--accent); border-radius:4px; background:rgba(47,111,163,.12); box-shadow:0 0 0 3px rgba(47,111,163,.12); }
+/* Echte, entfernbare Chips (contenteditable="false", MUI-artig) - siehe
+   buildChipEl()/isChipToken() in formulaBuilder.js. */
+.expr-chip{
+  display:inline-flex; align-items:center; gap:2px; margin:1px 3px 1px 0;
+  padding:1px 3px 1px 9px; border-radius:11px; font-weight:600; font-size:12px;
+  cursor:default; vertical-align:middle; white-space:nowrap;
+}
+.expr-chip-label{ line-height:1.6; }
+.expr-chip-remove{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:15px; height:15px; margin-left:1px; border-radius:50%; border:none;
+  background:rgba(255,255,255,.3); color:inherit; font-size:12px; line-height:1;
+  cursor:pointer; padding:0;
+}
+.expr-chip-remove:hover{ background:rgba(255,255,255,.6); }
+.expr-chip.expr-tok-kat{ background:var(--formula-on); color:#fff; }
+.expr-chip.expr-tok-func{ background:var(--req-marker); color:#fff; }
+.expr-chip.expr-tok-var{ background:var(--accent); color:#fff; }
+.expr-chip.expr-chip-err{ box-shadow:0 0 0 2px var(--sig-red); }
 
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }
