@@ -48,6 +48,224 @@
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
 
+  // ---------- Ausdrucks-Editor: Syntax-Highlighting / Fehler-Markierung /
+  // Autovervollständigung / Funktions-Palette für .up-func-body und .up-
+  // formula-expr - reine UI-"Eye Candy", keine eigene Parsing-Logik: nutzt
+  // GZ.exprEngine.tokenize() (denselben Lexer wie compile()) für die
+  // Einfärbung, damit Highlighting und tatsächliches Parsen nie ausein-
+  // anderlaufen. Technik: ein unsichtbarer <input> (color:transparent,
+  // sichtbarer Cursor) liegt über einem <div>, das denselben Text farbig
+  // gerendert anzeigt ("Overlay"-Trick, siehe .expr-input-wrap/.expr-
+  // highlight in components.css).
+  function classifyToken(tok, nextTok) {
+    switch (tok.type) {
+      case 'NUMBER': return 'expr-tok-num';
+      case 'KATLIT': return 'expr-tok-kat';
+      case 'AND': case 'OR': case 'NOT': return 'expr-tok-kw';
+      case 'IDENT': return (nextTok && nextTok.type === '(') ? 'expr-tok-func' : 'expr-tok-var';
+      case '+': case '-': case '*': case '/': case '>': case '<': case '>=': case '<=': case '==': case '!=':
+        return 'expr-tok-op';
+      case '(': case ')': case ',': return 'expr-tok-punc';
+      default: return '';
+    }
+  }
+
+  // errPos: Zeichenposition eines aktuellen Validierungsfehlers (siehe
+  // GZ.exprEngine compile()/compileFunctionDef() Rückgabe .pos) oder null -
+  // markiert das betroffene Token mit einer roten Wellenlinie (.expr-tok-
+  // err). Bei Tokenizer-Fehlern (unbekanntes Zeichen) wird der Rest des
+  // Textes ab der Fehlerstelle unstrukturiert markiert.
+  function renderExprHighlight(text, errPos) {
+    if (!text) return '';
+    let tokens;
+    try {
+      tokens = GZ.exprEngine.tokenize(text);
+    } catch (e) {
+      const failPos = (e && typeof e.pos === 'number') ? e.pos : 0;
+      return `${esc(text.slice(0, failPos))}<span class="expr-tok-err">${esc(text.slice(failPos))}</span>`;
+    }
+    let html = '';
+    let cursor = 0;
+    let markedErr = false;
+    tokens.forEach((tok, idx) => {
+      if (tok.type === 'EOF') return;
+      if (tok.pos > cursor) html += esc(text.slice(cursor, tok.pos));
+      const cls = classifyToken(tok, tokens[idx + 1]);
+      const isErr = errPos != null && tok.pos === errPos;
+      if (isErr) markedErr = true;
+      html += `<span class="${cls}${isErr ? ' expr-tok-err' : ''}">${esc(text.slice(tok.pos, tok.end))}</span>`;
+      cursor = tok.end;
+    });
+    if (cursor < text.length) html += esc(text.slice(cursor));
+    if (errPos != null && !markedErr) html += '<span class="expr-tok-err expr-tok-err-eof">&nbsp;</span>';
+    return html;
+  }
+
+  // Kandidaten für Autovervollständigung + Funktions-Palette: Primitiven
+  // (GZ.exprEngine.PRIMITIVE_INFO), aktuell definierte Funktionen/Variablen
+  // (Modul-State), Zustands-Konstanten (GZ.exprEngine.KAT_TOKENS), TX,
+  // AND/OR/NOT. insertText/selStart/selEnd beschreiben, was beim Einfügen an
+  // der Cursorposition eingesetzt wird und welcher Teilbereich davon
+  // anschließend als Platzhalter selektiert wird, damit man ihn direkt
+  // überschreiben kann (z.B. "Zustand(objekt, TX)" mit "objekt" selektiert).
+  function exprCandidates() {
+    const items = [];
+    GZ.exprEngine.PRIMITIVE_INFO.forEach(p => {
+      const argList = p.params.join(', ');
+      items.push({
+        group: 'Primitiven', label: p.name, hint: `(${argList})`, desc: p.desc,
+        insertText: `${p.name}(${argList})`,
+        selStart: p.name.length + 1, selEnd: p.name.length + 1 + p.params[0].length
+      });
+    });
+    funcs.forEach(f => {
+      const name = f.name.trim();
+      if (!name) return;
+      const params = f.params.map(p => p.trim()).filter(Boolean);
+      const argList = params.join(', ');
+      items.push({
+        group: 'Eigene Funktionen', label: name, hint: `(${argList})`, desc: f.bodyText,
+        insertText: `${name}(${argList})`,
+        selStart: name.length + 1, selEnd: name.length + 1 + (params[0] ? params[0].length : 0)
+      });
+    });
+    Object.entries(GZ.exprEngine.KAT_TOKENS).forEach(([tok, katType]) => {
+      const group = katType === 'KAT_SG' ? 'Zustände (Signalgruppe)' : 'Zustände (Detektor)';
+      items.push({ group, label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length });
+    });
+    items.push({ group: 'Sonstiges', label: 'TX', hint: '', desc: 'aktueller Auswertungszeitpunkt', insertText: 'TX', selStart: 2, selEnd: 2 });
+    ['AND', 'OR', 'NOT'].forEach(kw => {
+      items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: kw, selStart: kw.length, selEnd: kw.length });
+    });
+    vars.forEach(v => {
+      const alias = v.alias.trim();
+      if (!alias) return;
+      items.push({ group: 'Variablen', label: alias, hint: '', desc: '', insertText: alias, selStart: alias.length, selEnd: alias.length });
+    });
+    return items;
+  }
+
+  // Verdrahtet Syntax-Highlighting, Fehler-Markierung, Autovervollständigung
+  // (beim Tippen, gefiltert nach Bezeichner-Präfix) und die Funktions-
+  // Palette (Button "ƒ", ungefiltert) für EIN Ausdrucks-Eingabefeld. Wird pro
+  // Zeile bei jedem Render neu aufgerufen, da renderFuncRows()/render
+  // FormulaRows() das komplette innerHTML (und damit alle DOM-Knoten) neu
+  // aufbauen. Hängt refreshHighlight als wrap.__exprRefreshHighlight an, das
+  // validateAllInline()/validateFormulaRow() nutzen, um nach einer
+  // (debounced) Validierung die Fehlerposition nachträglich einzuzeichnen.
+  function setupExprEditor(rowEl) {
+    const wrap = rowEl.querySelector('.expr-input-wrap');
+    if (!wrap) return;
+    const input = wrap.querySelector('.expr-input');
+    const hl = wrap.querySelector('.expr-highlight');
+    const dropdown = wrap.querySelector('.expr-autocomplete');
+    const paletteBtn = wrap.querySelector('.expr-palette-btn');
+
+    const syncScroll = () => { hl.scrollLeft = input.scrollLeft; };
+    const refreshHighlight = errPos => { hl.innerHTML = renderExprHighlight(input.value, errPos == null ? null : errPos); syncScroll(); };
+    wrap.__exprRefreshHighlight = refreshHighlight;
+
+    const closeDropdown = () => { dropdown.hidden = true; dropdown.innerHTML = ''; };
+
+    const currentPrefix = () => {
+      const val = input.value, caret = input.selectionStart;
+      let start = caret;
+      while (start > 0 && /[A-Za-z0-9_]/.test(val[start - 1])) start--;
+      return { start, end: caret, text: val.slice(start, caret) };
+    };
+
+    const renderDropdown = (items, start, end) => {
+      if (!items.length) { closeDropdown(); return; }
+      let html = '', lastGroup = null;
+      items.forEach((it, i) => {
+        if (it.group !== lastGroup) { html += `<div class="expr-ac-group">${esc(it.group)}</div>`; lastGroup = it.group; }
+        html += `<div class="expr-ac-item" data-idx="${i}" title="${esc(it.desc || '')}">
+          <span class="expr-ac-label">${esc(it.label)}</span>
+          <span class="expr-ac-hint">${esc(it.hint || '')}</span>
+        </div>`;
+      });
+      dropdown.innerHTML = html;
+      dropdown.hidden = false;
+      dropdown.dataset.activeIdx = '-1';
+      dropdown._items = items; dropdown._start = start; dropdown._end = end;
+      dropdown.querySelectorAll('.expr-ac-item').forEach(el => {
+        el.onmousedown = ev => { ev.preventDefault(); accept(items[Number(el.dataset.idx)], start, end); };
+      });
+    };
+
+    const updateAutocomplete = () => {
+      const { start, end, text } = currentPrefix();
+      if (!text) { closeDropdown(); return; }
+      const items = exprCandidates().filter(c => c.label.toUpperCase().startsWith(text.toUpperCase()));
+      renderDropdown(items, start, end);
+    };
+
+    const openPalette = () => {
+      input.focus();
+      const caret = input.selectionStart;
+      renderDropdown(exprCandidates(), caret, caret);
+    };
+
+    const moveActive = delta => {
+      const optEls = Array.from(dropdown.querySelectorAll('.expr-ac-item'));
+      if (!optEls.length) return;
+      let idx = Number(dropdown.dataset.activeIdx || '-1') + delta;
+      if (idx < 0) idx = optEls.length - 1;
+      if (idx >= optEls.length) idx = 0;
+      optEls.forEach(e => e.classList.remove('active'));
+      optEls[idx].classList.add('active');
+      optEls[idx].scrollIntoView({ block: 'nearest' });
+      dropdown.dataset.activeIdx = String(idx);
+    };
+
+    const acceptActiveOrFirst = () => {
+      if (dropdown.hidden) return false;
+      const idx = Number(dropdown.dataset.activeIdx || '-1');
+      const items = dropdown._items || [];
+      const chosen = items[idx >= 0 ? idx : 0];
+      if (!chosen) return false;
+      accept(chosen, dropdown._start, dropdown._end);
+      return true;
+    };
+
+    function accept(item, start, end) {
+      const val = input.value;
+      input.value = val.slice(0, start) + item.insertText + val.slice(end);
+      const selStart = start + item.selStart, selEnd = start + item.selEnd;
+      closeDropdown();
+      input.focus();
+      input.setSelectionRange(selStart, selEnd);
+      input.dataset.suppressAc = '1';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    input.addEventListener('input', () => {
+      refreshHighlight(null);
+      if (input.dataset.suppressAc) { delete input.dataset.suppressAc; return; }
+      updateAutocomplete();
+    });
+    input.addEventListener('scroll', syncScroll);
+    input.addEventListener('click', () => { syncScroll(); closeDropdown(); });
+    input.addEventListener('keydown', e => {
+      if (dropdown.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+      else if (e.key === 'Enter' || e.key === 'Tab') { if (acceptActiveOrFirst()) e.preventDefault(); }
+      else if (e.key === 'Escape') { closeDropdown(); }
+    });
+    input.addEventListener('blur', () => setTimeout(closeDropdown, 150));
+    if (paletteBtn) {
+      // preventDefault auf mousedown verhindert, dass der Button dem Input
+      // den Fokus entzieht - sonst würde der oben registrierte blur-Handler
+      // die gerade per openPalette() geöffnete Liste ~150ms später wieder
+      // zumachen (Fokus wäre kurz weg- und wieder hergesprungen).
+      paletteBtn.addEventListener('mousedown', e => e.preventDefault());
+      paletteBtn.onclick = openPalette;
+    }
+
+    refreshHighlight(null);
+  }
+
   function init(root) {
     els = {
       root,
@@ -190,7 +408,14 @@
             </span>`).join('')}
           <button type="button" class="up-func-param-add btn" title="Parameter hinzufügen">+ Parameter</button>
         </span>
-        <input type="text" class="up-func-body mono-input" value="${esc(f.bodyText)}" placeholder="Ausdruck, z.B. DauerSeit(sg, GRUEN, TX) &gt; schwelle">
+        <span class="expr-input-wrap">
+          <span class="expr-input-box">
+            <div class="expr-highlight" aria-hidden="true"></div>
+            <input type="text" class="up-func-body expr-input mono-input" value="${esc(f.bodyText)}" placeholder="Ausdruck, z.B. DauerSeit(sg, GRUEN, TX) &gt; schwelle" autocomplete="off" spellcheck="false">
+          </span>
+          <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
+          <div class="expr-autocomplete" hidden></div>
+        </span>
         <span class="up-func-status"></span>
         <button type="button" class="oe-row-remove up-func-remove">✕</button>
       </div>`).join('') || '<div class="cfg-empty">Keine Funktionen definiert.</div>';
@@ -213,6 +438,7 @@
       rowEl.querySelector('.up-func-param-add').onclick = () => { f.params.push(''); renderFuncRows(); validateAllInline(); };
       rowEl.querySelector('.up-func-body').oninput = e => { f.bodyText = e.target.value; debouncedRevalidate(id); };
       rowEl.querySelector('.up-func-remove').onclick = () => { funcs = funcs.filter(x => x.id !== id); renderFuncRows(); validateAllInline(); };
+      setupExprEditor(rowEl);
     });
     validateAllInline();
   }
@@ -221,7 +447,14 @@
     els.formulaRows.innerHTML = formulas.map(f => `
       <div class="up-formula-row" data-id="${f.id}">
         <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
-        <input type="text" class="up-formula-expr mono-input" value="${esc(f.exprText)}" placeholder="z.B. DauerSeit(K1, GRUEN, TX) &gt; 45 AND Zustand(D1, TX) == BELEGT">
+        <span class="expr-input-wrap">
+          <span class="expr-input-box">
+            <div class="expr-highlight" aria-hidden="true"></div>
+            <input type="text" class="up-formula-expr expr-input mono-input" value="${esc(f.exprText)}" placeholder="z.B. DauerSeit(K1, GRUEN, TX) &gt; 45 AND Zustand(D1, TX) == BELEGT" autocomplete="off" spellcheck="false">
+          </span>
+          <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
+          <div class="expr-autocomplete" hidden></div>
+        </span>
         <span class="up-formula-status"></span>
         <button type="button" class="oe-row-remove up-formula-remove">✕</button>
       </div>`).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
@@ -236,6 +469,7 @@
         debounceTimers.set(`f:${id}`, setTimeout(() => validateFormulaRow(rowEl, f), 150));
       };
       rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); };
+      setupExprEditor(rowEl);
       validateFormulaRow(rowEl, f);
     });
   }
@@ -248,10 +482,13 @@
     const statusEl = rowEl.querySelector('.up-formula-status');
     const { types, aliasErrors } = currentVarTypes();
     const { defs: funcDefs, errors: funcErrors } = currentFuncDefs();
+    const wrap = rowEl.querySelector('.expr-input-wrap');
+    const markHighlight = pos => { if (wrap && wrap.__exprRefreshHighlight) wrap.__exprRefreshHighlight(pos); };
     if (aliasErrors.length || funcErrors.length) {
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
       statusEl.title = [...aliasErrors, ...funcErrors].join('; ');
+      markHighlight(null); // Fehler liegt in Alias-/Funktionsdefinitionen, nicht im Formel-Text selbst
       return;
     }
     const result = compile(f.exprText, { ...types, TX: 'NUM' }, funcDefs);
@@ -259,10 +496,12 @@
       statusEl.textContent = '✓';
       statusEl.className = 'up-formula-status ok';
       statusEl.title = 'Gültig';
+      markHighlight(null);
     } else {
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
       statusEl.title = result.message;
+      markHighlight(result.pos);
     }
   }
 
@@ -281,6 +520,7 @@
       if (!f || !statusEl) return;
       const name = f.name.trim();
       let msg = '';
+      let bodyErrPos = null;
       if (!name || !ALIAS_RE.test(name) || isReserved(name)) msg = 'Ungültiger Funktionsname';
       else if (funcs.filter(x => x.name.trim() === name).length > 1) msg = 'Name doppelt vergeben';
       else {
@@ -290,11 +530,13 @@
       }
       if (!msg) {
         const result = compileFunctionDef(f.params.map(p => p.trim()), f.bodyText, funcDefs);
-        if (!result.ok) msg = result.message;
+        if (!result.ok) { msg = result.message; bodyErrPos = result.pos; }
       }
       statusEl.textContent = msg ? '✕' : '✓';
       statusEl.className = 'up-func-status ' + (msg ? 'err' : 'ok');
       statusEl.title = msg || 'Gültig';
+      const wrap = rowEl.querySelector('.expr-input-wrap');
+      if (wrap && wrap.__exprRefreshHighlight) wrap.__exprRefreshHighlight(bodyErrPos);
     });
 
     els.formulaRows.querySelectorAll('.up-formula-row').forEach(rowEl => {

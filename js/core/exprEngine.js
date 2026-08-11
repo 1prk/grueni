@@ -152,6 +152,15 @@
     }
   };
 
+  // Anzeige-Metadaten für Primitiven (Autovervollständigung/Funktions-Palette
+  // in formulaBuilder.js) - getrennt von PRIMITIVES.check/run oben, da rein
+  // beschreibend (keine Auswertungslogik).
+  const PRIMITIVE_INFO = [
+    { name: 'Zustand', params: ['objekt', 'TX'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)' },
+    { name: 'Dauer', params: ['objekt', 'TX'], desc: 'Sekunden im aktuellen Zustand' },
+    { name: 'DauerSeit', params: ['objekt', 'zustand', 'TX'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)' }
+  ];
+
   function tokenize(text) {
     const tokens = [];
     const n = text.length;
@@ -167,7 +176,7 @@
         let j = i;
         while (j < n && isDigit(text[j])) j++;
         if (text[j] === '.') { j++; while (j < n && isDigit(text[j])) j++; }
-        tokens.push({ type: 'NUMBER', value: Number(text.slice(i, j)), pos: start });
+        tokens.push({ type: 'NUMBER', value: Number(text.slice(i, j)), pos: start, end: j });
         i = j;
         continue;
       }
@@ -176,18 +185,18 @@
         while (j < n && isIdentPart(text[j])) j++;
         const word = text.slice(i, j);
         const upper = word.toUpperCase();
-        if (upper === 'AND' || upper === 'OR' || upper === 'NOT') tokens.push({ type: upper, pos: start });
-        else if (KAT_TOKENS[word]) tokens.push({ type: 'KATLIT', value: word, katType: KAT_TOKENS[word], pos: start });
-        else tokens.push({ type: 'IDENT', value: word, pos: start });
+        if (upper === 'AND' || upper === 'OR' || upper === 'NOT') tokens.push({ type: upper, pos: start, end: j });
+        else if (KAT_TOKENS[word]) tokens.push({ type: 'KATLIT', value: word, katType: KAT_TOKENS[word], pos: start, end: j });
+        else tokens.push({ type: 'IDENT', value: word, pos: start, end: j });
         i = j;
         continue;
       }
       const two = text.slice(i, i + 2);
-      if (two === '>=' || two === '<=' || two === '==' || two === '!=') { tokens.push({ type: two, pos: start }); i += 2; continue; }
-      if ('+-*/(),><'.includes(ch)) { tokens.push({ type: ch, pos: start }); i++; continue; }
+      if (two === '>=' || two === '<=' || two === '==' || two === '!=') { tokens.push({ type: two, pos: start, end: start + 2 }); i += 2; continue; }
+      if ('+-*/(),><'.includes(ch)) { tokens.push({ type: ch, pos: start, end: start + 1 }); i++; continue; }
       throw new ExprError(`Unerwartetes Zeichen "${ch}"`, start);
     }
-    tokens.push({ type: 'EOF', pos: n });
+    tokens.push({ type: 'EOF', pos: n, end: n });
     return tokens;
   }
 
@@ -429,5 +438,9 @@
     }
   }
 
-  GZ.exprEngine = { compile, compileFunctionDef };
+  // tokenize/PRIMITIVE_INFO/KAT_TOKENS werden zusätzlich exportiert, damit
+  // formulaBuilder.js Syntax-Highlighting/Autovervollständigung/Funktions-
+  // Palette auf demselben Lexer/derselben Primitiven-Liste aufbaut statt sie
+  // in der UI-Schicht zu duplizieren (Single Source of Truth).
+  GZ.exprEngine = { compile, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS };
 })(window.GZ = window.GZ || {});
