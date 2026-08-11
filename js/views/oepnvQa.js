@@ -9,6 +9,7 @@
   const { esc, fmtTs } = GZ.format;
   const { mean, percentile, parseNumListe } = GZ.stats;
   const { computeSplTransitions } = GZ.segments;
+  const { compile } = GZ.exprEngine;
   const {
     LOS_LEVELS, losDefaultBounds, sollfahrzeitDefault, zwangsloeschDefault,
     losStufe, risingEdgeTimes, computeOepnvEvents,
@@ -18,8 +19,86 @@
   let els = null;
   let rows = []; // {id, sgIdx, anIdx:Set<colIndex>, abIdx:Set<colIndex>, sollfahrzeitSek, zwangsloeschSek}
   let nextRowId = 1;
-  let lastModelRows = [];
+  let lastModelRows = []; // voller (ungefilterter) Zeilensatz der letzten Berechnung
+  let lastFilteredRows = []; // nach Filterausdruck eingeschränkt - das, was Tabelle/Sortierung/Export tatsächlich nutzen
+  let filterExprText = '';
   let sortState = { key: 'anTime', dir: 'asc' };
+
+  // ---------- Zeilenfilter: derselbe Ausdrucks-Editor (GZ.exprEditor) wie im
+  // Formel-Builder der Umlaufprüfung, aber mit eigenem, festem Felder-Satz
+  // statt frei wählbarer Spalten-Variablen - jede fertig berechnete Anmelde-
+  // Zeile (siehe buildRowModel()) wird EINMAL, ohne Zeitreihen-Sweep, gegen
+  // diesen Ausdruck geprüft (siehe filterScopeForRow()). Ergebnis ist rein
+  // WAHR/FALSCH je Zeile (kein synthetischer Spaltenbezug wie bei Formeln in
+  // der Umlaufprüfung) und schränkt Kennzahlen/Diagramm/Tabelle GEMEINSAM
+  // ein (siehe recompute()).
+  const FILTER_VAR_TYPES = { TX: 'NUM', SPL: 'TEXT', Verlustzeit: 'NUM', IstFahrzeit: 'NUM', QSV: 'KAT_QSV', Ergebnis: 'KAT_ERGEBNIS', SG: 'TEXT' };
+  const FILTER_FIELD_DESC = {
+    TX: 'Sekunden seit Umlaufbeginn der Anmeldung',
+    SPL: 'Signalzeitenplan zum Anmeldezeitpunkt (Text, z.B. "10")',
+    Verlustzeit: 'Ist-Fahrzeit minus Sollfahrzeit in Sekunden',
+    IstFahrzeit: 'gemessene Fahrzeit An→Ab bzw. bis zur Zwangslöschung in Sekunden',
+    QSV: 'Qualitätsstufe der Verlustzeit (A-F, nur bei regulärer Abmeldung gesetzt)',
+    Ergebnis: 'ABGEMELDET, ZWANGSGELOESCHT, AUSGESCHLOSSEN (SPL) oder UNAUFGELOEST (Datenende)',
+    SG: 'Name der Signalgruppe'
+  };
+  // QSV-Stufen (A-F, siehe LOS_LEVELS) als Kategorie-Literale NUR für diesen
+  // Filterausdruck aktiv (extraKatTokens, siehe GZ.exprEngine.tokenize()) -
+  // reserviert die Buchstaben nicht global.
+  const QSV_KAT_TOKENS = Object.fromEntries(LOS_LEVELS.map(l => [l, 'KAT_QSV']));
+  const ERGEBNIS_KAT_TOKENS = { ABGEMELDET: 'KAT_ERGEBNIS', ZWANGSGELOESCHT: 'KAT_ERGEBNIS', AUSGESCHLOSSEN: 'KAT_ERGEBNIS', UNAUFGELOEST: 'KAT_ERGEBNIS' };
+  const FILTER_KAT_TOKENS = { ...QSV_KAT_TOKENS, ...ERGEBNIS_KAT_TOKENS };
+
+  function filterCandidates() {
+    const items = [];
+    Object.keys(FILTER_VAR_TYPES).forEach(name => {
+      items.push({ group: 'Felder', label: name, hint: FILTER_VAR_TYPES[name], desc: FILTER_FIELD_DESC[name], insertText: name, selStart: name.length, selEnd: name.length });
+    });
+    LOS_LEVELS.forEach(l => items.push({ group: 'Zustände (QSV)', label: l, hint: '', desc: `QSV-Stufe ${l}`, insertText: l, selStart: l.length, selEnd: l.length }));
+    Object.keys(ERGEBNIS_KAT_TOKENS).forEach(tok => items.push({ group: 'Zustände (Ergebnis)', label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length }));
+    ['AND', 'OR', 'NOT'].forEach(kw => items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: kw, selStart: kw.length, selEnd: kw.length }));
+    return items;
+  }
+
+  // scope-Objekt für GZ.exprEngine.compile().run() - siehe FILTER_VAR_TYPES.
+  // Fehlende Zahlen (unaufgelöste Zeilen ohne Verlustzeit/TX) werden zu NaN
+  // (jeder Vergleich damit ist automatisch false, siehe exprEngine.js
+  // Kopfkommentar) statt null (das JS bei numerischen Vergleichen fälschlich
+  // zu 0 coercen würde). QSV ist bei Zwangslöschung/Ausschluss/unaufgelöst
+  // null - ein Kategorie-Vergleich mit null ist ebenfalls automatisch false.
+  function filterScopeForRow(r) {
+    return {
+      TX: r.tx == null ? NaN : r.tx,
+      SPL: r.spl,
+      Verlustzeit: r.verlustSek == null ? NaN : r.verlustSek,
+      IstFahrzeit: r.istFahrzeitSek,
+      QSV: r.qsv,
+      Ergebnis: r.ergebnisKat,
+      SG: r.sgLabel
+    };
+  }
+
+  function compileFilterExpr() {
+    const text = filterExprText.trim();
+    if (!text) return { ok: true, empty: true, run: () => true };
+    return compile(text, FILTER_VAR_TYPES, {}, FILTER_KAT_TOKENS);
+  }
+
+  // Validiert (Syntax/Typen) und zeichnet Status + Fehlerposition im Editor
+  // nach - liefert das compile()-Ergebnis, damit recompute() es direkt zum
+  // tatsächlichen Filtern weiterverwenden kann (keine doppelte Kompilierung).
+  function validateFilterExpr() {
+    const result = compileFilterExpr();
+    if (els.filterStatus) {
+      if (result.empty) { els.filterStatus.textContent = ''; els.filterStatus.className = 'oe-filter-status'; els.filterStatus.title = ''; }
+      else if (result.ok) { els.filterStatus.textContent = '✓'; els.filterStatus.className = 'oe-filter-status ok'; els.filterStatus.title = 'Gültig'; }
+      else { els.filterStatus.textContent = '✕'; els.filterStatus.className = 'oe-filter-status err'; els.filterStatus.title = result.message; }
+    }
+    if (els.filterFieldWrap && els.filterFieldWrap.__exprRefreshHighlight) {
+      els.filterFieldWrap.__exprRefreshHighlight(result.ok || result.empty ? null : result.pos);
+    }
+    return result;
+  }
 
   function round1(v) { return Math.round(v * 10) / 10; }
 
@@ -70,13 +149,27 @@
       eventsBody: root.querySelector('#oeEventsBody'),
       search: root.querySelector('#oeSearch'),
       searchInfo: root.querySelector('#oeSearchInfo'),
-      exportBtn: root.querySelector('#oeExportBtn')
+      exportBtn: root.querySelector('#oeExportBtn'),
+      filterField: root.querySelector('#oeFilterField'),
+      filterStatus: root.querySelector('#oeFilterStatus'),
+      filterHint: root.querySelector('#oeFilterHint')
     };
     els.addSgBtn.onclick = () => { addRow(); renderRows(); recompute(); };
     els.search.oninput = applySearch;
     els.exportBtn.onclick = exportTableXlsx;
     els.losInputs.forEach(inp => inp.onchange = recompute);
     els.splExcl.onchange = recompute;
+
+    els.filterFieldWrap = els.filterField ? els.filterField.querySelector('.expr-input-wrap') : null;
+    if (els.filterField) {
+      GZ.exprEditor.setup(els.filterField, {
+        getText: () => filterExprText,
+        setText: v => { filterExprText = v; },
+        knownNames: () => new Set(Object.keys(FILTER_VAR_TYPES)),
+        getCandidates: filterCandidates,
+        onRevalidate: recompute
+      });
+    }
   }
 
   function currentDetCols() {
@@ -234,6 +327,8 @@
       els.tablePanel.style.display = 'none';
       GZ.state.data.oepnvActivePoints = [];
       GZ.views.gruenzeitanalyse.refreshReqPoints();
+      lastModelRows = []; lastFilteredRows = [];
+      if (els.filterHint) els.filterHint.textContent = '';
       return;
     }
 
@@ -248,13 +343,6 @@
     renderRawPoints(results, a);
 
     const allEvents = results.flatMap(r => r.events).sort((e1, e2) => e1.anTime - e2.anTime);
-    const validAbmeldung = allEvents.filter(e => e.type === 'ABMELDUNG' && !e.excluded);
-    const validZwangsgeloescht = allEvents.filter(e => e.type === 'ZWANGSGELOESCHT' && !e.excluded);
-    const excludedCount = allEvents.filter(e => e.excluded).length;
-    const verlustWerte = validAbmeldung.map(e => e.verlustSek).sort((a1, b1) => a1 - b1);
-    const losCounts = {};
-    LOS_LEVELS.forEach(l => { losCounts[l] = 0; });
-    validAbmeldung.forEach(e => { losCounts[losStufe(e.verlustSek, losBounds)]++; });
     const unresolvedList = results.map(r => r.unresolved).filter(Boolean).sort((u1, u2) => u1.startTime - u2.startTime);
 
     const skipped = rows.length - results.length;
@@ -266,9 +354,33 @@
     els.chartPanel.style.display = 'block';
     els.tablePanel.style.display = 'block';
 
-    renderKpis(verlustWerte, losCounts, validZwangsgeloescht.length, excludedCount, unresolvedList, results);
-    renderChart(results, losBounds, cycleStarts, a);
+    // Filter (siehe validateFilterExpr()/filterScopeForRow()) schränkt Kenn-
+    // zahlen, Diagramm UND Tabelle GEMEINSAM ein - daher zuerst das volle
+    // Zeilenmodell bauen, dann EINMAL filtern, und ALLE nachfolgenden
+    // Darstellungen aus lastFilteredRows ableiten statt aus den Roh-Events.
     lastModelRows = buildRowModel(allEvents, unresolvedList, losBounds, results);
+    const filterResult = validateFilterExpr();
+    lastFilteredRows = (filterResult.ok || filterResult.empty)
+      ? lastModelRows.filter(mr => { try { return filterResult.run(filterScopeForRow(mr)); } catch (e) { return true; } })
+      : lastModelRows.slice();
+    if (els.filterHint) {
+      els.filterHint.textContent = (filterResult.ok && !filterResult.empty)
+        ? `${lastFilteredRows.length} von ${lastModelRows.length} Anmeldung(en) entsprechen dem Filter.`
+        : '';
+      els.filterHint.className = 'hint';
+    }
+
+    const validAbmeldung = lastFilteredRows.filter(r => r.ergebnisKat === 'ABGEMELDET');
+    const validZwangsgeloescht = lastFilteredRows.filter(r => r.ergebnisKat === 'ZWANGSGELOESCHT');
+    const excludedCount = lastFilteredRows.filter(r => r.ergebnisKat === 'AUSGESCHLOSSEN').length;
+    const verlustWerte = validAbmeldung.map(r => r.verlustSek).sort((a1, b1) => a1 - b1);
+    const losCounts = {};
+    LOS_LEVELS.forEach(l => { losCounts[l] = 0; });
+    validAbmeldung.forEach(r => { losCounts[r.qsv]++; });
+    const filteredUnresolvedList = lastFilteredRows.filter(r => r.ergebnisKat === 'UNAUFGELOEST');
+
+    renderKpis(verlustWerte, losCounts, validZwangsgeloescht.length, excludedCount, filteredUnresolvedList, results, lastFilteredRows);
+    renderChart(results, losBounds, cycleStarts, a, lastFilteredRows);
     renderTableHead();
     renderTableBody();
     applySearch();
@@ -290,7 +402,7 @@
     });
   }
 
-  function renderKpis(verlustWerte, losCounts, zwangsgeloeschtCount, excludedCount, unresolvedList, results) {
+  function renderKpis(verlustWerte, losCounts, zwangsgeloeschtCount, excludedCount, unresolvedList, results, filteredRows) {
     const n = verlustWerte.length;
     const totalOutcomes = n + zwangsgeloeschtCount;
     const successRate = totalOutcomes ? (n / totalOutcomes * 100) : null;
@@ -317,10 +429,11 @@
 
     if (results.length > 1) {
       const bodyRows = results.map(r => {
-        const valid = r.events.filter(e => e.type === 'ABMELDUNG' && !e.excluded);
-        const denied = r.events.filter(e => e.type === 'ZWANGSGELOESCHT' && !e.excluded).length;
+        const rowsForSg = filteredRows.filter(mr => mr.sgColIndex === r.sgEntry.col.index);
+        const valid = rowsForSg.filter(mr => mr.ergebnisKat === 'ABGEMELDET');
+        const denied = rowsForSg.filter(mr => mr.ergebnisKat === 'ZWANGSGELOESCHT').length;
         const rate = (valid.length + denied) ? (valid.length / (valid.length + denied) * 100) : null;
-        const werte = valid.map(e => e.verlustSek);
+        const werte = valid.map(mr => mr.verlustSek);
         return `<tr>
           <td>${esc(r.sgEntry.col.name)}</td><td>${valid.length}</td>
           <td>${werte.length ? mean(werte).toFixed(1) + 's' : '–'}</td>
@@ -337,7 +450,7 @@
     }
   }
 
-  function renderChart(results, losBounds, cycleStarts, a) {
+  function renderChart(results, losBounds, cycleStarts, a, filteredRows) {
     const splTransitions = computeSplTransitions(a.times, a.splValues);
     els.chartRows.innerHTML = results.map(r => `
       <div class="oe-chart-row">
@@ -349,8 +462,9 @@
     const rowEls = [...els.chartRows.querySelectorAll('.oe-chart-row')];
     results.forEach((r, i) => {
       const rowEl = rowEls[i];
-      const abmeldungEvents = r.events.filter(e => e.type === 'ABMELDUNG');
-      const zwangsgeloeschtEvents = r.events.filter(e => e.type === 'ZWANGSGELOESCHT');
+      const rowsForSg = filteredRows.filter(mr => mr.sgColIndex === r.sgEntry.col.index);
+      const abmeldungEvents = rowsForSg.filter(mr => mr.rawType === 'ABMELDUNG');
+      const zwangsgeloeschtEvents = rowsForSg.filter(mr => mr.rawType === 'ZWANGSGELOESCHT');
       const result = GZ.charts.oepnvScatterChart.render(rowEl.querySelector('[data-chart]'), rowEl.querySelector('[data-axis] svg'), {
         tMin: a.tMin, tMax: a.tMax, abmeldungEvents, zwangsgeloeschtEvents, losBounds,
         splTransitions, cycleStarts, onPointClick: GZ.app.jumpToGruenzeit
@@ -369,19 +483,19 @@
       nr++;
       const result = findResult(e.rowId);
       const isZwang = e.type === 'ZWANGSGELOESCHT';
-      let ergebnisShort, ergebnisTitle, rowCls;
+      let ergebnisShort, ergebnisTitle, rowCls, ergebnisKat;
       if (e.excluded) {
-        ergebnisShort = 'Sonstige'; ergebnisTitle = `Ausgeschlossen (SPL ${e.spl})`; rowCls = 'oe-excluded';
+        ergebnisShort = 'Sonstige'; ergebnisTitle = `Ausgeschlossen (SPL ${e.spl})`; rowCls = 'oe-excluded'; ergebnisKat = 'AUSGESCHLOSSEN';
       } else if (isZwang) {
-        ergebnisShort = 'Zwangsgelöscht'; ergebnisTitle = null; rowCls = 'oe-abgemeldet';
+        ergebnisShort = 'Zwangsgelöscht'; ergebnisTitle = null; rowCls = 'oe-abgemeldet'; ergebnisKat = 'ZWANGSGELOESCHT';
       } else {
-        ergebnisShort = 'Abgemeldet'; ergebnisTitle = null; rowCls = '';
+        ergebnisShort = 'Abgemeldet'; ergebnisTitle = null; rowCls = ''; ergebnisKat = 'ABGEMELDET';
       }
       return {
         id: nr, rowCls, clickT: e.anTime, nr,
-        sgLabel: e.sgLabel,
+        sgLabel: e.sgLabel, sgColIndex: e.sgColIndex,
         anTime: e.anTime, tx: txAtTime(e.anTime, cycleStarts),
-        ergebnisShort, ergebnisTitle,
+        ergebnisShort, ergebnisTitle, ergebnisKat, excluded: e.excluded, rawType: e.type,
         endTime: e.endTime, spl: String(e.spl),
         istFahrzeitSek: e.istFahrzeitSek,
         verlustSek: e.verlustSek, verlustIsEstimate: isZwang,
@@ -396,9 +510,10 @@
       const result = findResult(u.rowId);
       modelRows.push({
         id: nr, rowCls: 'oe-unresolved', clickT: u.startTime, nr,
-        sgLabel: u.sgLabel,
+        sgLabel: u.sgLabel, sgColIndex: result ? result.sgEntry.col.index : null,
         anTime: u.startTime, tx: txAtTime(u.startTime, cycleStarts),
         ergebnisShort: 'Sonstige', ergebnisTitle: 'Unaufgelöst bis Datenende (weder Abmeldung noch Zwangslöschung)',
+        ergebnisKat: 'UNAUFGELOEST', excluded: false, rawType: null,
         endTime: null, spl: String(u.spl),
         istFahrzeitSek: u.durationSec,
         verlustSek: null, verlustIsEstimate: false,
@@ -422,7 +537,7 @@
 
   function sortedRows() {
     const col = TABLE_COLUMNS.find(c => c.key === sortState.key);
-    return [...lastModelRows].sort((a, b) => compareValues(col.value(a), col.value(b), sortState.dir));
+    return [...lastFilteredRows].sort((a, b) => compareValues(col.value(a), col.value(b), sortState.dir));
   }
 
   function renderTableHead() {

@@ -228,10 +228,12 @@ tr.oe-hidden{ display:none; }
 .up-var-row .up-var-col{ flex:1; min-width:0; }
 .up-formula-row .up-formula-name{ width:90px; flex-shrink:0; }
 .up-formula-row .expr-input-wrap{ flex:1; min-width:0; }
-.up-var-status, .up-formula-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
-.up-var-status.ok, .up-formula-status.ok{ color:var(--sig-green); }
-.up-var-status.err, .up-formula-status.err{ color:var(--sig-red); }
+.up-var-status, .up-formula-status, .oe-filter-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
+.up-var-status.ok, .up-formula-status.ok, .oe-filter-status.ok{ color:var(--sig-green); }
+.up-var-status.err, .up-formula-status.err, .oe-filter-status.err{ color:var(--sig-red); }
 .mono-input{ font-family:var(--mono); }
+.oe-filter-row{ display:flex; align-items:flex-start; gap:6px; }
+.oe-filter-row .expr-input-wrap{ flex:1; min-width:0; }
 
 .up-func-row{ display:flex; align-items:flex-start; gap:6px; flex-wrap:wrap; }
 .up-func-row .up-func-name{ width:110px; flex-shrink:0; }
