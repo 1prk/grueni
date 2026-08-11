@@ -62,7 +62,12 @@
       case 'NUMBER': return 'expr-tok-num';
       case 'KATLIT': return 'expr-tok-kat';
       case 'AND': case 'OR': case 'NOT': return 'expr-tok-kw';
-      case 'IDENT': return (nextTok && nextTok.type === '(') ? 'expr-tok-func' : 'expr-tok-var';
+      // TX ist reserviert (siehe RESERVED_EXACT/isTxCol) - wie AND/OR/NOT
+      // eingefärbt statt wie eine normale Variable, damit optisch klar
+      // bleibt, dass es nichts ist, was man selbst benennen/zuweisen muss.
+      case 'IDENT':
+        if (tok.value === 'TX') return 'expr-tok-kw';
+        return (nextTok && nextTok.type === '(') ? 'expr-tok-func' : 'expr-tok-var';
       case '+': case '-': case '*': case '/': case '>': case '<': case '>=': case '<=': case '==': case '!=':
         return 'expr-tok-op';
       case '(': case ')': case ',': return 'expr-tok-punc';
@@ -133,7 +138,7 @@
       const group = katType === 'KAT_SG' ? 'Zustände (Signalgruppe)' : 'Zustände (Detektor)';
       items.push({ group, label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length });
     });
-    items.push({ group: 'Sonstiges', label: 'TX', hint: '', desc: 'aktueller Auswertungszeitpunkt', insertText: 'TX', selStart: 2, selEnd: 2 });
+    items.push({ group: 'Sonstiges', label: 'TX', hint: 'reserviert', desc: 'aktueller Auswertungszeitpunkt - immer automatisch verfügbar, nicht selbst benennen/zuweisen', insertText: 'TX', selStart: 2, selEnd: 2 });
     ['AND', 'OR', 'NOT'].forEach(kw => {
       items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: kw, selStart: kw.length, selEnd: kw.length });
     });
@@ -323,11 +328,21 @@
   // Objekt-Handles, APW/ÖPNV als Zahl. Bewusst OHNE bereits berechnete
   // Formel-Spalten selbst (keine Formeln-referenzieren-Formeln-Verkettung -
   // hält Auswertungsreihenfolge und Zyklen-Vermeidung trivial).
+  // TX ist der reservierte, immer implizit verfügbare Auswertungszeitpunkt
+  // (siehe RESERVED_EXACT/GZ.exprEngine) - niemals eine normale Spalte, die
+  // man als Variable/Objekt auswählen oder zuordnen müsste. Der Filter ist
+  // ein Sicherheitsnetz (case-insensitiv, unabhängig von kuerzel): sollte
+  // eine Roh-CSV ausnahmsweise doch eine Spalte namens "TX" unter SG/DET/
+  // APW/ÖPNV führen, darf sie hier nie auftauchen - sonst könnte man ihr
+  // versehentlich eine Variable zuordnen bzw. sie im Ausdrucks-Editor als
+  // "Objekt" auswählen, was mit dem echten, reservierten TX kollidieren
+  // würde.
+  const isTxCol = c => (c.name || '').trim().toUpperCase() === 'TX';
   function sourceCols() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return [];
-    const sgCols = a.allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' }));
-    return sgCols.concat(a.otherColumns.filter(c => c.kuerzel === 'DET' || c.kuerzel === 'APW' || c.kuerzel === 'OEPNV'));
+    const sgCols = a.allStats.map(({ col }) => ({ ...col, kuerzel: 'SG' })).filter(c => !isTxCol(c));
+    return sgCols.concat(a.otherColumns.filter(c => (c.kuerzel === 'DET' || c.kuerzel === 'APW' || c.kuerzel === 'OEPNV') && !isTxCol(c)));
   }
 
   function varTypeForCol(col) {
