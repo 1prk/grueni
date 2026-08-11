@@ -53,6 +53,12 @@
   // bei neuem Datenimport zurückgesetzt (populateControls()) bzw. bei neuen
   // Formel-Spalten/Konfigurations-Import abgeglichen (reconcileObjectOrder()).
   let objectOrder = [];
+  // Mehrfachauswahl in der Objekt-Liste (Strg-Klick) - rein zum GEMEINSAMEN
+  // Ziehen mehrerer Zeilen auf einmal (siehe wireObjDrag()), unabhängig vom
+  // Anhak-Status (checked = im Umlauf-Output, dieses Set = "zusammen
+  // verschieben"). Bleibt über Render-Durchläufe hinweg bestehen (wie
+  // objectOrder), wird gegen bekannte Objekte abgeglichen (renderObjList()).
+  let multiSelectKeys = new Set();
   // Filterbedingungen (separat von der Objekt-Auswahl/Reihenfolge oben) -
   // jede Zeile UND-verknüpft: {id, key, op, value} - op/value-Bedeutung
   // hängt vom Objekttyp ab (Zustand-Gleichheit für SG/DET/FORMEL,
@@ -209,14 +215,16 @@
       : new Set([...els.objList.querySelectorAll('input:checked')].map(cb => cb.closest('.obj-row').dataset.key));
     reconcileObjectOrder(objs);
     const byKey = new Map(objs.map(o => [objKey(o), o]));
+    multiSelectKeys = new Set([...multiSelectKeys].filter(k => byKey.has(k)));
     const rows = objectOrder.map(k => byKey.get(k)).filter(Boolean);
 
     els.objList.innerHTML = rows.length ? rows.map(c => {
       const key = objKey(c);
       const label = c.beschreibung && c.beschreibung !== c.name ? `${c.name} – ${c.beschreibung}` : c.name;
       const checked = (hasExplicit || hadRows) ? prevChecked.has(key) : (c.kuerzel === 'SG' && c.index === 0);
-      return `<div class="obj-row" data-key="${esc(key)}">
-        <span class="obj-drag" title="Ziehen zum Sortieren">⠿</span>
+      const selected = multiSelectKeys.has(key);
+      return `<div class="obj-row${selected ? ' obj-row-selected' : ''}" data-key="${esc(key)}">
+        <span class="obj-drag" title="Ziehen zum Sortieren (mehrere: erst mit Strg-Klick auswählen)">⠿</span>
         <label class="obj-row-label">
           <input type="checkbox" ${checked ? 'checked' : ''}>
           <span class="filter-kuerzel">${esc(c.kuerzel)}</span>
@@ -242,32 +250,72 @@
     });
   }
 
+  // Aktualisiert nur die .obj-row-selected-Klasse anhand von multiSelectKeys
+  // (leichtgewichtig - KEIN render(), Mehrfachauswahl betrifft nur, welche
+  // Zeilen später gemeinsam gezogen werden, nicht den Umlauf-Output).
+  function updateObjSelectionHighlight() {
+    els.objList.querySelectorAll('.obj-row').forEach(row => {
+      row.classList.toggle('obj-row-selected', multiSelectKeys.has(row.dataset.key));
+    });
+  }
+
   // Ziehen-zum-Sortieren per natives HTML5 Drag&Drop, nur vom Griff (.obj-
   // drag) auslösbar: die Zeile selbst ist standardmäßig NICHT draggable
   // (sonst würde ein Klick auf die Checkbox/den Namen versehentlich einen
   // Drag statt eines Checkbox-Toggles/einer Textselektion auslösen) - erst
   // ein mousedown auf dem Griff schaltet draggable für diese eine Zeile
   // scharf, dragend schaltet es wieder aus. Während des Ziehens wird die
-  // gezogene Zeile LIVE an die Zielposition verschoben (einfaches, robustes
-  // Muster ohne zusätzliche Bibliothek); beim Ablegen wird die jetzt im DOM
-  // sichtbare Reihenfolge 1:1 in objectOrder übernommen und die Umlauf-
-  // Ausgabe neu gerendert. Zeilen- und Listen-Level-Handler sind getrennt:
-  // Zeilen werden bei jedem renderObjList() neu erzeugt (mousedown muss
-  // daher jedes Mal neu verdrahtet werden), der Listen-Container selbst
-  // bleibt bestehen (drag-/dragover/dragend nur EINMAL verdrahtet, per
-  // Event-Delegation über e.target.closest()).
+  // gezogene (Anker-)Zeile LIVE an die Zielposition verschoben (einfaches,
+  // robustes Muster ohne zusätzliche Bibliothek); beim Ablegen wird die
+  // jetzt im DOM sichtbare Reihenfolge in objectOrder übernommen und die
+  // Umlauf-Ausgabe neu gerendert.
+  //
+  // Mehrfachauswahl (Strg-Klick, siehe multiSelectKeys): ist die gezogene
+  // Zeile Teil einer Mehrfachauswahl mit >1 Elementen, werden die ANDEREN
+  // ausgewählten Zeilen während des Ziehens nur optisch abgedunkelt
+  // (.dragging-group) statt live mitverschoben (kein vollwertiges Multi-
+  // Element-Drag nötig) - beim Ablegen (dragend) werden dann ALLE
+  // ausgewählten Schlüssel (in ihrer bisherigen relativen Reihenfolge
+  // zueinander, siehe objectOrder.filter()) gemeinsam an die Position der
+  // Anker-Zeile eingefügt. Wird eine Zeile gezogen, die NICHT Teil der
+  // aktuellen Mehrfachauswahl ist, ersetzt sie die Auswahl (zieht allein) -
+  // wie in üblichen Datei-Manager-Listen.
+  //
+  // Zeilen- und Listen-Level-Handler sind getrennt: Zeilen werden bei jedem
+  // renderObjList() neu erzeugt (mousedown/click müssen daher jedes Mal neu
+  // verdrahtet werden), der Listen-Container selbst bleibt bestehen (drag-/
+  // dragover/dragend nur EINMAL verdrahtet, per Event-Delegation über
+  // e.target.closest()).
+  let dragAnchorKey = null;
   function wireObjDrag() {
     els.objList.querySelectorAll('.obj-drag').forEach(handle => {
       handle.onmousedown = () => { const row = handle.closest('.obj-row'); if (row) row.draggable = true; };
+    });
+    els.objList.querySelectorAll('.obj-row').forEach(row => {
+      row.onclick = e => {
+        if (!(e.ctrlKey || e.metaKey)) { if (multiSelectKeys.size) { multiSelectKeys.clear(); updateObjSelectionHighlight(); } return; }
+        if (e.target.closest('.obj-drag')) return; // Griff hat eigene Semantik (startet Drag)
+        e.preventDefault(); // verhindert, dass der Klick zusätzlich die Checkbox umschaltet
+        const key = row.dataset.key;
+        if (multiSelectKeys.has(key)) multiSelectKeys.delete(key); else multiSelectKeys.add(key);
+        updateObjSelectionHighlight();
+      };
     });
     if (els.objList.__dragWired) return;
     els.objList.__dragWired = true;
     els.objList.addEventListener('dragstart', e => {
       const row = e.target.closest('.obj-row');
       if (!row || !row.draggable) { e.preventDefault(); return; }
+      dragAnchorKey = row.dataset.key;
+      if (!multiSelectKeys.has(dragAnchorKey)) { multiSelectKeys = new Set([dragAnchorKey]); updateObjSelectionHighlight(); }
       row.classList.add('dragging');
+      if (multiSelectKeys.size > 1) {
+        els.objList.querySelectorAll('.obj-row').forEach(r => {
+          if (r !== row && multiSelectKeys.has(r.dataset.key)) r.classList.add('dragging-group');
+        });
+      }
       e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', row.dataset.key); } catch (err) { /* Firefox braucht Daten, Chrome ist tolerant */ }
+      try { e.dataTransfer.setData('text/plain', dragAnchorKey); } catch (err) { /* Firefox braucht Daten, Chrome ist tolerant */ }
     });
     els.objList.addEventListener('dragover', e => {
       const draggingRow = els.objList.querySelector('.obj-row.dragging');
@@ -280,8 +328,28 @@
       overRow.parentNode.insertBefore(draggingRow, before ? overRow : overRow.nextSibling);
     });
     els.objList.addEventListener('dragend', () => {
-      els.objList.querySelectorAll('.obj-row').forEach(r => { r.draggable = false; r.classList.remove('dragging'); });
-      objectOrder = [...els.objList.querySelectorAll('.obj-row')].map(r => r.dataset.key);
+      // Nur die Anker-Zeile wurde während dragover live im DOM verschoben
+      // (siehe Kopfkommentar) - die übrigen Gruppenmitglieder stehen dort
+      // noch an ihrer ALTEN Position. Reihenfolge daher NICHT direkt aus dem
+      // DOM übernehmen (wie beim Einzel-Drag), sondern rechnerisch bilden:
+      // alle Gruppenschlüssel aus der DOM-Reihenfolge herauslösen und
+      // gemeinsam an der (auf die verbleibenden Zeilen umgerechneten)
+      // Ankerposition wieder einfügen - anschließend #upObjList komplett aus
+      // dem neuen objectOrder neu aufbauen (renderObjList()), damit DOM und
+      // objectOrder wieder übereinstimmen, BEVOR render() die Checkbox-
+      // Reihenfolge aus dem DOM ausliest.
+      const domOrder = [...els.objList.querySelectorAll('.obj-row')].map(r => r.dataset.key);
+      const groupKeys = multiSelectKeys.size > 1 && multiSelectKeys.has(dragAnchorKey)
+        ? objectOrder.filter(k => multiSelectKeys.has(k)) // bisherige relative Reihenfolge untereinander erhalten
+        : [dragAnchorKey];
+      const anchorDomIdx = domOrder.indexOf(dragAnchorKey);
+      let insertAt = 0;
+      for (let i = 0; i < anchorDomIdx; i++) { if (!groupKeys.includes(domOrder[i])) insertAt++; }
+      const rest = domOrder.filter(k => !groupKeys.includes(k));
+      rest.splice(insertAt, 0, ...groupKeys);
+      objectOrder = rest;
+      dragAnchorKey = null;
+      renderObjList();
       render();
     });
   }
