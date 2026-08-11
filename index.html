@@ -457,7 +457,10 @@
         <div class="panel">
           <div class="panel-head">
             <span>Formeln (synthetische Detektoren)</span>
-            <button type="button" id="upFormulaCalcBtn" class="btn primary">Berechnen</button>
+            <span class="panel-head-actions">
+              <button type="button" id="upFormulaHelpBtn" class="btn" title="Hilfe &amp; Beispiele">? Hilfe</button>
+              <button type="button" id="upFormulaCalcBtn" class="btn primary">Berechnen</button>
+            </span>
           </div>
           <div class="cfg-stack">
             <div class="cfg-field">
@@ -477,6 +480,59 @@
             </div>
           </div>
           <div id="upFormulaHint" class="hint"></div>
+        </div>
+
+        <div id="upFormulaHelpModal" class="modal-overlay" hidden>
+          <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="upFormulaHelpTitle">
+            <div class="modal-head">
+              <span id="upFormulaHelpTitle">Formel-Builder – Hilfe &amp; Beispiele</span>
+              <button type="button" id="upFormulaHelpClose" class="modal-close" title="Schließen">✕</button>
+            </div>
+            <div class="modal-body">
+              <div class="help-section">
+                <h4>Grundidee</h4>
+                <p><strong>Variablen</strong> sind Aliase auf eine Signalgruppen-/Detektor-Spalte (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder eine APW-/ÖPNV-Spalte (Zahl, roher Wert). <strong>Funktionen</strong> sind optionale, selbst benannte Bausteine aus wiederverwendbaren Ausdrücken. <strong>Formeln</strong> kombinieren beides und müssen zu WAHR/FALSCH auswerten – jede gültige Formel erscheint nach „Berechnen“ als zusätzlicher, synthetischer Detektor (Kürzel FORMEL).</p>
+                <p class="help-tip">Tipp: Im Ausdrucksfeld muss man Variablen nicht vorher anlegen – beim Tippen (Autovervollständigung) oder über den „ƒ“-Button lassen sich auch rohe Objekte (Signalgruppen/Detektoren/APW/ÖPNV) direkt auswählen; die passende Variable wird automatisch angelegt bzw. wiederverwendet.</p>
+              </div>
+
+              <div class="help-section">
+                <h4>Primitiven</h4>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">Zustand(objekt, TX)</td><td>aktueller Zustand des Objekts – GRUEN/ROT/GELB/ROTGELB/DUNKEL bei einer Signalgruppe, BELEGT/FREI bei einem Detektor.</td></tr>
+                    <tr><td class="mono-input help-fn">Dauer(objekt, TX)</td><td>Sekunden, die das Objekt bereits ununterbrochen im aktuellen Zustand ist.</td></tr>
+                    <tr><td class="mono-input help-fn">DauerSeit(objekt, zustand, TX)</td><td>Sekunden seit dem letzten Eintritt in „zustand“ – 0, wenn das Objekt gerade nicht in diesem Zustand ist.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="help-section">
+                <h4>Zustände &amp; Operatoren</h4>
+                <p><strong>Signalgruppe:</strong> GRUEN, ROT, GELB, ROTGELB, DUNKEL &nbsp;·&nbsp; <strong>Detektor:</strong> BELEGT, FREI</p>
+                <p><strong>Operatoren:</strong> <span class="mono-input">+ − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT ( )</span> &nbsp;·&nbsp; <strong>TX</strong> = aktueller Auswertungszeitpunkt (immer verfügbar, als Sekunden seit Umlaufbeginn)</p>
+              </div>
+
+              <div class="help-section">
+                <h4>Beispiele</h4>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">Zustand(D1, TX) == BELEGT</td><td>Detektor D1 ist aktuell belegt.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(K1, TX) == GRUEN</td><td>Signalgruppe K1 hat gerade Freigabe (Grün).</td></tr>
+                    <tr><td class="mono-input help-fn">DauerSeit(K1, GRUEN, TX) &gt; 45</td><td>K1 ist seit mehr als 45&nbsp;s ununterbrochen grün.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(D1, TX) == BELEGT AND Zustand(K1, TX) == ROT</td><td>D1 ist belegt, während K1 gerade Rot zeigt (z.&nbsp;B. Anmeldung ohne Freigabe).</td></tr>
+                    <tr><td class="mono-input help-fn">NOT (Zustand(D1, TX) == BELEGT)</td><td>D1 ist gerade frei.</td></tr>
+                  </tbody>
+                </table>
+                <p class="help-tip">Mit einer <strong>Funktion</strong> lässt sich ein wiederkehrendes Muster einmal benennen und mehrfach mit unterschiedlichen Argumenten aufrufen:</p>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">LangGenug(sg, schwelle) :=<br>DauerSeit(sg, GRUEN, TX) &gt; schwelle</td><td>Funktions-<em>definition</em> im Abschnitt „Funktionen“ (Name „LangGenug“, Parameter „sg, schwelle“).</td></tr>
+                    <tr><td class="mono-input help-fn">LangGenug(K1, 30) OR LangGenug(K2, 30)</td><td>Aufruf in einer Formel: mindestens eine der beiden Signalgruppen ist seit über 30&nbsp;s grün.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" id="upTablePanel" style="display:none;">
@@ -529,6 +585,7 @@
 
 <script src="js/vendor/d3.v7.min.js"></script>
 <script src="js/core/format.js"></script>
+<script src="js/core/snackbar.js"></script>
 <script src="js/core/stats.js"></script>
 <script src="js/core/parser.js"></script>
 <script src="js/core/segments.js"></script>

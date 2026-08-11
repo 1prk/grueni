@@ -281,3 +281,65 @@ table.phase-matrix .phase-check-cell input[type=checkbox]{ width:16px; height:16
 /* ---------- Phasenauswertung ---------- */
 table.static-rows tbody tr{ cursor:default; }
 .phase-color-dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; box-shadow:0 0 0 1px rgba(0,0,0,.2); }
+
+/* ---------- Snackbar (GZ.snackbar) ---------- */
+.snackbar-stack{
+  position:fixed; right:18px; bottom:18px; z-index:1000;
+  display:flex; flex-direction:column-reverse; gap:8px; max-width:380px;
+  pointer-events:none;
+}
+.snackbar{
+  display:flex; align-items:flex-start; gap:9px; padding:10px 11px;
+  border-radius:var(--radius-md); background:var(--bg-header-2); box-shadow:var(--shadow-md);
+  opacity:0; transform:translateY(10px); transition:opacity .18s ease, transform .18s ease;
+  pointer-events:auto;
+}
+.snackbar-show{ opacity:1; transform:translateY(0); }
+.snackbar-icon{
+  flex-shrink:0; width:18px; height:18px; margin-top:1px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:700;
+}
+.snackbar-error .snackbar-icon{ background:var(--sig-red); color:#fff; }
+.snackbar-warning .snackbar-icon{ background:var(--sig-yellow); color:#3a2a00; }
+.snackbar-info .snackbar-icon{ background:var(--accent); color:#fff; }
+.snackbar-body{ flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.snackbar-msg{ font-size:12.5px; font-weight:700; line-height:1.35; color:var(--text-on-dark); }
+.snackbar-desc{ font-size:11.5px; color:var(--text-on-dark-muted); line-height:1.4; }
+.snackbar-close{
+  flex-shrink:0; background:none; border:none; color:var(--text-on-dark-muted);
+  font-size:11px; cursor:pointer; padding:2px; line-height:1;
+}
+.snackbar-close:hover{ color:var(--text-on-dark); }
+
+.panel-head-actions{ display:flex; align-items:center; gap:8px; }
+
+/* ---------- Modal (Hilfe & Beispiele) ---------- */
+.modal-overlay{
+  position:fixed; inset:0; z-index:900; background:rgba(20,30,45,.45);
+  display:flex; align-items:center; justify-content:center; padding:24px;
+}
+.modal-overlay[hidden]{ display:none; }
+.modal-box{
+  background:var(--bg-surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-md);
+  max-width:640px; width:100%; max-height:min(80vh, 720px); display:flex; flex-direction:column; overflow:hidden;
+}
+.modal-head{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:13px 18px; border-bottom:1px solid var(--border); font-weight:700; font-size:13.5px;
+  background:var(--bg-surface-2); flex-shrink:0;
+}
+.modal-close{
+  background:none; border:none; font-size:14px; color:var(--text-faint); cursor:pointer; padding:2px 6px; line-height:1;
+}
+.modal-close:hover{ color:var(--sig-red); }
+.modal-body{ padding:16px 18px 20px; overflow-y:auto; }
+.help-section{ margin-bottom:18px; }
+.help-section:last-child{ margin-bottom:0; }
+.help-section h4{ margin:0 0 7px; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); }
+.help-section p{ margin:0 0 8px; font-size:12.5px; line-height:1.55; color:var(--text); }
+.help-section p:last-child{ margin-bottom:0; }
+.help-tip{ color:var(--text-muted); font-size:11.5px; }
+.help-table{ width:100%; border-collapse:collapse; margin-bottom:8px; }
+.help-table td{ padding:6px 10px 6px 0; font-size:12px; vertical-align:top; border-bottom:1px solid var(--border); line-height:1.5; }
+.help-table tr:last-child td{ border-bottom:none; }
+.help-fn{ white-space:nowrap; width:1%; color:var(--accent-strong); font-weight:600; padding-right:16px; }

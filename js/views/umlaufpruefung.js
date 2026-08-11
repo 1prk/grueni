@@ -244,10 +244,18 @@
 
   async function loadConfigFile(file) {
     const a = GZ.state.data.currentAnalysis;
-    if (!a) { els.hint.textContent = 'Bitte zuerst Daten laden/analysieren.'; els.hint.className = 'hint warn'; return; }
+    if (!a) {
+      els.hint.textContent = 'Bitte zuerst Daten laden/analysieren.'; els.hint.className = 'hint warn';
+      if (GZ.snackbar) GZ.snackbar.show('Konfiguration kann nicht geladen werden', { type: 'warning', description: 'Bitte zuerst Daten laden/analysieren.' });
+      return;
+    }
     let cfg;
     try { cfg = await GZ.configIO.readJsonFile(file); }
-    catch (e) { els.hint.textContent = e.message; els.hint.className = 'hint warn'; return; }
+    catch (e) {
+      els.hint.textContent = e.message; els.hint.className = 'hint warn';
+      if (GZ.snackbar) GZ.snackbar.show('Konfiguration konnte nicht gelesen werden', { type: 'error', description: e.message });
+      return;
+    }
 
     const match = GZ.configIO.fingerprintMatches(cfg.fingerprint, a);
     const notes = [];
@@ -267,6 +275,12 @@
     els.hint.textContent = ['Konfiguration geladen.', ...notes, allSkipped.length ? `Nicht gefunden: ${allSkipped.join(', ')}.` : '']
       .filter(Boolean).join(' ');
     els.hint.className = 'hint' + ((notes.length || allSkipped.length) ? ' warn' : '');
+    if ((notes.length || allSkipped.length) && GZ.snackbar) {
+      GZ.snackbar.show('Konfiguration teilweise geladen', {
+        type: 'warning',
+        description: [...notes, allSkipped.length ? `Nicht gefunden: ${allSkipped.join(', ')}.` : ''].filter(Boolean).join(' ')
+      });
+    }
   }
 
   function populateControls() {

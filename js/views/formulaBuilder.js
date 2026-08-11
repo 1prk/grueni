@@ -142,6 +142,19 @@
       if (!alias) return;
       items.push({ group: 'Variablen', label: alias, hint: '', desc: '', insertText: alias, selStart: alias.length, selEnd: alias.length });
     });
+    // Rohe Signalgruppen-/Detektor-/APW-/ÖPNV-Spalten - auch OHNE dass dafür
+    // schon eine Variable existiert. Auswahl legt bei Bedarf (siehe accept()
+    // in setupExprEditor()) automatisch eine passende Variable an, statt das
+    // vorher manuell im Abschnitt "Variablen" verlangen zu müssen.
+    sourceCols().forEach(col => {
+      const existing = vars.find(v => v.colIndex === col.index);
+      items.push({
+        group: 'Objekte (Spalten)', label: col.name,
+        hint: existing && existing.alias.trim() ? `${col.kuerzel} · Variable „${existing.alias.trim()}“` : `${col.kuerzel} · neue Variable`,
+        desc: col.beschreibung || `${col.kuerzel} ${col.name}`,
+        isObject: true, col
+      });
+    });
     return items;
   }
 
@@ -229,12 +242,23 @@
     };
 
     function accept(item, start, end) {
+      // Objekt-Kandidat (Spalte statt Primitive/Funktion/Zustand/Variable):
+      // erst Alias auflösen/anlegen (siehe resolveOrCreateVarForCol()), dann
+      // wie eine normale Variable einfügen (reiner Bezeichner, ohne Klammern
+      // /Platzhalter-Selektion).
+      let insertText = item.insertText, selStart = item.selStart, selEnd = item.selEnd;
+      if (item.isObject) {
+        const alias = resolveOrCreateVarForCol(item.col);
+        insertText = alias;
+        selStart = alias.length;
+        selEnd = alias.length;
+      }
       const val = input.value;
-      input.value = val.slice(0, start) + item.insertText + val.slice(end);
-      const selStart = start + item.selStart, selEnd = start + item.selEnd;
+      input.value = val.slice(0, start) + insertText + val.slice(end);
+      const absSelStart = start + selStart, absSelEnd = start + selEnd;
       closeDropdown();
       input.focus();
-      input.setSelectionRange(selStart, selEnd);
+      input.setSelectionRange(absSelStart, absSelEnd);
       input.dataset.suppressAc = '1';
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
@@ -276,12 +300,23 @@
       formulaRows: root.querySelector('#upFormulaRows'),
       addFormulaBtn: root.querySelector('#upAddFormulaBtn'),
       calcBtn: root.querySelector('#upFormulaCalcBtn'),
-      hint: root.querySelector('#upFormulaHint')
+      hint: root.querySelector('#upFormulaHint'),
+      helpBtn: root.querySelector('#upFormulaHelpBtn'),
+      helpModal: root.querySelector('#upFormulaHelpModal'),
+      helpClose: root.querySelector('#upFormulaHelpClose')
     };
     els.addVarBtn.onclick = () => { addVar(); renderVarRows(); };
     els.addFuncBtn.onclick = () => { addFunc(); renderFuncRows(); };
     els.addFormulaBtn.onclick = () => { addFormula(); renderFormulaRows(); };
     els.calcBtn.onclick = berechnen;
+
+    if (els.helpBtn && els.helpModal) {
+      const closeHelp = () => { els.helpModal.hidden = true; };
+      els.helpBtn.onclick = () => { els.helpModal.hidden = false; };
+      if (els.helpClose) els.helpClose.onclick = closeHelp;
+      els.helpModal.addEventListener('click', e => { if (e.target === els.helpModal) closeHelp(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !els.helpModal.hidden) closeHelp(); });
+    }
   }
 
   // Quellspalten für Variablen: Signalgruppen (SG) und Detektoren (DET) als
@@ -304,6 +339,42 @@
   function addVar() {
     const cols = sourceCols();
     vars.push({ id: nextVarId++, alias: `VAR${nextVarId - 1}`, colIndex: cols.length ? cols[0].index : null });
+  }
+
+  // Wandelt einen beliebigen Spaltennamen in einen gültigen, noch nicht
+  // vergebenen Bezeichner um (Basis für "Objekt aus dem Dropdown wählen" -
+  // siehe exprCandidates()/resolveOrCreateVarForCol() unten). Spaltennamen
+  // aus der OCIT-Kopfzeile sind i.d.R. bereits kurz und identifiergleich
+  // (z.B. "K1", "D1") - die Bereinigung ist nur ein Sicherheitsnetz für
+  // Ausnahmefälle (Leerzeichen, führende Ziffer, Duplikate).
+  function sanitizeIdent(base) {
+    let s = (base || '').replace(/[^A-Za-z0-9_]/g, '_');
+    if (!/^[A-Za-z_]/.test(s)) s = '_' + s;
+    return s || 'VAR';
+  }
+  function uniqueAlias(base) {
+    const root = sanitizeIdent(base);
+    const taken = alias => isReserved(alias) || vars.some(v => v.alias.trim() === alias);
+    if (!taken(root)) return root;
+    let i = 2;
+    while (taken(`${root}${i}`)) i++;
+    return `${root}${i}`;
+  }
+
+  // Liefert den Alias einer bereits existierenden Variable für diese Spalte,
+  // oder legt (bei Auswahl eines "Objekts" aus dem Ausdrucks-Editor-Dropdown,
+  // siehe exprCandidates()/setupExprEditor() unten) still eine neue an - so
+  // muss man beim Formulieren einer Formel nicht erst manuell im Abschnitt
+  // "Variablen" eine Zeile anlegen. Rendert die Variablen-Liste neu, damit
+  // die neue/wiederverwendete Zuordnung dort sichtbar ist.
+  function resolveOrCreateVarForCol(col) {
+    const existing = vars.find(v => v.colIndex === col.index);
+    if (existing && existing.alias.trim()) return existing.alias.trim();
+    const alias = uniqueAlias(col.name);
+    if (existing) existing.alias = alias;
+    else vars.push({ id: nextVarId++, alias, colIndex: col.index });
+    renderVarRows();
+    return alias;
   }
 
   function addFunc() {
@@ -590,8 +661,10 @@
     const cols = sourceCols();
 
     if (aliasErrors.length || funcErrors.length) {
-      els.hint.textContent = [...aliasErrors, ...funcErrors].join('; ') + ' – bitte zuerst beheben.';
+      const desc = [...aliasErrors, ...funcErrors].join('; ');
+      els.hint.textContent = desc + ' – bitte zuerst beheben.';
       els.hint.className = 'hint warn';
+      if (GZ.snackbar) GZ.snackbar.show('Formeln können nicht berechnet werden', { type: 'error', description: desc });
       return;
     }
 
@@ -612,11 +685,11 @@
     const varTypesWithTx = { ...types, TX: 'NUM' };
 
     const computed = [];
-    let skipped = 0;
+    const skippedList = []; // {name, message} - für Hint-Zeile UND Snackbar
     formulas.forEach(f => {
       const name = f.name.trim() || `F${f.id}`;
       const compiled = compile(f.exprText, varTypesWithTx, funcDefs);
-      if (!compiled.ok) { skipped++; return; }
+      if (!compiled.ok) { skippedList.push({ name, message: compiled.message }); return; }
       const rawSeries = new Array(times.length);
       let cyclePtr = 0;
       for (let i = 0; i < times.length; i++) {
@@ -639,10 +712,17 @@
     });
 
     syntheticCols = computed;
+    const skipped = skippedList.length;
     els.hint.textContent = formulas.length
       ? `${computed.length} von ${formulas.length} Formel(n) berechnet` + (skipped ? `, ${skipped} übersprungen (ungültig)` : '') + '.'
       : 'Keine Formeln definiert.';
     els.hint.className = 'hint' + (skipped ? ' warn' : '');
+    if (skipped && GZ.snackbar) {
+      GZ.snackbar.show(`${skipped} Formel(n) übersprungen (ungültig)`, {
+        type: 'warning',
+        description: skippedList.map(s => `${s.name}: ${s.message}`).join(' · ')
+      });
+    }
 
     if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshFormulaColumns();
   }
