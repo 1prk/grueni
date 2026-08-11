@@ -66,13 +66,19 @@
 
   const CMP_OPS = { '>': (a, b) => a > b, '<': (a, b) => a < b, '>=': (a, b) => a >= b, '<=': (a, b) => a <= b, '==': (a, b) => a === b, '!=': (a, b) => a !== b };
   const TYPE_LABEL = t => ({
-    BOOL: 'WAHR/FALSCH', NUM: 'eine Zahl',
+    BOOL: 'WAHR/FALSCH', NUM: 'eine Zahl', TEXT: 'einen Text',
     SG: 'eine Signalgruppe', DET: 'einen Detektor',
     KAT_SG: 'einen Signalgruppen-Zustand', KAT_DET: 'einen Detektor-Zustand',
     ANY: 'einen (noch unbestimmten) Parameterwert'
   })[t] || t;
   const isNumCompatible = t => t === 'NUM' || t === 'ANY';
-  const isKatCompatible = t => t === 'KAT_SG' || t === 'KAT_DET' || t === 'ANY';
+  const isTextCompatible = t => t === 'TEXT' || t === 'ANY';
+  // KAT_* ist offen für beliebig viele konkrete Zustands-Kategorien (aktuell
+  // KAT_SG/KAT_DET aus KAT_TOKENS unten, plus was ein Aufrufer per
+  // extraKatTokens registriert, z.B. KAT_QSV in oepnvQa.js) - generisch am
+  // Namensschema erkannt statt eine feste Liste zu pflegen.
+  const isKatType = t => typeof t === 'string' && t.indexOf('KAT_') === 0;
+  const isKatCompatible = t => isKatType(t) || t === 'ANY';
   const isObjCompatible = t => t === 'SG' || t === 'DET' || t === 'ANY';
 
   // Zustands-Konstanten (exakte Schreibweise, siehe GZ.parser STATE_CAT/
@@ -159,7 +165,13 @@
     { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)' }
   ];
 
-  function tokenize(text) {
+  // extraKatTokens: wie KAT_TOKENS, aber NUR für diesen einen tokenize()-
+  // Aufruf aktiv statt global reserviert (siehe Datei-Kopfkommentar zu
+  // KAT_TOKENS) - damit z.B. oepnvQa.js eigene Zustands-Konstanten (QSV-
+  // Stufen A-F) einführen kann, ohne dass diese Buchstaben dem Formel-
+  // Builder (mit seinen frei wählbaren Variablen-Aliasen) als Bezeichner
+  // verloren gehen.
+  function tokenize(text, extraKatTokens) {
     const tokens = [];
     const n = text.length;
     let i = 0;
@@ -170,6 +182,15 @@
       const ch = text[i];
       if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { i++; continue; }
       const start = i;
+      if (ch === '"' || ch === "'") {
+        const quote = ch;
+        let j = i + 1;
+        while (j < n && text[j] !== quote) j++;
+        if (j >= n) throw new ExprError('Unbeendete Zeichenkette (schließendes Anführungszeichen fehlt)', start);
+        tokens.push({ type: 'STRING', value: text.slice(i + 1, j), pos: start, end: j + 1 });
+        i = j + 1;
+        continue;
+      }
       if (isDigit(ch) || (ch === '.' && isDigit(text[i + 1]))) {
         let j = i;
         while (j < n && isDigit(text[j])) j++;
@@ -183,8 +204,9 @@
         while (j < n && isIdentPart(text[j])) j++;
         const word = text.slice(i, j);
         const upper = word.toUpperCase();
+        const katType = KAT_TOKENS[word] || (extraKatTokens && extraKatTokens[word]);
         if (upper === 'AND' || upper === 'OR' || upper === 'NOT') tokens.push({ type: upper, pos: start, end: j });
-        else if (KAT_TOKENS[word]) tokens.push({ type: 'KATLIT', value: word, katType: KAT_TOKENS[word], pos: start, end: j });
+        else if (katType) tokens.push({ type: 'KATLIT', value: word, katType, pos: start, end: j });
         else tokens.push({ type: 'IDENT', value: word, pos: start, end: j });
         i = j;
         continue;
@@ -261,17 +283,20 @@
         const opTok = next();
         const right = parseAdd();
         const bothNum = isNumCompatible(left.type) && isNumCompatible(right.type);
-        // Konkret unterschiedliche KAT-Subtypen (KAT_SG vs. KAT_DET) sind nie
-        // vergleichbar; ist eine Seite noch ANY (unspezialisierter Funktions-
-        // parameter), lässt sich das erst am tatsächlichen Aufruf entscheiden.
-        const concreteKatMismatch = (left.type === 'KAT_SG' && right.type === 'KAT_DET') || (left.type === 'KAT_DET' && right.type === 'KAT_SG');
+        // Konkret unterschiedliche KAT-Subtypen (z.B. KAT_SG vs. KAT_DET)
+        // sind nie vergleichbar; ist eine Seite noch ANY (unspezialisierter
+        // Funktionsparameter), lässt sich das erst am tatsächlichen Aufruf
+        // entscheiden.
+        const concreteKatMismatch = isKatType(left.type) && isKatType(right.type) && left.type !== right.type;
         const bothSameKat = isKatCompatible(left.type) && isKatCompatible(right.type) && !concreteKatMismatch;
-        if (!bothNum && !bothSameKat) {
-          throw new ExprError(`"${opTok.type}" erwartet zwei Zahlen oder zwei gleichartige Zustände, bekam ${TYPE_LABEL(left.type)} und ${TYPE_LABEL(right.type)}`, opTok.pos);
+        const bothText = isTextCompatible(left.type) && isTextCompatible(right.type);
+        if (!bothNum && !bothSameKat && !bothText) {
+          throw new ExprError(`"${opTok.type}" erwartet zwei Zahlen, zwei gleichartige Zustände oder zwei Texte, bekam ${TYPE_LABEL(left.type)} und ${TYPE_LABEL(right.type)}`, opTok.pos);
         }
-        const isConcreteKat = left.type === 'KAT_SG' || left.type === 'KAT_DET' || right.type === 'KAT_SG' || right.type === 'KAT_DET';
-        if (bothSameKat && isConcreteKat && opTok.type !== '==' && opTok.type !== '!=') {
-          throw new ExprError(`"${opTok.type}" ist für Zustände nicht sinnvoll - nur == oder != verwenden`, opTok.pos);
+        const isConcreteKat = isKatType(left.type) || isKatType(right.type);
+        const isConcreteText = left.type === 'TEXT' || right.type === 'TEXT';
+        if (((bothSameKat && isConcreteKat) || (bothText && isConcreteText)) && opTok.type !== '==' && opTok.type !== '!=') {
+          throw new ExprError(`"${opTok.type}" ist für Zustände/Texte nicht sinnvoll - nur == oder != verwenden`, opTok.pos);
         }
         const fn = CMP_OPS[opTok.type], l = left, r = right;
         return { type: 'BOOL', run: scope => fn(l.run(scope), r.run(scope)) };
@@ -369,6 +394,7 @@
     function parseAtom() {
       const tok = peek();
       if (tok.type === 'NUMBER') { next(); const v = tok.value; return { type: 'NUM', run: () => v }; }
+      if (tok.type === 'STRING') { next(); const v = tok.value; return { type: 'TEXT', run: () => v }; }
       if (tok.type === 'KATLIT') { next(); const v = tok.value, kt = tok.katType; return { type: kt, run: () => v }; }
       if (tok.type === 'IDENT') {
         next();
@@ -395,13 +421,14 @@
   // Parst UND typprüft (aber wertet nicht aus) EINEN FORMEL-Text - für Live-
   // Validierung sowie als Vorstufe der eigentlichen Berechnung. Muss zu BOOL
   // auswerten (anders als ein Funktionsrumpf, siehe compileFunctionDef()).
-  // varTypes: { [alias]: 'BOOL'|'NUM'|'SG'|'DET' }
+  // varTypes: { [alias]: 'BOOL'|'NUM'|'TEXT'|'SG'|'DET'|'KAT_*' }
   // funcs: { [name]: {params:string[], exprText:string} }, optional.
+  // extraKatTokens: siehe tokenize()-Kopfkommentar, optional.
   // Rückgabe: { ok:true, run(scope)->boolean } | { ok:false, message, pos }
-  function compile(text, varTypes, funcs) {
+  function compile(text, varTypes, funcs, extraKatTokens) {
     if (!text || !text.trim()) return { ok: false, message: 'Formel ist leer.', pos: 0 };
     try {
-      const tokens = tokenize(text);
+      const tokens = tokenize(text, extraKatTokens);
       const node = parse(tokens, varTypes || {}, funcs || {});
       if (node.type !== 'BOOL') {
         throw new ExprError('Die Formel muss insgesamt zu WAHR/FALSCH auswerten (z.B. mit einem Vergleich wie "<" oder einer Verknüpfung mit AND/OR)', 0);

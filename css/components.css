@@ -331,6 +331,10 @@ tr.oe-hidden{ display:none; }
 .expr-tok-kat{ color:var(--formula-on); font-weight:600; }
 .expr-tok-func{ color:var(--req-marker); font-weight:600; }
 .expr-tok-var{ color:var(--accent); }
+/* Text-Literal ("..."/'...') - z.B. für den ÖPNV-Zeilenfilter (SPL-
+   Vergleich). Bleibt immer nur eingefärbter Text, nie Chip (siehe
+   isChipToken() in js/core/exprEditor.js). */
+.expr-tok-text{ color:var(--sig-redyellow); font-weight:600; }
 
 /* Echte, entfernbare Chips (contenteditable="false", MUI-artig) - siehe
    buildChipEl()/isChipToken() in formulaBuilder.js. */
