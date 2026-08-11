@@ -469,12 +469,12 @@
               <button type="button" id="upAddVarBtn" class="btn">+ Variable hinzufügen</button>
             </div>
             <div class="cfg-field">
-              <label>Funktionen <span class="cfg-field-hint">(benutzerdefinierte, parametrisierte Ausdrücke aus den Primitiven, z.&nbsp;B. Name „LangGenug“ mit Parametern „sg, schwelle“ und Rumpf „DauerSeit(sg, GRUEN, TX) &gt; schwelle“ – aus Formeln (oder anderen Funktionen) mit konkreten Argumenten aufrufbar, z.&nbsp;B. „LangGenug(K1, 30)“; Parameter sind generisch, kein fester Typ nötig)</span></label>
+              <label>Funktionen <span class="cfg-field-hint">(benutzerdefinierte, parametrisierte Ausdrücke aus den Primitiven, z.&nbsp;B. Name „LangGenug“ mit Parametern „sg, schwelle“ und Rumpf „DauerSeit(sg, GRUEN) &gt; schwelle“ – aus Formeln (oder anderen Funktionen) mit konkreten Argumenten aufrufbar, z.&nbsp;B. „LangGenug(K1, 30)“; Parameter sind generisch, kein fester Typ nötig)</span></label>
               <div id="upFuncRows" class="up-formula-list"></div>
               <button type="button" id="upAddFuncBtn" class="btn">+ Funktion hinzufügen</button>
             </div>
             <div class="cfg-field">
-              <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN, TX) &gt; 45 AND Zustand(D1, TX) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det, TX), Dauer(sg|det, TX), DauerSeit(sg|det, zustand, TX) sowie eigene Funktionen · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · TX = aktueller Auswertungszeitpunkt (immer verfügbar))</span></label>
+              <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det), Dauer(sg|det), DauerSeit(sg|det, zustand) sowie eigene Funktionen · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · der Auswertungszeitpunkt (TX) wird automatisch berücksichtigt, nicht als Argument nötig)</span></label>
               <div id="upFormulaRows" class="up-formula-list"></div>
               <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
             </div>
@@ -499,9 +499,9 @@
                 <h4>Primitiven</h4>
                 <table class="help-table">
                   <tbody>
-                    <tr><td class="mono-input help-fn">Zustand(objekt, TX)</td><td>aktueller Zustand des Objekts – GRUEN/ROT/GELB/ROTGELB/DUNKEL bei einer Signalgruppe, BELEGT/FREI bei einem Detektor.</td></tr>
-                    <tr><td class="mono-input help-fn">Dauer(objekt, TX)</td><td>Sekunden, die das Objekt bereits ununterbrochen im aktuellen Zustand ist.</td></tr>
-                    <tr><td class="mono-input help-fn">DauerSeit(objekt, zustand, TX)</td><td>Sekunden seit dem letzten Eintritt in „zustand“ – 0, wenn das Objekt gerade nicht in diesem Zustand ist.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(objekt)</td><td>aktueller Zustand des Objekts – GRUEN/ROT/GELB/ROTGELB/DUNKEL bei einer Signalgruppe, BELEGT/FREI bei einem Detektor.</td></tr>
+                    <tr><td class="mono-input help-fn">Dauer(objekt)</td><td>Sekunden, die das Objekt bereits ununterbrochen im aktuellen Zustand ist.</td></tr>
+                    <tr><td class="mono-input help-fn">DauerSeit(objekt, zustand)</td><td>Sekunden seit dem letzten Eintritt in „zustand“ – 0, wenn das Objekt gerade nicht in diesem Zustand ist.</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -509,24 +509,25 @@
               <div class="help-section">
                 <h4>Zustände &amp; Operatoren</h4>
                 <p><strong>Signalgruppe:</strong> GRUEN, ROT, GELB, ROTGELB, DUNKEL &nbsp;·&nbsp; <strong>Detektor:</strong> BELEGT, FREI</p>
-                <p><strong>Operatoren:</strong> <span class="mono-input">+ − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT ( )</span> &nbsp;·&nbsp; <strong>TX</strong> = aktueller Auswertungszeitpunkt (immer verfügbar, als Sekunden seit Umlaufbeginn)</p>
+                <p><strong>Operatoren:</strong> <span class="mono-input">+ − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT ( )</span></p>
+                <p class="help-tip">Der aktuelle Auswertungszeitpunkt wird intern automatisch berücksichtigt – man muss ihn nirgends als Argument angeben. Für fortgeschrittene, eigene Bedingungen (z.&nbsp;B. in einer Funktion) steht er trotzdem als Variable <span class="mono-input">TX</span> zur Verfügung (Sekunden seit Umlaufbeginn).</p>
               </div>
 
               <div class="help-section">
                 <h4>Beispiele</h4>
                 <table class="help-table">
                   <tbody>
-                    <tr><td class="mono-input help-fn">Zustand(D1, TX) == BELEGT</td><td>Detektor D1 ist aktuell belegt.</td></tr>
-                    <tr><td class="mono-input help-fn">Zustand(K1, TX) == GRUEN</td><td>Signalgruppe K1 hat gerade Freigabe (Grün).</td></tr>
-                    <tr><td class="mono-input help-fn">DauerSeit(K1, GRUEN, TX) &gt; 45</td><td>K1 ist seit mehr als 45&nbsp;s ununterbrochen grün.</td></tr>
-                    <tr><td class="mono-input help-fn">Zustand(D1, TX) == BELEGT AND Zustand(K1, TX) == ROT</td><td>D1 ist belegt, während K1 gerade Rot zeigt (z.&nbsp;B. Anmeldung ohne Freigabe).</td></tr>
-                    <tr><td class="mono-input help-fn">NOT (Zustand(D1, TX) == BELEGT)</td><td>D1 ist gerade frei.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(D1) == BELEGT</td><td>Detektor D1 ist aktuell belegt.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(K1) == GRUEN</td><td>Signalgruppe K1 hat gerade Freigabe (Grün).</td></tr>
+                    <tr><td class="mono-input help-fn">DauerSeit(K1, GRUEN) &gt; 45</td><td>K1 ist seit mehr als 45&nbsp;s ununterbrochen grün.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(D1) == BELEGT AND Zustand(K1) == ROT</td><td>D1 ist belegt, während K1 gerade Rot zeigt (z.&nbsp;B. Anmeldung ohne Freigabe).</td></tr>
+                    <tr><td class="mono-input help-fn">NOT (Zustand(D1) == BELEGT)</td><td>D1 ist gerade frei.</td></tr>
                   </tbody>
                 </table>
                 <p class="help-tip">Mit einer <strong>Funktion</strong> lässt sich ein wiederkehrendes Muster einmal benennen und mehrfach mit unterschiedlichen Argumenten aufrufen:</p>
                 <table class="help-table">
                   <tbody>
-                    <tr><td class="mono-input help-fn">LangGenug(sg, schwelle) :=<br>DauerSeit(sg, GRUEN, TX) &gt; schwelle</td><td>Funktions-<em>definition</em> im Abschnitt „Funktionen“ (Name „LangGenug“, Parameter „sg, schwelle“).</td></tr>
+                    <tr><td class="mono-input help-fn">LangGenug(sg, schwelle) :=<br>DauerSeit(sg, GRUEN) &gt; schwelle</td><td>Funktions-<em>definition</em> im Abschnitt „Funktionen“ (Name „LangGenug“, Parameter „sg, schwelle“).</td></tr>
                     <tr><td class="mono-input help-fn">LangGenug(K1, 30) OR LangGenug(K2, 30)</td><td>Aufruf in einer Formel: mindestens eine der beiden Signalgruppen ist seit über 30&nbsp;s grün.</td></tr>
                   </tbody>
                 </table>

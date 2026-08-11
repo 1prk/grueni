@@ -2,11 +2,15 @@
    synthetische Detektoren. Variablen sind Aliase auf bestehende Signalgruppen-
    (SG), Detektor- (DET) bzw. APW-/ÖPNV-Spalten. SG/DET sind Objekt-Handles
    (siehe GZ.exprEngine): kein direkter WAHR/FALSCH-Wert mehr, sondern über
-   die Primitiven Zustand/Dauer/DauerSeit auszuwerten (z.B. "Zustand(D1,TX)
+   die Primitiven Zustand/Dauer/DauerSeit auszuwerten (z.B. "Zustand(D1)
    == BELEGT" statt früher bloß "D1"). APW/ÖPNV bleiben Zahl (roher Wert).
+   Der aktuelle Auswertungszeitpunkt (früher als explizites TX-Argument
+   mitgegeben) ist jetzt vollständig implizit - keine Primitive verlangt
+   TX mehr als Argument, TX bleibt aber als normale NUM-Variable im scope
+   verfügbar (für eigene, fortgeschrittene Bedingungen in Funktionsrümpfen).
 
    Funktionen sind benutzerdefinierte, parametrisierte Ausdrücke aus den
-   Primitiven (z.B. "LangGenug(sg, schwelle) := DauerSeit(sg, GRUEN, TX) >
+   Primitiven (z.B. "LangGenug(sg, schwelle) := DauerSeit(sg, GRUEN) >
    schwelle"), aufrufbar aus Formeln (oder anderen Funktionen) mit konkreten
    Argumenten ("LangGenug(K1, 30)"). Parameter sind generisch (kein fester
    SG/DET/NUM-Typ in der Definition) - jeder Aufruf spezialisiert den Rumpf
@@ -112,7 +116,9 @@
   // AND/OR/NOT. insertText/selStart/selEnd beschreiben, was beim Einfügen an
   // der Cursorposition eingesetzt wird und welcher Teilbereich davon
   // anschließend als Platzhalter selektiert wird, damit man ihn direkt
-  // überschreiben kann (z.B. "Zustand(objekt, TX)" mit "objekt" selektiert).
+  // überschreiben kann (z.B. "Zustand(objekt)" mit "objekt" selektiert). TX
+  // wird bewusst NICHT in die eingefügten Primitiven-/Funktionsaufrufe
+  // aufgenommen (siehe GZ.exprEngine PRIMITIVE_INFO) - es bleibt implizit.
   function exprCandidates() {
     const items = [];
     GZ.exprEngine.PRIMITIVE_INFO.forEach(p => {
@@ -497,7 +503,7 @@
         <span class="expr-input-wrap">
           <span class="expr-input-box">
             <div class="expr-highlight" aria-hidden="true"></div>
-            <input type="text" class="up-func-body expr-input mono-input" value="${esc(f.bodyText)}" placeholder="Ausdruck, z.B. DauerSeit(sg, GRUEN, TX) &gt; schwelle" autocomplete="off" spellcheck="false">
+            <input type="text" class="up-func-body expr-input mono-input" value="${esc(f.bodyText)}" placeholder="Ausdruck, z.B. DauerSeit(sg, GRUEN) &gt; schwelle" autocomplete="off" spellcheck="false">
           </span>
           <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
           <div class="expr-autocomplete" hidden></div>
@@ -536,7 +542,7 @@
         <span class="expr-input-wrap">
           <span class="expr-input-box">
             <div class="expr-highlight" aria-hidden="true"></div>
-            <input type="text" class="up-formula-expr expr-input mono-input" value="${esc(f.exprText)}" placeholder="z.B. DauerSeit(K1, GRUEN, TX) &gt; 45 AND Zustand(D1, TX) == BELEGT" autocomplete="off" spellcheck="false">
+            <input type="text" class="up-formula-expr expr-input mono-input" value="${esc(f.exprText)}" placeholder="z.B. DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT" autocomplete="off" spellcheck="false">
           </span>
           <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
           <div class="expr-autocomplete" hidden></div>

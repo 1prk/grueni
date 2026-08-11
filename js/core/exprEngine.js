@@ -38,14 +38,15 @@
    einem klaren Fehler statt eines Stapelüberlaufs.
 
    Eingebaute Funktionen (PRIMITIVES unten) verwandeln ein Objekt-Handle in
-   einen auswertbaren Wert - Zustand(sg|det, TX)->KAT_*, Dauer(sg|det, TX)
-   ->NUM (Sekunden im aktuellen Zustand), DauerSeit(sg|det, kategorie, TX)
-   ->NUM (Sekunden seit dem letzten Eintritt in "kategorie", 0 wenn gerade
-   nicht in diesem Zustand). TX ist rein deklarativ (self-dokumentierend,
-   "an dieser Stelle ausgewertet") - der aktuelle Auswertungspunkt wird
-   NICHT über den TX-Wert selbst durchgereicht, sondern über das jeweilige
-   Objekt-Handle (siehe scope unten), daher ignorieren die Primitiven TX
-   zur Laufzeit; es wird nur typgeprüft (muss NUM sein).
+   einen auswertbaren Wert - Zustand(sg|det)->KAT_*, Dauer(sg|det)->NUM
+   (Sekunden im aktuellen Zustand), DauerSeit(sg|det, kategorie)->NUM
+   (Sekunden seit dem letzten Eintritt in "kategorie", 0 wenn gerade nicht
+   in diesem Zustand). Der aktuelle Auswertungszeitpunkt wird NICHT als
+   Argument übergeben, sondern läuft intern/implizit über das jeweilige
+   Objekt-Handle (siehe scope unten, handle.sweep) - TX bleibt zwar als
+   normale NUM-Variable im scope verfügbar (z.B. für eigene Bedingungen wie
+   "TX > 60" in einer Funktion), muss aber nie an eine Primitive übergeben
+   werden und ist daher nirgends ein Pflichtargument.
 
    scope-Objekt bei run(scope): Alias -> Wert. NUM-Variablen (APW/ÖPNV) sind
    number (NaN bei fehlendem Rohwert - jeder Vergleich mit NaN ist in JS
@@ -92,11 +93,10 @@
   // DET/NUM/KAT_* verlangt wird - siehe Datei-Kopfkommentar zu ANY.
   const PRIMITIVES = {
     Zustand: {
-      arity: 2,
+      arity: 1,
       check(args, pos) {
-        const [obj, tx] = args;
-        if (!isObjCompatible(obj.type)) throw new ExprError('"Zustand" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
-        if (!isNumCompatible(tx.type)) throw new ExprError(`"Zustand" (2. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
+        const [obj] = args;
+        if (!isObjCompatible(obj.type)) throw new ExprError('"Zustand" erwartet als Argument eine Signalgruppe oder einen Detektor', pos);
         return katTypeForObj(obj.type);
       },
       run(args) {
@@ -108,11 +108,10 @@
       }
     },
     Dauer: {
-      arity: 2,
+      arity: 1,
       check(args, pos) {
-        const [obj, tx] = args;
-        if (!isObjCompatible(obj.type)) throw new ExprError('"Dauer" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
-        if (!isNumCompatible(tx.type)) throw new ExprError(`"Dauer" (2. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
+        const [obj] = args;
+        if (!isObjCompatible(obj.type)) throw new ExprError('"Dauer" erwartet als Argument eine Signalgruppe oder einen Detektor', pos);
         return 'NUM';
       },
       run(args) {
@@ -125,9 +124,9 @@
       }
     },
     DauerSeit: {
-      arity: 3,
+      arity: 2,
       check(args, pos) {
-        const [obj, kat, tx] = args;
+        const [obj, kat] = args;
         if (!isObjCompatible(obj.type)) throw new ExprError('"DauerSeit" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
         if (obj.type === 'SG' || obj.type === 'DET') {
           const expectedKat = katTypeForObj(obj.type);
@@ -137,7 +136,6 @@
         } else if (!isKatCompatible(kat.type)) {
           throw new ExprError('"DauerSeit" (2. Argument) erwartet einen Zustand', pos);
         }
-        if (!isNumCompatible(tx.type)) throw new ExprError(`"DauerSeit" (3. Argument TX) erwartet eine Zahl, bekam ${TYPE_LABEL(tx.type)}`, pos);
         return 'NUM';
       },
       run(args) {
@@ -156,9 +154,9 @@
   // in formulaBuilder.js) - getrennt von PRIMITIVES.check/run oben, da rein
   // beschreibend (keine Auswertungslogik).
   const PRIMITIVE_INFO = [
-    { name: 'Zustand', params: ['objekt', 'TX'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)' },
-    { name: 'Dauer', params: ['objekt', 'TX'], desc: 'Sekunden im aktuellen Zustand' },
-    { name: 'DauerSeit', params: ['objekt', 'zustand', 'TX'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)' }
+    { name: 'Zustand', params: ['objekt'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)' },
+    { name: 'Dauer', params: ['objekt'], desc: 'Sekunden im aktuellen Zustand' },
+    { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)' }
   ];
 
   function tokenize(text) {
