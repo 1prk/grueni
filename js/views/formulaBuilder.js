@@ -189,7 +189,43 @@
     const refreshHighlight = errPos => { hl.innerHTML = renderExprHighlight(input.value, errPos == null ? null : errPos); syncScroll(); };
     wrap.__exprRefreshHighlight = refreshHighlight;
 
-    const closeDropdown = () => { dropdown.hidden = true; dropdown.innerHTML = ''; };
+    // Schließt bei Bedarf mitlaufende Scroll-/Resize-Listener (siehe unten) -
+    // nur EIN Listener-Paar pro Dropdown-Öffnung, selbst-entfernend, damit
+    // beim wiederholten Öffnen/Schließen nichts an window hängen bleibt.
+    let scrollCloseHandler = null;
+    const closeDropdown = () => {
+      dropdown.hidden = true; dropdown.innerHTML = '';
+      if (scrollCloseHandler) {
+        window.removeEventListener('scroll', scrollCloseHandler, true);
+        window.removeEventListener('resize', scrollCloseHandler);
+        scrollCloseHandler = null;
+      }
+    };
+
+    // .expr-autocomplete ist bewusst position:fixed statt :absolute (siehe
+    // components.css) - das umgeht das overflow:hidden von .panel (für die
+    // abgerundeten Ecken), das ein absolut positioniertes Dropdown sonst am
+    // Panel-Rand hart abschneiden würde. Position wird daher hier per JS aus
+    // der tatsächlichen Bildschirmposition berechnet, inkl. Umklappen nach
+    // oben, wenn unterhalb kein Platz mehr ist, und horizontalem Clamping.
+    const positionDropdown = () => {
+      const rect = wrap.getBoundingClientRect();
+      dropdown.style.left = Math.round(rect.left) + 'px';
+      dropdown.style.top = Math.round(rect.bottom + 3) + 'px';
+      dropdown.style.visibility = 'hidden';
+      requestAnimationFrame(() => {
+        if (dropdown.hidden) return; // in der Zwischenzeit wieder geschlossen
+        const dw = dropdown.offsetWidth, dh = dropdown.offsetHeight;
+        let top = rect.bottom + 3;
+        if (top + dh > window.innerHeight - 8) top = Math.max(8, rect.top - dh - 3);
+        let left = rect.left;
+        if (left + dw > window.innerWidth - 8) left = window.innerWidth - dw - 8;
+        if (left < 8) left = 8;
+        dropdown.style.top = Math.round(top) + 'px';
+        dropdown.style.left = Math.round(left) + 'px';
+        dropdown.style.visibility = '';
+      });
+    };
 
     const currentPrefix = () => {
       const val = input.value, caret = input.selectionStart;
@@ -215,6 +251,12 @@
       dropdown.querySelectorAll('.expr-ac-item').forEach(el => {
         el.onmousedown = ev => { ev.preventDefault(); accept(items[Number(el.dataset.idx)], start, end); };
       });
+      positionDropdown();
+      if (!scrollCloseHandler) {
+        scrollCloseHandler = () => closeDropdown();
+        window.addEventListener('scroll', scrollCloseHandler, true);
+        window.addEventListener('resize', scrollCloseHandler);
+      }
     };
 
     const updateAutocomplete = () => {
@@ -314,7 +356,8 @@
       hint: root.querySelector('#upFormulaHint'),
       helpBtn: root.querySelector('#upFormulaHelpBtn'),
       helpModal: root.querySelector('#upFormulaHelpModal'),
-      helpClose: root.querySelector('#upFormulaHelpClose')
+      helpClose: root.querySelector('#upFormulaHelpClose'),
+      sidebar: root.querySelector('#upFormulaSidebar')
     };
     els.addVarBtn.onclick = () => { addVar(); renderVarRows(); };
     els.addFuncBtn.onclick = () => { addFunc(); renderFuncRows(); };
@@ -653,6 +696,110 @@
       statusEl.className = 'up-var-status ' + (msg ? 'err' : 'ok');
       statusEl.title = msg || 'Gültig';
     });
+    renderSidebar();
+  }
+
+  // Live-Symbolübersicht ("IDE-Gefühl") neben Variablen/Funktionen/Formeln -
+  // rein lesend/anzeigend, außer: Klick auf einen Eintrag fügt ihn in das
+  // GERADE FOKUSSIERTE Ausdrucksfeld ein (siehe insertTextAtInput()). Wird
+  // aus validateAllInline() heraus bei jeder Variablen-/Funktionsänderung
+  // neu aufgebaut (Formeln selbst tauchen hier nicht auf, sie beeinflussen
+  // die Symbolliste nicht).
+  function renderSidebar() {
+    if (!els.sidebar) return;
+    const cols = sourceCols();
+    const boundIdx = new Set(vars.map(v => v.colIndex));
+    const unboundCols = cols.filter(c => !boundIdx.has(c.index));
+
+    const item = (name, meta, insertText, selStart, selEnd, muted) =>
+      `<div class="fsb-item${muted ? ' fsb-item-muted' : ''}" data-insert="${esc(insertText)}" data-sel-start="${selStart}" data-sel-end="${selEnd}" title="${esc(meta)}">
+        <span class="fsb-item-name">${esc(name)}</span><span class="fsb-item-meta">${esc(meta)}</span>
+      </div>`;
+    const section = (title, inner) => `<div class="fsb-section"><div class="fsb-section-title">${esc(title)}</div>${inner || '<div class="fsb-empty">–</div>'}</div>`;
+
+    const varsHtml = vars.filter(v => v.alias.trim()).map(v => {
+      const alias = v.alias.trim();
+      const col = cols.find(c => c.index === v.colIndex);
+      return item(alias, col ? `${col.kuerzel} ${col.name}` : '?', alias, alias.length, alias.length);
+    }).join('');
+
+    const funcsHtml = funcs.filter(f => f.name.trim()).map(f => {
+      const name = f.name.trim();
+      const params = f.params.map(p => p.trim()).filter(Boolean);
+      const argList = params.join(', ');
+      return item(name, `(${argList})`, `${name}(${argList})`, name.length + 1, name.length + 1 + (params[0] ? params[0].length : 0));
+    }).join('');
+
+    const primHtml = GZ.exprEngine.PRIMITIVE_INFO.map(p => {
+      const argList = p.params.join(', ');
+      return item(p.name, `(${argList})`, `${p.name}(${argList})`, p.name.length + 1, p.name.length + 1 + p.params[0].length);
+    }).join('');
+
+    const katChips = Object.entries(GZ.exprEngine.KAT_TOKENS).map(([tok, katType]) =>
+      `<span class="fsb-chip${katType === 'KAT_DET' ? ' fsb-chip-det' : ''}" data-insert="${esc(tok)}" data-sel-start="${tok.length}" data-sel-end="${tok.length}" title="${katType === 'KAT_SG' ? 'Signalgruppen-Zustand' : 'Detektor-Zustand'}">${esc(tok)}</span>`
+    ).join('');
+
+    const objHtml = unboundCols.map(c =>
+      `<div class="fsb-item fsb-item-muted" data-col-index="${c.index}" title="${esc(c.kuerzel)}">
+        <span class="fsb-item-name">${esc(c.name)}</span><span class="fsb-item-meta">${esc(c.kuerzel)}</span>
+      </div>`
+    ).join('');
+
+    els.sidebar.innerHTML = [
+      section('Variablen', varsHtml),
+      section('Funktionen', funcsHtml),
+      section('Primitiven', primHtml),
+      section('Zustände', `<div class="fsb-chips">${katChips}</div>`),
+      section('Objekte (ohne Variable)', objHtml)
+    ].join('');
+
+    els.sidebar.querySelectorAll('[data-insert]').forEach(el => {
+      el.onmousedown = ev => {
+        ev.preventDefault(); // Fokus im Ausdrucksfeld erhalten (siehe insertTextAtFocused())
+        insertTextAtFocused(el.dataset.insert, Number(el.dataset.selStart), Number(el.dataset.selEnd));
+      };
+    });
+    els.sidebar.querySelectorAll('[data-col-index]').forEach(el => {
+      el.onmousedown = ev => {
+        ev.preventDefault();
+        // Erst prüfen, OB überhaupt eingefügt werden kann - sonst würde ein
+        // Klick ohne fokussiertes Feld still (nur mit Hinweis, aber ohne
+        // sichtbaren Effekt) trotzdem eine Variable anlegen, was wie ein
+        // Bug wirkt (Seiteneffekt ohne Ergebnis).
+        if (!activeExprInput()) {
+          if (GZ.snackbar) GZ.snackbar.show('Kein Eingabefeld aktiv', { type: 'info', description: 'Zuerst in ein Funktions- oder Formelfeld klicken, dann aus der Übersicht auswählen.' });
+          return;
+        }
+        const col = cols.find(c => c.index === Number(el.dataset.colIndex));
+        if (!col) return;
+        const alias = resolveOrCreateVarForCol(col);
+        insertTextAtFocused(alias, alias.length, alias.length);
+      };
+    });
+  }
+
+  // Liefert das aktuell fokussierte Ausdrucksfeld (document.activeElement
+  // bleibt dank preventDefault auf mousedown der Sidebar-Klicks das zuvor
+  // fokussierte Feld, siehe renderSidebar()) oder null.
+  function activeExprInput() {
+    const el = document.activeElement;
+    return (el && el.classList && el.classList.contains('expr-input')) ? el : null;
+  }
+
+  // Fügt Text in das aktuell fokussierte Ausdrucksfeld ein - no-op mit
+  // Hinweis, wenn gerade keins fokussiert ist (siehe activeExprInput()).
+  function insertTextAtFocused(text, selStart, selEnd) {
+    const input = activeExprInput();
+    if (!input) {
+      if (GZ.snackbar) GZ.snackbar.show('Kein Eingabefeld aktiv', { type: 'info', description: 'Zuerst in ein Funktions- oder Formelfeld klicken, dann aus der Übersicht auswählen.' });
+      return;
+    }
+    const start = input.selectionStart, end = input.selectionEnd;
+    const val = input.value;
+    input.value = val.slice(0, start) + text + val.slice(end);
+    input.focus();
+    input.setSelectionRange(start + selStart, start + selEnd);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   // Baut für eine SG-/DET-Variable EINMAL (nicht pro Zeile) ihre Segmente +
