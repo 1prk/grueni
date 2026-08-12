@@ -236,6 +236,9 @@ tr.oe-hidden{ display:none; }
 .up-var-status, .up-formula-status, .oe-filter-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
 .up-var-status.ok, .up-formula-status.ok, .oe-filter-status.ok{ color:var(--sig-green); }
 .up-var-status.err, .up-formula-status.err, .oe-filter-status.err{ color:var(--sig-red); }
+/* "noch nicht fertig" (siehe exprEngine incomplete) - bewusst unauffällig,
+   damit normales Tippen nicht permanent nach Fehler aussieht. */
+.up-formula-status.pending, .oe-filter-status.pending{ color:var(--text-faint); }
 .mono-input{ font-family:var(--mono); }
 .oe-filter-row{ display:flex; align-items:flex-start; gap:6px; }
 .oe-filter-row .expr-input-wrap{ flex:1; min-width:0; }
@@ -258,16 +261,23 @@ tr.oe-hidden{ display:none; }
    Übersicht) ---------- */
 .formula-layout{ display:flex; align-items:flex-start; gap:18px; padding:16px; }
 .formula-main{ flex:1; min-width:0; padding:0; }
+/* Feste Höhenobergrenze (statt an der Viewporthöhe zu hängen): die Seiten-
+   leiste sitzt in einem flex-Container neben .formula-main - ohne harte
+   Kappung bestimmt bei vielen Objekten/Variablen SIE die Panelhöhe und
+   streckt den ganzen Tab. Zusätzlich scrollt jede Sektion INTERN (siehe
+   .fsb-section-body), damit eine einzelne lange Liste nicht die übrigen
+   Abschnitte unerreichbar weit nach unten schiebt. */
 .formula-sidebar{
   width:230px; flex-shrink:0; position:sticky; top:12px;
   border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-surface-2);
-  max-height:calc(100vh - 100px); overflow-y:auto;
+  max-height:400px; overflow-y:auto;
 }
 @media (max-width:900px){
   .formula-layout{ flex-direction:column; }
-  .formula-sidebar{ width:100%; position:static; max-height:none; }
+  .formula-sidebar{ width:100%; position:static; max-height:260px; }
 }
 .fsb-section{ border-bottom:1px solid var(--border); padding:9px 11px; }
+.fsb-section-body{ max-height:132px; overflow-y:auto; }
 .fsb-section:last-child{ border-bottom:none; }
 .fsb-section-title{ font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); margin-bottom:6px; }
 .fsb-empty{ font-size:11px; color:var(--text-faint); font-style:italic; }
@@ -348,8 +358,11 @@ tr.oe-hidden{ display:none; }
 .expr-chip{
   display:inline-flex; align-items:center; gap:2px; margin:1px 3px 1px 0;
   padding:1px 3px 1px 9px; border-radius:11px; font-weight:600; font-size:12px;
-  cursor:default; vertical-align:middle; white-space:nowrap;
+  cursor:pointer; vertical-align:middle; white-space:nowrap;
 }
+/* Chips sind austauschbar (Klick öffnet die gefilterte Auswahlliste, siehe
+   gz-chip-replace in exprEditor.js) - das darf man ihnen ansehen. */
+.expr-chip:hover{ box-shadow:0 0 0 2px var(--accent-bg-strong); }
 .expr-chip-label{ line-height:1.6; }
 .expr-chip-remove{
   display:inline-flex; align-items:center; justify-content:center;

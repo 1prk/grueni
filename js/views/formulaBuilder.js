@@ -59,6 +59,23 @@
   // formulaBuilder-spezifisch ist: exprCandidates() (Kandidatenliste) und die
   // beiden setup()-Aufrufe in renderFuncRows()/renderFormulaRows().
 
+  // Vergleichs-/Rechenoperatoren für die Palette (siehe exprCandidates()) -
+  // mit umgebenden Leerzeichen eingefügt, damit ein reiner Klickweg lesbaren
+  // Text erzeugt ("DauerSeit(K1, GRUEN) > 45" statt "DauerSeit(K1,GRUEN)>45").
+  const OPERATOR_INFO = [
+    { label: '>', insert: ' > ', hint: 'größer als', desc: 'Zahlenvergleich: größer als' },
+    { label: '>=', insert: ' >= ', hint: 'größer/gleich', desc: 'Zahlenvergleich: größer oder gleich' },
+    { label: '<', insert: ' < ', hint: 'kleiner als', desc: 'Zahlenvergleich: kleiner als' },
+    { label: '<=', insert: ' <= ', hint: 'kleiner/gleich', desc: 'Zahlenvergleich: kleiner oder gleich' },
+    { label: '==', insert: ' == ', hint: 'gleich', desc: 'Gleichheit - für Zahlen UND Zustände (z.B. Zustand(K1) == GRUEN)' },
+    { label: '!=', insert: ' != ', hint: 'ungleich', desc: 'Ungleichheit - für Zahlen UND Zustände' },
+    { label: '+', insert: ' + ', hint: 'plus', desc: 'Addition' },
+    { label: '-', insert: ' - ', hint: 'minus', desc: 'Subtraktion' },
+    { label: '*', insert: ' * ', hint: 'mal', desc: 'Multiplikation' },
+    { label: '/', insert: ' / ', hint: 'geteilt', desc: 'Division' },
+    { label: '( )', insert: '()', hint: 'Klammern', desc: 'Klammern zum Gruppieren', caret: 1 } // Cursor ZWISCHEN die Klammern
+  ];
+
   // Zeichenbereiche ALLER Parameter innerhalb von "name(argList)" (relativ
   // zum Anfang des insertText, d.h. inkl. "name(" - Offset), parallel zur
   // ", "-Verkettung von params.join(', '). Erlaubt es GZ.exprEditor, nach
@@ -96,7 +113,7 @@
       items.push({
         group: 'Primitiven', label: p.name, hint: `(${argList})`, desc: p.desc,
         insertText: `${p.name}(${argList})`,
-        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges
+        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges, kind: 'func'
       });
     });
     funcs.forEach(f => {
@@ -108,21 +125,31 @@
       items.push({
         group: 'Eigene Funktionen', label: name, hint: `(${argList})`, desc: f.bodyText,
         insertText: `${name}(${argList})`,
-        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges
+        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges, kind: 'func'
       });
     });
     Object.entries(GZ.exprEngine.KAT_TOKENS).forEach(([tok, katType]) => {
       const group = katType === 'KAT_SG' ? 'Zustände (Signalgruppe)' : 'Zustände (Detektor)';
-      items.push({ group, label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length });
+      items.push({ group, label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length, kind: 'kat' });
     });
-    items.push({ group: 'Sonstiges', label: 'TX', hint: 'reserviert', desc: 'aktueller Auswertungszeitpunkt - immer automatisch verfügbar, nicht selbst benennen/zuweisen', insertText: 'TX', selStart: 2, selEnd: 2 });
+    items.push({ group: 'Sonstiges', label: 'TX', hint: 'reserviert', desc: 'aktueller Auswertungszeitpunkt - immer automatisch verfügbar, nicht selbst benennen/zuweisen', insertText: 'TX', selStart: 2, selEnd: 2, kind: 'var' });
+    // Vergleichsoperatoren + Zahl-Platzhalter: ohne sie endete der reine
+    // Klickweg zwangsläufig bei einem unvollständigen Ausdruck (z.B.
+    // "DauerSeit(K1, GRUEN)"), der noch zu WAHR/FALSCH ergänzt werden MUSS -
+    // fertigstellen ging also nur per Tastatur. Der Zahl-Eintrag fügt eine
+    // vorselektierte "0" ein, die man direkt überschreiben kann.
+    OPERATOR_INFO.forEach(op => {
+      const caret = op.caret != null ? op.caret : op.insert.length;
+      items.push({ group: 'Operatoren', label: op.label, hint: op.hint, desc: op.desc, insertText: op.insert, selStart: caret, selEnd: caret, kind: 'op' });
+    });
+    items.push({ group: 'Operatoren', label: '0', hint: 'Zahl', desc: 'Zahlenwert einfügen (vorselektiert - direkt überschreibbar)', insertText: '0', selStart: 0, selEnd: 1, kind: 'op' });
     ['AND', 'OR', 'NOT'].forEach(kw => {
-      items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: kw, selStart: kw.length, selEnd: kw.length });
+      items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: ` ${kw} `, selStart: kw.length + 2, selEnd: kw.length + 2, kind: 'op' });
     });
     vars.forEach(v => {
       const alias = v.alias.trim();
       if (!alias) return;
-      items.push({ group: 'Variablen', label: alias, hint: '', desc: '', insertText: alias, selStart: alias.length, selEnd: alias.length });
+      items.push({ group: 'Variablen', label: alias, hint: '', desc: '', insertText: alias, selStart: alias.length, selEnd: alias.length, kind: 'var' });
     });
     // Rohe Signalgruppen-/Detektor-/APW-/ÖPNV-Spalten - auch OHNE dass dafür
     // schon eine Variable existiert. Auswahl legt bei Bedarf (siehe onAccept,
@@ -134,6 +161,7 @@
         group: 'Objekte (Spalten)', label: col.name,
         hint: existing && existing.alias.trim() ? `${col.kuerzel} · Variable „${existing.alias.trim()}“` : `${col.kuerzel} · neue Variable`,
         desc: col.beschreibung || `${col.kuerzel} ${col.name}`,
+        kind: 'var',
         onAccept: () => resolveOrCreateVarForCol(col)
       });
     });
@@ -429,6 +457,14 @@
       statusEl.className = 'up-formula-status ok';
       statusEl.title = 'Gültig';
       markHighlight(null);
+    } else if (result.incomplete) {
+      // Noch nicht fertig statt falsch (siehe exprEngine ExprError) - neutral
+      // anzeigen und KEINE rote Fehlerwelle zeichnen, sonst blinkt beim
+      // normalen Tippen/Zusammenklicken ständig ein Fehler auf, der keiner ist.
+      statusEl.textContent = '…';
+      statusEl.className = 'up-formula-status pending';
+      statusEl.title = result.message;
+      markHighlight(null);
     } else {
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
@@ -512,7 +548,10 @@
       `<div class="fsb-item${muted ? ' fsb-item-muted' : ''}" data-insert="${esc(insertText)}" data-sel-start="${selStart}" data-sel-end="${selEnd}" title="${esc(meta)}">
         <span class="fsb-item-name">${esc(name)}</span><span class="fsb-item-meta">${esc(meta)}</span>
       </div>`;
-    const section = (title, inner) => `<div class="fsb-section"><div class="fsb-section-title">${esc(title)}</div>${inner || '<div class="fsb-empty">–</div>'}</div>`;
+    // .fsb-section-body kapselt die Einträge in einen eigenen Scrollbereich
+    // (siehe components.css) - eine lange Objekt-/Variablenliste schiebt so
+    // nicht die nachfolgenden Abschnitte aus dem Blickfeld.
+    const section = (title, inner) => `<div class="fsb-section"><div class="fsb-section-title">${esc(title)}</div><div class="fsb-section-body">${inner || '<div class="fsb-empty">–</div>'}</div></div>`;
 
     const varsHtml = vars.filter(v => v.alias.trim()).map(v => {
       const alias = v.alias.trim();

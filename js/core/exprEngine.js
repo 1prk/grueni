@@ -60,8 +60,14 @@
 (function (GZ) {
   'use strict';
 
+  // incomplete: der Ausdruck ist nicht FALSCH, sondern (noch) NICHT FERTIG -
+  // z.B. "DauerSeit(K1, GRUEN) > " mitten im Tippen oder ein für sich
+  // gültiger, nur noch nicht zu WAHR/FALSCH ergänzter Ausdruck. Aufrufer
+  // können das neutral statt als roten Fehler anzeigen (siehe
+  // validateFormulaRow() in formulaBuilder.js) - sonst blinkt beim normalen
+  // Tippen dauernd eine Fehlermeldung auf, die gar keine ist.
   class ExprError extends Error {
-    constructor(message, pos) { super(message); this.pos = pos; }
+    constructor(message, pos, incomplete) { super(message); this.pos = pos; this.incomplete = !!incomplete; }
   }
 
   const CMP_OPS = { '>': (a, b) => a > b, '<': (a, b) => a < b, '>=': (a, b) => a >= b, '<=': (a, b) => a <= b, '==': (a, b) => a === b, '!=': (a, b) => a !== b };
@@ -426,16 +432,21 @@
   // extraKatTokens: siehe tokenize()-Kopfkommentar, optional.
   // Rückgabe: { ok:true, run(scope)->boolean } | { ok:false, message, pos }
   function compile(text, varTypes, funcs, extraKatTokens) {
-    if (!text || !text.trim()) return { ok: false, message: 'Formel ist leer.', pos: 0 };
+    if (!text || !text.trim()) return { ok: false, message: 'Formel ist leer.', pos: 0, incomplete: true };
     try {
       const tokens = tokenize(text, extraKatTokens);
       const node = parse(tokens, varTypes || {}, funcs || {});
       if (node.type !== 'BOOL') {
-        throw new ExprError('Die Formel muss insgesamt zu WAHR/FALSCH auswerten (z.B. mit einem Vergleich wie "<" oder einer Verknüpfung mit AND/OR)', 0);
+        throw new ExprError('Die Formel muss insgesamt zu WAHR/FALSCH auswerten (z.B. mit einem Vergleich wie "<" oder einer Verknüpfung mit AND/OR)', 0, true);
       }
       return { ok: true, run: node.run };
     } catch (e) {
-      if (e instanceof ExprError) return { ok: false, message: e.message, pos: e.pos };
+      if (e instanceof ExprError) {
+        // Fehler AM Textende = abgeschnittener, noch unfertiger Ausdruck
+        // (siehe ExprError-Kopfkommentar) - kein echter Denkfehler.
+        const incomplete = e.incomplete || (typeof e.pos === 'number' && e.pos >= text.replace(/\s+$/, '').length);
+        return { ok: false, message: e.message, pos: e.pos, incomplete };
+      }
       return { ok: false, message: e.message || String(e), pos: 0 };
     }
   }

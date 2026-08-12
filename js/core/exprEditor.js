@@ -355,6 +355,30 @@
         el.dispatchEvent(new CustomEvent('gz-chip-remove', { detail: { chip: btn.closest('.expr-chip') } }));
       };
     });
+    // Klick auf den Chip SELBST (nicht auf sein "×") = "diesen Baustein
+    // austauschen": Chips sehen wie greifbare Bausteine aus, verhielten sich
+    // aber wie reine Einfärbung - man musste sie löschen und neu einfügen.
+    // Jetzt öffnet ein Klick die Auswahlliste, auf den Chip-Bereich
+    // beschränkt und auf art-gleiche Kandidaten gefiltert (siehe
+    // 'gz-chip-replace' in setup()).
+    el.querySelectorAll('.expr-chip').forEach(chip => {
+      chip.onmousedown = ev => ev.preventDefault(); // Fokus/Selektion im Editor halten
+      chip.onclick = ev => {
+        if (ev.target.closest('.expr-chip-remove')) return; // "×" hat eigene Bedeutung
+        ev.preventDefault();
+        ev.stopPropagation();
+        el.dispatchEvent(new CustomEvent('gz-chip-replace', { detail: { chip } }));
+      };
+    });
+  }
+
+  // Welche Kandidaten-Art passt zu einem angeklickten Chip? Leitet sich aus
+  // der Token-Klasse ab, die classifyToken() ohnehin schon vergibt - so
+  // braucht der Editor keinerlei Kenntnis des Typsystems seines Aufrufers.
+  const CHIP_KIND_BY_CLASS = { 'expr-tok-kat': 'kat', 'expr-tok-func': 'func', 'expr-tok-var': 'var' };
+  function chipKind(chipEl) {
+    for (const cls in CHIP_KIND_BY_CLASS) if (chipEl.classList.contains(cls)) return CHIP_KIND_BY_CLASS[cls];
+    return null;
   }
 
   // Verdrahtet den Chip-Editor, Fehler-Markierung, Autovervollständigung
@@ -481,11 +505,25 @@
       }
     };
 
+    // Teilstring- statt reiner Präfixsuche (Treffer am Wortanfang zuerst) -
+    // "seit" findet so auch "DauerSeit", ohne dass man den Namensanfang
+    // kennen muss. Die Gruppenreihenfolge der Kandidatenliste bleibt
+    // innerhalb der beiden Ränge erhalten (stabile Sortierung).
+    const matchCandidates = (items, text) => {
+      const q = text.toUpperCase();
+      const pre = [], sub = [];
+      items.forEach(c => {
+        const l = String(c.label).toUpperCase();
+        if (l.startsWith(q)) pre.push(c);
+        else if (l.includes(q)) sub.push(c);
+      });
+      return pre.concat(sub);
+    };
+
     const updateAutocomplete = () => {
       const { start, end, text } = currentPrefix();
       if (!text) { closeDropdown(); return; }
-      const items = getCandidates().filter(c => c.label.toUpperCase().startsWith(text.toUpperCase()));
-      renderDropdown(items, start, end);
+      renderDropdown(matchCandidates(getCandidates(), text), start, end);
     };
 
     const openPalette = () => {
@@ -527,6 +565,61 @@
       debounceTimers.set(el, setTimeout(onRevalidate, 150));
     };
 
+    // ---------- Rückgängig/Wiederholen (Ctrl+Z / Ctrl+Y bzw. Ctrl+Shift+Z)
+    // Der native Undo-Stack des Browsers ist hier unbrauchbar: der Editor
+    // baut sein DOM bei JEDER Änderung komplett neu aus dem Modelltext auf
+    // (siehe refreshEditorContent()), wodurch der Browser seine eigene
+    // Historie verwirft - Ctrl+Z war schlicht wirkungslos. Stattdessen eine
+    // eigene, schlanke Historie auf MODELLEBENE (Text + Cursorposition).
+    // Aufeinanderfolgendes Tippen wird zeitlich zusammengefasst (COALESCE_MS),
+    // damit ein Undo nicht Zeichen für Zeichen zurückgeht, sondern - wie in
+    // üblichen Editoren - ganze Tippgruppen; explizite Einfügungen (Palette/
+    // Sidebar/Chip entfernen) bilden dagegen immer einen eigenen Schritt.
+    const HISTORY_LIMIT = 100, COALESCE_MS = 600, COALESCE_MAX_CHARS = 20;
+    let undoStack = [], redoStack = [], lastPushAt = 0, groupBaseLen = 0, suppressHistory = false;
+    const snapshot = () => ({ text: getText(), caret: getCaretOffset(el) });
+    function pushHistory(coalesce) {
+      if (suppressHistory) return;
+      const now = Date.now();
+      // Tippgruppe fortsetzen, solange kurz hintereinander UND nicht zu viel
+      // Text seit ihrem Beginn - Letzteres verhindert, dass schnelles
+      // Durchtippen eines ganzen Ausdrucks zu EINEM einzigen Undo-Schritt
+      // wird (dann würde Ctrl+Z alles auf einmal wegnehmen).
+      const grown = Math.abs(getText().length - groupBaseLen);
+      if (coalesce && undoStack.length && (now - lastPushAt) < COALESCE_MS && grown < COALESCE_MAX_CHARS) {
+        lastPushAt = now;
+        return;
+      }
+      undoStack.push(snapshot());
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+      redoStack = [];
+      lastPushAt = now;
+      groupBaseLen = getText().length;
+    }
+    function restore(entry) {
+      suppressHistory = true;
+      clearPendingArgs();
+      setText(entry.text);
+      refresh(null, { preserveCaret: false });
+      if (entry.caret != null) setCaretOffset(el, entry.caret);
+      suppressHistory = false;
+      debouncedRevalidate();
+    }
+    function undo() {
+      if (!undoStack.length) return false;
+      redoStack.push(snapshot());
+      restore(undoStack.pop());
+      lastPushAt = 0; // nächste Tippgruppe beginnt frisch
+      return true;
+    }
+    function redo() {
+      if (!redoStack.length) return false;
+      undoStack.push(snapshot());
+      restore(redoStack.pop());
+      lastPushAt = 0;
+      return true;
+    }
+
     // Zentrale Stelle für JEDE inhaltliche Änderung (Tippen, Chip entfernen,
     // Einfügen aus Dropdown/Palette/Sidebar): Modell synchronisieren, Editor
     // neu rendern, Nachvalidierung anstoßen. caretMode 'preserve' = aktuelle
@@ -551,8 +644,14 @@
     // ABSOLUTE Zeichenbereiche im aktuellen Text, pendingArgIdx zeigt auf
     // den GERADE selektierten/offenen Platzhalter. Nur hier (in dieser
     // Zeile) gültig, kein modulweiter/globaler Zustand.
-    let pendingArgs = null, pendingArgIdx = 0;
-    function clearPendingArgs() { pendingArgs = null; pendingArgIdx = 0; }
+    // pendingEnd: Ende des GESAMTEN eingefügten Templates (z.B. hinter dem
+    // ")" von "DauerSeit(...)"), fortlaufend um die Längenänderungen der
+    // ausgefüllten Platzhalter korrigiert. Ist der letzte Platzhalter
+    // gefüllt, springt der Cursor dorthin - sonst bliebe er INNERHALB der
+    // Klammern stehen und der nächste Klick (z.B. auf ">") landete mitten im
+    // Funktionsaufruf statt dahinter.
+    let pendingArgs = null, pendingArgIdx = 0, pendingEnd = null;
+    function clearPendingArgs() { pendingArgs = null; pendingArgIdx = 0; pendingEnd = null; }
 
     // Ersetzt [rStart,rEnd) im aktuellen Text durch insertText - Kernstück
     // des Klick-Workflows "Primitive wählen -> Objekt wählen -> Zustand
@@ -569,29 +668,36 @@
     // Einträgen eine NEUE Kette für das GERADE eingefügte Template - löst
     // eine evtl. noch laufende alte Kette dabei bewusst ab.
     function insertAtSelection(rStart, rEnd, insertText, selStart, selEnd, argRanges) {
+      pushHistory(false); // explizites Einfügen = eigener Undo-Schritt
       const val = getText();
       const newText = val.slice(0, rStart) + insertText + val.slice(rEnd);
       el.focus();
 
       const wasPendingSlot = pendingArgs && pendingArgIdx < pendingArgs.length &&
         pendingArgs[pendingArgIdx].start === rStart && pendingArgs[pendingArgIdx].end === rEnd;
+      let finishedAt = null;
       if (wasPendingSlot) {
         const delta = insertText.length - (rEnd - rStart);
         for (let k = pendingArgIdx + 1; k < pendingArgs.length; k++) {
           pendingArgs[k] = { start: pendingArgs[k].start + delta, end: pendingArgs[k].end + delta };
         }
+        if (pendingEnd != null) pendingEnd += delta;
         pendingArgIdx++;
+        if (pendingArgIdx >= pendingArgs.length) finishedAt = pendingEnd; // Kette fertig -> hinter das Template
       } else {
         clearPendingArgs();
       }
-      if (argRanges && argRanges.length > 1) {
+      if (argRanges && argRanges.length) {
         pendingArgs = argRanges.map(r => ({ start: rStart + r.start, end: rStart + r.end }));
         pendingArgIdx = 0;
+        pendingEnd = rStart + insertText.length;
+        finishedAt = null;
       }
 
       const active = (pendingArgs && pendingArgIdx < pendingArgs.length) ? pendingArgs[pendingArgIdx] : null;
       if (!active) clearPendingArgs();
-      applyText(newText, { range: active ? [active.start, active.end] : [rStart + selStart, rStart + selEnd] });
+      const fallback = finishedAt != null ? [finishedAt, finishedAt] : [rStart + selStart, rStart + selEnd];
+      applyText(newText, { range: active ? [active.start, active.end] : fallback });
     }
 
     function accept(item, start, end) {
@@ -626,7 +732,36 @@
       const val = getText();
       el.focus();
       clearPendingArgs(); // manuelles Entfernen ist außerhalb der Klick-Kette
+      pushHistory(false);
       applyText(val.slice(0, start) + val.slice(end), { offset: start });
+    });
+
+    // Chip anklicken = austauschen (siehe wireChipRemovers()/chipKind()):
+    // Auswahlliste über GENAU dem Zeichenbereich dieses Chips öffnen, auf
+    // art-gleiche Kandidaten gefiltert (ein Zustands-Chip bietet Zustände an,
+    // ein Funktions-Chip Funktionen, ein Variablen-Chip Variablen/Objekte).
+    // Ein Funktions-Chip trägt dabei nur seinen NAMEN als Bereich - die
+    // Klammern/Argumente dahinter bleiben unangetastet, weshalb für ihn
+    // ausnahmsweise nur der reine Bezeichner (ohne "(...)") eingesetzt wird.
+    el.addEventListener('gz-chip-replace', e => {
+      const chip = e.detail.chip;
+      if (!chip) return;
+      const before = [];
+      for (const child of el.childNodes) { if (child === chip) break; before.push(child); }
+      const start = before.reduce((sum, n) => sum + nodeTextLength(n), 0);
+      const end = start + nodeTextLength(chip);
+      const kind = chipKind(chip);
+      let items = getCandidates();
+      if (kind) items = items.filter(c => c.kind === kind);
+      if (kind === 'func') {
+        // Nur den Namen ersetzen, vorhandene Argumentliste behalten.
+        items = items.map(c => ({ ...c, insertText: c.label, selStart: c.label.length, selEnd: c.label.length, argRanges: null }));
+      }
+      if (!items.length) return;
+      el.focus();
+      clearPendingArgs();
+      setCaretRange(el, start, end); // sichtbar markieren, WAS ersetzt wird
+      renderDropdown(items, start, end);
     });
 
     el.addEventListener('input', () => {
@@ -634,6 +769,7 @@
     });
     function applyTextFromDom() {
       clearPendingArgs(); // freies Tippen verlässt die Klick-Kette (siehe insertAtSelection())
+      pushHistory(true);  // zusammenhängendes Tippen zu einer Gruppe zusammenfassen
       const oldText = getText();
       const newText = serializeEditor(el);
       setText(newText);
@@ -658,11 +794,18 @@
       const sel = getCaretSelection(el);
       if (sel == null) return;
       clearPendingArgs(); // Einfügen per Zwischenablage ist außerhalb der Klick-Kette
+      pushHistory(false);
       const val = getText();
       const newText = val.slice(0, sel.start) + text + val.slice(sel.end);
       applyText(newText, { offset: sel.start + text.length });
     });
     el.addEventListener('keydown', e => {
+      // Rückgängig/Wiederholen vor allem anderen behandeln (siehe
+      // pushHistory()/undo() oben) - der native Browser-Undo greift hier
+      // nicht, da der Editor bei jeder Änderung neu aufgebaut wird.
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); closeDropdown(); undo(); return; }
+      if (mod && ((e.key === 'y' || e.key === 'Y') || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); closeDropdown(); redo(); return; }
       if (!dropdown.hidden) {
         if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); return; }
         if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); return; }

@@ -49,14 +49,34 @@
   const ERGEBNIS_KAT_TOKENS = { ABGEMELDET: 'KAT_ERGEBNIS', ZWANGSGELOESCHT: 'KAT_ERGEBNIS', AUSGESCHLOSSEN: 'KAT_ERGEBNIS', UNAUFGELOEST: 'KAT_ERGEBNIS' };
   const FILTER_KAT_TOKENS = { ...QSV_KAT_TOKENS, ...ERGEBNIS_KAT_TOKENS };
 
+  // Vergleichsoperatoren + Zahl-/Text-Platzhalter, damit ein Filterausdruck
+  // auch rein per Klick vollständig (und gültig) zusammensetzbar ist - ohne
+  // sie endet der Klickweg zwangsläufig bei einem halben Ausdruck wie "QSV",
+  // der noch von Hand zu einem Vergleich ergänzt werden müsste.
+  const FILTER_OPERATORS = [
+    { label: '==', insert: ' == ', hint: 'gleich', desc: 'Gleichheit - für Zahlen, Texte UND Zustände' },
+    { label: '!=', insert: ' != ', hint: 'ungleich', desc: 'Ungleichheit' },
+    { label: '>', insert: ' > ', hint: 'größer als', desc: 'Zahlenvergleich: größer als' },
+    { label: '>=', insert: ' >= ', hint: 'größer/gleich', desc: 'Zahlenvergleich: größer oder gleich' },
+    { label: '<', insert: ' < ', hint: 'kleiner als', desc: 'Zahlenvergleich: kleiner als' },
+    { label: '<=', insert: ' <= ', hint: 'kleiner/gleich', desc: 'Zahlenvergleich: kleiner oder gleich' },
+    { label: '( )', insert: '()', hint: 'Klammern', desc: 'Klammern zum Gruppieren', caret: 1 }
+  ];
+
   function filterCandidates() {
     const items = [];
     Object.keys(FILTER_VAR_TYPES).forEach(name => {
-      items.push({ group: 'Felder', label: name, hint: FILTER_VAR_TYPES[name], desc: FILTER_FIELD_DESC[name], insertText: name, selStart: name.length, selEnd: name.length });
+      items.push({ group: 'Felder', label: name, hint: FILTER_VAR_TYPES[name], desc: FILTER_FIELD_DESC[name], insertText: name, selStart: name.length, selEnd: name.length, kind: 'var' });
     });
-    LOS_LEVELS.forEach(l => items.push({ group: 'Zustände (QSV)', label: l, hint: '', desc: `QSV-Stufe ${l}`, insertText: l, selStart: l.length, selEnd: l.length }));
-    Object.keys(ERGEBNIS_KAT_TOKENS).forEach(tok => items.push({ group: 'Zustände (Ergebnis)', label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length }));
-    ['AND', 'OR', 'NOT'].forEach(kw => items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: kw, selStart: kw.length, selEnd: kw.length }));
+    LOS_LEVELS.forEach(l => items.push({ group: 'Zustände (QSV)', label: l, hint: '', desc: `QSV-Stufe ${l}`, insertText: l, selStart: l.length, selEnd: l.length, kind: 'kat' }));
+    Object.keys(ERGEBNIS_KAT_TOKENS).forEach(tok => items.push({ group: 'Zustände (Ergebnis)', label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length, kind: 'kat' }));
+    FILTER_OPERATORS.forEach(op => {
+      const caret = op.caret != null ? op.caret : op.insert.length;
+      items.push({ group: 'Operatoren', label: op.label, hint: op.hint, desc: op.desc, insertText: op.insert, selStart: caret, selEnd: caret, kind: 'op' });
+    });
+    items.push({ group: 'Operatoren', label: '0', hint: 'Zahl', desc: 'Zahlenwert einfügen (vorselektiert - direkt überschreibbar)', insertText: '0', selStart: 0, selEnd: 1, kind: 'op' });
+    items.push({ group: 'Operatoren', label: '"…"', hint: 'Text', desc: 'Textwert in Anführungszeichen (Inhalt vorselektiert), z.B. für SPL', insertText: '""', selStart: 1, selEnd: 1, kind: 'op' });
+    ['AND', 'OR', 'NOT'].forEach(kw => items.push({ group: 'Verknüpfung', label: kw, hint: '', desc: '', insertText: ` ${kw} `, selStart: kw.length + 2, selEnd: kw.length + 2, kind: 'op' }));
     return items;
   }
 
@@ -92,10 +112,13 @@
     if (els.filterStatus) {
       if (result.empty) { els.filterStatus.textContent = ''; els.filterStatus.className = 'oe-filter-status'; els.filterStatus.title = ''; }
       else if (result.ok) { els.filterStatus.textContent = '✓'; els.filterStatus.className = 'oe-filter-status ok'; els.filterStatus.title = 'Gültig'; }
+      // Noch unfertig (Tippen/Zusammenklicken) neutral statt rot - siehe
+      // exprEngine ExprError/incomplete.
+      else if (result.incomplete) { els.filterStatus.textContent = '…'; els.filterStatus.className = 'oe-filter-status pending'; els.filterStatus.title = result.message; }
       else { els.filterStatus.textContent = '✕'; els.filterStatus.className = 'oe-filter-status err'; els.filterStatus.title = result.message; }
     }
     if (els.filterFieldWrap && els.filterFieldWrap.__exprRefreshHighlight) {
-      els.filterFieldWrap.__exprRefreshHighlight(result.ok || result.empty ? null : result.pos);
+      els.filterFieldWrap.__exprRefreshHighlight((result.ok || result.empty || result.incomplete) ? null : result.pos);
     }
     return result;
   }
