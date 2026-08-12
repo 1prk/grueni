@@ -36,22 +36,33 @@
      getText()->string, setText(string)
      knownNames()->Set<string>
      getCandidates()->[{group,label,hint,desc,insertText,selStart,selEnd,
-       onAccept?()->string|void}] - Autovervollständigung (nach Bezeichner-
-       Präfix gefiltert)/Funktions-Palette (ungefiltert). onAccept ist ein
-       optionaler Hook für Kandidaten, deren Einfügen mehr als reinen Text
-       braucht (z.B. formulaBuilder.js: eine Spalte auswählen legt bei
+       argRanges?, onAccept?()->string|void}] - Autovervollständigung (nach
+       Bezeichner-Präfix gefiltert)/Funktions-Palette (ungefiltert). onAccept
+       ist ein optionaler Hook für Kandidaten, deren Einfügen mehr als reinen
+       Text braucht (z.B. formulaBuilder.js: eine Spalte auswählen legt bei
        Bedarf automatisch eine Variable an und fügt deren Alias statt des
        Spaltennamens ein) - der Rückgabewert ERSETZT insertText/selStart/
-       selEnd (als reiner Bezeichner, ohne Platzhalter-Selektion), wenn
-       nicht null/undefined.
+       selEnd (als reiner Bezeichner, ohne Platzhalter-Selektion/argRanges),
+       wenn nicht null/undefined. argRanges (optional, [{start,end}, ...]
+       relativ zum Anfang von insertText, selStart/selEnd entspricht
+       argRanges[0]): bei mehr als einem Eintrag öffnet das Einfügen eine
+       Tabstop-Kette - klickt man den GERADE selektierten Platzhalter direkt
+       mit einem weiteren Kandidaten zu (Primitive -> Objekt -> Zustand, z.B.
+       "DauerSeit(#objekt#,zustand)" -> "DauerSeit(K1,#zustand#)" ->
+       "DauerSeit(K1,GRUEN)"), springt die Selektion automatisch zum
+       nächsten offenen Platzhalter weiter (siehe insertAtSelection() unten)
+       - Tippen oder ein Klick außerhalb der Kette gibt sie auf, ohne die
+       Einfügung selbst zu beeinträchtigen.
      onRevalidate() - debounced (150ms) nach jeder inhaltlichen Änderung.
    Hängt an rowEl.querySelector('.expr-input-wrap'):
      wrap.__exprRefreshHighlight(errPos) - von außen (Validierung) genutzt,
        um nachträglich eine Fehlerposition einzuzeichnen.
      wrap.__exprInsertAt(text, selStart, selEnd)->boolean - von außen (z.B.
-       einer Symbol-Sidebar) genutzt, um an der aktuellen Cursorposition
-       einzufügen, ohne Interna dieser Zeile zu kennen; liefert false, wenn
-       das Feld gerade keine Selektion hat (z.B. nicht fokussiert). */
+       einer Symbol-Sidebar) genutzt, um die AKTUELLE Selektion (Platzhalter
+       oder Cursor) zu ersetzen, ohne Interna dieser Zeile zu kennen; liefert
+       false, wenn das Feld gerade keine Selektion hat (z.B. nicht
+       fokussiert). Nimmt an derselben Tabstop-Kette teil wie Klicks aus dem
+       Dropdown/der Palette (siehe argRanges oben). */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
@@ -380,17 +391,15 @@
       return refreshEditorContent(el, getText(), { errPos, knownNames: knownNames(), excludeCaret: lastExcludeCaret, ...options });
     };
     wrap.__exprRefreshHighlight = errPos => refresh(errPos);
-    // Externer Einfüge-Hook (z.B. für eine Symbol-Sidebar) - fügt an der
-    // AKTUELLEN Cursorposition ein, ohne dass der Aufrufer Interna dieser
-    // Zeile (Modell-Feld, Debounce...) kennen muss. Liefert false, wenn das
-    // Feld gerade keine Selektion hat (z.B. nicht fokussiert).
+    // Externer Einfüge-Hook (z.B. für eine Symbol-Sidebar) - fügt anstelle
+    // der AKTUELLEN Selektion ein (siehe insertAtSelection() unten), ohne
+    // dass der Aufrufer Interna dieser Zeile (Modell-Feld, Debounce,
+    // Tabstop-Kette...) kennen muss. Liefert false, wenn das Feld gerade
+    // keine Selektion hat (z.B. nicht fokussiert).
     wrap.__exprInsertAt = (text, selStart, selEnd) => {
-      const caret = getCaretOffset(el);
-      if (caret == null) return false;
-      const val = getText();
-      const newText = val.slice(0, caret) + text + val.slice(caret);
-      el.focus();
-      applyText(newText, { range: [caret + selStart, caret + selEnd] });
+      const sel = getCaretSelection(el);
+      if (sel == null) return false;
+      insertAtSelection(sel.start, sel.end, text, selStart, selEnd, null);
       return true;
     };
 
@@ -481,9 +490,14 @@
 
     const openPalette = () => {
       el.focus();
-      const caret = getCaretOffset(el);
-      const pos = caret == null ? getText().length : caret;
-      renderDropdown(getCandidates(), pos, pos);
+      // Ganze aktuelle Selektion (nicht nur ihren Anfang) übernehmen - steht
+      // z.B. gerade ein Platzhalter wie "objekt" markiert (siehe
+      // insertAtSelection()-Kopfkommentar), muss ein Klick auf einen
+      // Palette-Eintrag genau IHN ersetzen, nicht bloß davor einfügen.
+      const sel = getCaretSelection(el);
+      const pos = sel ? sel.start : getText().length;
+      const endPos = sel ? sel.end : pos;
+      renderDropdown(getCandidates(), pos, endPos);
     };
 
     const moveActive = delta => {
@@ -531,22 +545,69 @@
       debouncedRevalidate();
     }
 
+    // Tabstop-Kette (VS-Code-Snippet-Gefühl): argRanges eines gerade
+    // eingefügten mehrargumentigen Templates (Primitive/eigene Funktion mit
+    // >1 Parameter, siehe exprCandidates() in formulaBuilder.js) - als
+    // ABSOLUTE Zeichenbereiche im aktuellen Text, pendingArgIdx zeigt auf
+    // den GERADE selektierten/offenen Platzhalter. Nur hier (in dieser
+    // Zeile) gültig, kein modulweiter/globaler Zustand.
+    let pendingArgs = null, pendingArgIdx = 0;
+    function clearPendingArgs() { pendingArgs = null; pendingArgIdx = 0; }
+
+    // Ersetzt [rStart,rEnd) im aktuellen Text durch insertText - Kernstück
+    // des Klick-Workflows "Primitive wählen -> Objekt wählen -> Zustand
+    // wählen" (siehe Datei-Kopfkommentar zu accept()/__exprInsertAt):
+    // entspricht [rStart,rEnd) GENAU dem aktuell offenen Platzhalter einer
+    // laufenden Kette (pendingArgs[pendingArgIdx]), springt die Selektion
+    // nach dem Einfügen automatisch zum NÄCHSTEN offenen Platzhalter
+    // DESSELBEN Templates weiter, statt nur den fest übergebenen
+    // selStart/selEnd zu übernehmen - bis alle Platzhalter durch sind, dann
+    // landet der Cursor (wie bisher) hinter dem zuletzt eingefügten Text.
+    // Jede andere Einfügung/Bearbeitung (Klick/Tipp außerhalb der Kette)
+    // gibt die Kette stillschweigend auf (clearPendingArgs()). argRanges
+    // (optional, relativ zum Anfang von insertText): eröffnet bei >1
+    // Einträgen eine NEUE Kette für das GERADE eingefügte Template - löst
+    // eine evtl. noch laufende alte Kette dabei bewusst ab.
+    function insertAtSelection(rStart, rEnd, insertText, selStart, selEnd, argRanges) {
+      const val = getText();
+      const newText = val.slice(0, rStart) + insertText + val.slice(rEnd);
+      el.focus();
+
+      const wasPendingSlot = pendingArgs && pendingArgIdx < pendingArgs.length &&
+        pendingArgs[pendingArgIdx].start === rStart && pendingArgs[pendingArgIdx].end === rEnd;
+      if (wasPendingSlot) {
+        const delta = insertText.length - (rEnd - rStart);
+        for (let k = pendingArgIdx + 1; k < pendingArgs.length; k++) {
+          pendingArgs[k] = { start: pendingArgs[k].start + delta, end: pendingArgs[k].end + delta };
+        }
+        pendingArgIdx++;
+      } else {
+        clearPendingArgs();
+      }
+      if (argRanges && argRanges.length > 1) {
+        pendingArgs = argRanges.map(r => ({ start: rStart + r.start, end: rStart + r.end }));
+        pendingArgIdx = 0;
+      }
+
+      const active = (pendingArgs && pendingArgIdx < pendingArgs.length) ? pendingArgs[pendingArgIdx] : null;
+      if (!active) clearPendingArgs();
+      applyText(newText, { range: active ? [active.start, active.end] : [rStart + selStart, rStart + selEnd] });
+    }
+
     function accept(item, start, end) {
       // Kandidaten mit onAccept() (z.B. formulaBuilder.js: eine Spalte statt
       // Primitive/Funktion/Zustand/Variable - erst Alias auflösen/anlegen,
       // dann wie eine normale Variable einfügen, reiner Bezeichner ohne
       // Klammern/Platzhalter-Selektion) ERSETZEN insertText/selStart/selEnd
-      // komplett durch den Rückgabewert.
-      let insertText = item.insertText, selStart = item.selStart, selEnd = item.selEnd;
+      // komplett durch den Rückgabewert (und tragen daher nie eigene
+      // Platzhalter/argRanges).
+      let insertText = item.insertText, selStart = item.selStart, selEnd = item.selEnd, argRanges = item.argRanges || null;
       if (item.onAccept) {
         const resolved = item.onAccept();
-        if (resolved != null) { insertText = resolved; selStart = resolved.length; selEnd = resolved.length; }
+        if (resolved != null) { insertText = resolved; selStart = resolved.length; selEnd = resolved.length; argRanges = null; }
       }
       closeDropdown();
-      const val = getText();
-      const newText = val.slice(0, start) + insertText + val.slice(end);
-      el.focus();
-      applyText(newText, { range: [start + selStart, start + selEnd] });
+      insertAtSelection(start, end, insertText, selStart, selEnd, argRanges);
     }
 
     // Chip per "×"-Button entfernen (siehe wireChipRemovers()) - Token-
@@ -564,6 +625,7 @@
       const end = start + nodeTextLength(chip);
       const val = getText();
       el.focus();
+      clearPendingArgs(); // manuelles Entfernen ist außerhalb der Klick-Kette
       applyText(val.slice(0, start) + val.slice(end), { offset: start });
     });
 
@@ -571,6 +633,7 @@
       applyTextFromDom();
     });
     function applyTextFromDom() {
+      clearPendingArgs(); // freies Tippen verlässt die Klick-Kette (siehe insertAtSelection())
       const oldText = getText();
       const newText = serializeEditor(el);
       setText(newText);
@@ -592,11 +655,12 @@
       e.preventDefault();
       const text = (e.clipboardData || window.clipboardData).getData('text/plain');
       if (!text) return;
-      const caret = getCaretOffset(el);
-      if (caret == null) return;
+      const sel = getCaretSelection(el);
+      if (sel == null) return;
+      clearPendingArgs(); // Einfügen per Zwischenablage ist außerhalb der Klick-Kette
       const val = getText();
-      const newText = val.slice(0, caret) + text + val.slice(caret);
-      applyText(newText, { offset: caret + text.length });
+      const newText = val.slice(0, sel.start) + text + val.slice(sel.end);
+      applyText(newText, { offset: sel.start + text.length });
     });
     el.addEventListener('keydown', e => {
       if (!dropdown.hidden) {
@@ -631,6 +695,7 @@
     });
     el.addEventListener('blur', () => {
       setTimeout(closeDropdown, 150);
+      clearPendingArgs();
       refresh(null, { preserveCaret: false }); // beim Verlassen: alles Erkannte einrasten lassen
     });
     if (paletteBtn) {

@@ -59,23 +59,44 @@
   // formulaBuilder-spezifisch ist: exprCandidates() (Kandidatenliste) und die
   // beiden setup()-Aufrufe in renderFuncRows()/renderFormulaRows().
 
+  // Zeichenbereiche ALLER Parameter innerhalb von "name(argList)" (relativ
+  // zum Anfang des insertText, d.h. inkl. "name(" - Offset), parallel zur
+  // ", "-Verkettung von params.join(', '). Erlaubt es GZ.exprEditor, nach
+  // dem Ausfüllen EINES Platzhalters automatisch zum nächsten zu springen
+  // (Tabstop-Kette, siehe dortiger Kopfkommentar zu argRanges) - bei einem
+  // einzigen Parameter ergibt sich daraus dieselbe einfache Selektion wie
+  // zuvor, nur eben immer über argRanges[0] statt fest verdrahteter Werte.
+  function argRangesFor(name, params) {
+    const prefix = name.length + 1; // "name(".length
+    let pos = 0;
+    return params.map((p, i) => {
+      const r = { start: prefix + pos, end: prefix + pos + p.length };
+      pos += p.length + (i < params.length - 1 ? 2 : 0); // ", "
+      return r;
+    });
+  }
+
   // Kandidaten für Autovervollständigung + Funktions-Palette: Primitiven
   // (GZ.exprEngine.PRIMITIVE_INFO), aktuell definierte Funktionen/Variablen
   // (Modul-State), Zustands-Konstanten (GZ.exprEngine.KAT_TOKENS), TX,
   // AND/OR/NOT. insertText/selStart/selEnd beschreiben, was beim Einfügen an
   // der Cursorposition eingesetzt wird und welcher Teilbereich davon
   // anschließend als Platzhalter selektiert wird, damit man ihn direkt
-  // überschreiben kann (z.B. "Zustand(objekt)" mit "objekt" selektiert). TX
-  // wird bewusst NICHT in die eingefügten Primitiven-/Funktionsaufrufe
-  // aufgenommen (siehe GZ.exprEngine PRIMITIVE_INFO) - es bleibt implizit.
+  // überschreiben kann (z.B. "Zustand(objekt)" mit "objekt" selektiert) -
+  // argRanges (Primitiven/eigene Funktionen mit >1 Parameter) lässt
+  // GZ.exprEditor nach dem Ausfüllen automatisch zum nächsten Platzhalter
+  // weiterspringen (siehe argRangesFor() oben). TX wird bewusst NICHT in die
+  // eingefügten Primitiven-/Funktionsaufrufe aufgenommen (siehe GZ.exprEngine
+  // PRIMITIVE_INFO) - es bleibt implizit.
   function exprCandidates() {
     const items = [];
     GZ.exprEngine.PRIMITIVE_INFO.forEach(p => {
       const argList = p.params.join(', ');
+      const ranges = argRangesFor(p.name, p.params);
       items.push({
         group: 'Primitiven', label: p.name, hint: `(${argList})`, desc: p.desc,
         insertText: `${p.name}(${argList})`,
-        selStart: p.name.length + 1, selEnd: p.name.length + 1 + p.params[0].length
+        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges
       });
     });
     funcs.forEach(f => {
@@ -83,10 +104,11 @@
       if (!name) return;
       const params = f.params.map(p => p.trim()).filter(Boolean);
       const argList = params.join(', ');
+      const ranges = params.length ? argRangesFor(name, params) : [{ start: name.length + 1, end: name.length + 1 }];
       items.push({
         group: 'Eigene Funktionen', label: name, hint: `(${argList})`, desc: f.bodyText,
         insertText: `${name}(${argList})`,
-        selStart: name.length + 1, selEnd: name.length + 1 + (params[0] ? params[0].length : 0)
+        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges
       });
     });
     Object.entries(GZ.exprEngine.KAT_TOKENS).forEach(([tok, katType]) => {
