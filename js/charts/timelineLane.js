@@ -162,30 +162,41 @@
     if (edgeLabelsFor) {
       const CHAR_W = 5.4; // ~0.6 * 9px Schriftgröße (var(--mono)), grobe Schätzung
       const PAD = 3, GAP = 6, MARKER_W = 6;
+      // labels.left/labels.right sind EINZELN optional (null/undefined =
+      // kein Rand-Label an dieser Seite) - z.B. für ein Segment, das über
+      // den sichtbaren Zeitausschnitt hinausreicht: der Aufrufer kennt dann
+      // nur den WIRKLICH hier liegenden Rand (siehe umlaufpruefung.js'
+      // edgeLabelsFor-Kopfkommentar zu über Umlaufgrenzen hinausreichenden
+      // Grünzeiten) und darf den anderen einfach weglassen, statt einen
+      // Wert zu zeigen, der zu einem ganz anderen (Nachbar-)Segment gehört.
       const edgeData = visSegs.map(d => {
         const labels = edgeLabelsFor(d);
         if (!labels) return null;
+        const hasLeft = labels.left != null, hasRight = labels.right != null;
+        if (!hasLeft && !hasRight) return null;
         const x0 = x(Math.max(d.start, wMin)), x1 = x(Math.min(d.end, wMax));
         const segW = x1 - x0;
-        const leftW = String(labels.left).length * CHAR_W;
-        const rightW = String(labels.right).length * CHAR_W;
+        const leftW = hasLeft ? String(labels.left).length * CHAR_W : 0;
+        const rightW = hasRight ? String(labels.right).length * CHAR_W : 0;
         // "Eng, aber lesbar" (Marker in der Mitte) vs. "so knapp, dass sogar
         // der Marker selbst nur zusätzlich überlappen würde" (dann lieber
         // GAR keinen Marker zeigen, statt drei Zeichen ineinander zu
         // quetschen - die beiden Zahlen bleiben trotzdem immer sichtbar,
-        // auch wenn sie sich dabei selbst berühren/überlappen).
-        const overflow = (leftW + rightW + GAP + 2 * PAD) > segW;
+        // auch wenn sie sich dabei selbst berühren/überlappen). Nur relevant,
+        // wenn BEIDE Seiten ein Label haben - bei nur einem Label gibt es
+        // keine zwei Zahlen, die kollidieren könnten.
+        const overflow = hasLeft && hasRight && (leftW + rightW + GAP + 2 * PAD) > segW;
         const showMarker = overflow && (leftW + rightW + MARKER_W) <= segW;
-        return { d, x0, x1, labels, showMarker };
+        return { d, x0, x1, labels, hasLeft, hasRight, showMarker };
       }).filter(Boolean);
 
       const eg = svg.append('g').attr('class', 'seg-edge-labels');
-      eg.selectAll('text.seg-edge-label-left').data(edgeData).join('text')
+      eg.selectAll('text.seg-edge-label-left').data(edgeData.filter(e => e.hasLeft)).join('text')
         .attr('class', 'seg-edge-label seg-edge-label-left')
         .attr('x', e => e.x0 + PAD).attr('y', height / 2).attr('dy', '0.32em')
         .style('opacity', e => segOpacityFor ? segOpacityFor(e.d) : 1)
         .text(e => e.labels.left);
-      eg.selectAll('text.seg-edge-label-right').data(edgeData).join('text')
+      eg.selectAll('text.seg-edge-label-right').data(edgeData.filter(e => e.hasRight)).join('text')
         .attr('class', 'seg-edge-label seg-edge-label-right')
         .attr('x', e => e.x1 - PAD).attr('y', height / 2).attr('dy', '0.32em')
         .style('opacity', e => segOpacityFor ? segOpacityFor(e.d) : 1)

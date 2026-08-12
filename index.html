@@ -367,15 +367,17 @@
           <div class="panel-head">
             <span>Filtern</span>
           </div>
-          <div class="cfg-field cfg-field-wide">
-            <label>Filterausdruck <span class="cfg-field-hint">(schränkt Kennzahlen, Diagramm und Ereignistabelle unten auf die zutreffenden Anmeldungen ein – leer = alle anzeigen. Felder: TX (Zahl, Sekunden im Umlauf), SPL (Text), Verlustzeit/IstFahrzeit (Zahl, Sekunden), QSV (A–F), Ergebnis (ABGEMELDET/ZWANGSGELOESCHT/AUSGESCHLOSSEN/UNAUFGELOEST), SG (Text, Signalgruppen-Name) – z.&nbsp;B. „TX &gt; 30 AND QSV == A“ oder „SPL == &quot;10&quot;“)</span></label>
-            <div class="oe-filter-row" id="oeFilterField">
-              <span class="expr-input-wrap">
-                <div id="oeFilterExpr" class="expr-editor mono-input" contenteditable="true" spellcheck="false" data-placeholder="z.B. TX &gt; 30 AND QSV == A" role="textbox" aria-multiline="false"></div>
-                <button type="button" class="expr-palette-btn" title="Felder/Zustände einfügen">ƒ</button>
-                <div class="expr-autocomplete" hidden></div>
-              </span>
-              <span id="oeFilterStatus" class="oe-filter-status"></span>
+          <div class="cfg-grid">
+            <div class="cfg-field cfg-field-wide">
+              <label>Filterausdruck <span class="cfg-field-hint">(schränkt Kennzahlen, Diagramm und Ereignistabelle unten auf die zutreffenden Anmeldungen ein – leer = alle anzeigen. Felder: TX (Zahl, Sekunden im Umlauf), SPL (Text), Verlustzeit/IstFahrzeit (Zahl, Sekunden), QSV (A–F), Ergebnis (ABGEMELDET/ZWANGSGELOESCHT/AUSGESCHLOSSEN/UNAUFGELOEST), SG (Text, Signalgruppen-Name) – z.&nbsp;B. „TX &gt; 30 AND QSV == A“ oder „SPL == &quot;10&quot;“)</span></label>
+              <div class="oe-filter-row" id="oeFilterField">
+                <span class="expr-input-wrap">
+                  <div id="oeFilterExpr" class="expr-editor mono-input" contenteditable="true" spellcheck="false" data-placeholder="z.B. TX &gt; 30 AND QSV == A" role="textbox" aria-multiline="false"></div>
+                  <button type="button" class="expr-palette-btn" title="Felder/Zustände einfügen">ƒ</button>
+                  <div class="expr-autocomplete" hidden></div>
+                </span>
+                <span id="oeFilterStatus" class="oe-filter-status"></span>
+              </div>
             </div>
           </div>
           <div id="oeFilterHint" class="hint"></div>

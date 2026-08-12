@@ -909,6 +909,20 @@
     els.btnWinNext.disabled = showAll || to >= effectiveCount;
     els.winSize.disabled = showAll;
 
+    // Grünsegmente, die über eine Umlaufgrenze hinausreichen (Grün beginnt
+    // in Umlauf A, endet erst in Umlauf B): stats.greens/greenSweep
+    // (makeIndexSweep, startpunkt-basiert) ordnet ein solches Segment
+    // AUSSCHLIESSLICH Umlauf A zu (dort beginnt es) - Umlauf B bekäme ohne
+    // dieses Tracking gar keinen Bezug zu diesem Segment, obwohl sein Balken
+    // dort (dank überlappungs-basiertem segSweep) durchaus weiter grün
+    // gezeichnet wird. carrySegs merkt sich je Signalgruppe das zuletzt in
+    // EINEM Umlauf begonnene, aber über dessen Ende hinausreichende Segment
+    // (+ dessen bereits berechneten Ab-Wert) und reicht es an den jeweils
+    // NÄCHSTEN, zeitlich unmittelbar anschließenden Umlauf weiter (geprüft
+    // über echte Zeit-Überlappung, nicht Listenindex - überspringt eine
+    // gefilterte/nicht angezeigte Zwischenzeile daher korrekt ersatzlos).
+    const carrySegs = sgData.map(() => null);
+
     const rowData = [];
     cycleIdxList.forEach(i => {
       const start = cycleStarts[i];
@@ -916,9 +930,20 @@
       const spl = findSplAt(start, times, splValues) || '–';
       const tu = Math.round((end - start) / 1000);
 
-      const sgRows = sgData.map(sd => {
+      const sgRows = sgData.map((sd, sgIdx) => {
         const gIdx = sd.greenSweep(start, end);
         let an = '–', ab = '–', tf = '–', anomClass = '', greenSeg = null;
+        let carryGreenSeg = null, carryAb = null;
+
+        const prevCarry = carrySegs[sgIdx];
+        if (prevCarry && prevCarry.seg.end > start && prevCarry.seg.end <= end) {
+          carryGreenSeg = prevCarry.seg;
+          carryAb = prevCarry.ab;
+          carrySegs[sgIdx] = null; // in diesem Umlauf endend - für weitere Zeilen erledigt
+        } else if (prevCarry && prevCarry.seg.end <= start) {
+          carrySegs[sgIdx] = null; // bereits vorher geendet (z.B. Zeile übersprungen) - nicht mehr gültig
+        }
+
         if (gIdx !== -1) {
           // Dieselbe Objekt-Referenz wie in visSegs (stats.greens ist per
           // .filter() aus denselben Segment-Objekten wie segs abgeleitet,
@@ -930,9 +955,10 @@
           const seg = TU ? computeSegmentAnAbTf(greenSeg, cycleStarts, TU) : null;
           if (seg) { an = seg.an; ab = seg.ab; tf = seg.tf; }
           if (sd.flags[gIdx]) anomClass = 'up-anom';
+          if (greenSeg.end > end) carrySegs[sgIdx] = { seg: greenSeg, ab }; // reicht über diese Zeile hinaus
         }
         return {
-          sgEntry: sd.sgEntry, an, ab, tf, anomClass, greenSeg,
+          sgEntry: sd.sgEntry, an, ab, tf, anomClass, greenSeg, carryGreenSeg, carryAb,
           visSegs: sd.segSweep(start, end),
           fzVisSegs: sd.fzRows.map(fd => fd.fzSweep(start, end)),
           zwlVisSegs: sd.fzRows.map(fd => fd.zwlSweep(start, end)),
@@ -1035,7 +1061,19 @@
           renderLane(mainSvg, {
             wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
             width: mainSize.width, height: mainSize.height, gridStepMs: 5000,
-            edgeLabelsFor: d => (sr.greenSeg && d === sr.greenSeg) ? { left: sr.an, right: sr.ab } : null
+            // Ein Grünsegment, das über die Umlaufgrenze hinausreicht, wird
+            // in ZWEI Zeilen sichtbar (Balken-Füllung via segSweep in
+            // beiden, siehe carrySegs oben) - hier aber je Zeile nur die
+            // Beschriftung(en) zeigen, die TATSÄCHLICH zu deren sichtbarem
+            // Rand gehören: An (links) nur, wenn das Segment auch hier
+            // beginnt UND endet (sonst reicht es weiter, kein rechter Rand
+            // hier); Ab (rechts) separat für die Fortsetzungszeile, in der
+            // es tatsächlich endet (carryGreenSeg/carryAb).
+            edgeLabelsFor: d => {
+              if (sr.greenSeg && d === sr.greenSeg) return { left: sr.an, right: sr.greenSeg.end <= r.end ? sr.ab : null };
+              if (sr.carryGreenSeg && d === sr.carryGreenSeg) return { right: sr.carryAb };
+              return null;
+            }
           });
           wireMeasure(mainSvg, r.start, r.end, `${r.i}|main|${sr.sgEntry.col.index}`);
 
