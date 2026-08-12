@@ -494,7 +494,7 @@
                 <button type="button" id="upAddFuncBtn" class="btn">+ Funktion hinzufügen</button>
               </div>
               <div class="cfg-field">
-                <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det), Dauer(sg|det), DauerSeit(sg|det, zustand) sowie eigene Funktionen · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · der Auswertungszeitpunkt (TX) wird automatisch berücksichtigt, nicht als Argument nötig)</span></label>
+                <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det), Dauer(sg|det), DauerSeit(sg|det, zustand) sowie eigene Funktionen · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · der Auswertungszeitpunkt (TX) wird automatisch berücksichtigt, nicht als Argument nötig · eine Formel kann eine ANDERE Formel bei ihrem Namen referenzieren, z.&nbsp;B. „M1 AND NOT R1“ · wahlweise auf einer Objekt-Spur farbig hervorheben)</span></label>
                 <div id="upFormulaRows" class="up-formula-list"></div>
                 <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
               </div>
@@ -515,6 +515,7 @@
                 <h4>Grundidee</h4>
                 <p><strong>Variablen</strong> sind Aliase auf eine Signalgruppen-/Detektor-Spalte (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder eine APW-/ÖPNV-Spalte (Zahl, roher Wert). <strong>Funktionen</strong> sind optionale, selbst benannte Bausteine aus wiederverwendbaren Ausdrücken. <strong>Formeln</strong> kombinieren beides und müssen zu WAHR/FALSCH auswerten – jede gültige Formel erscheint nach „Berechnen“ als zusätzlicher, synthetischer Detektor (Kürzel FORMEL).</p>
                 <p class="help-tip">Tipp: Im Ausdrucksfeld muss man Variablen nicht vorher anlegen – beim Tippen (Autovervollständigung) oder über den „ƒ“-Button lassen sich auch rohe Objekte (Signalgruppen/Detektoren/APW/ÖPNV) direkt auswählen; die passende Variable wird automatisch angelegt bzw. wiederverwendet.</p>
+                <p class="help-tip">Jede Formel trägt eine feste Farbe (Punkt vor ihrem Namen) und kann wahlweise auf einer Objekt-Spur hervorgehoben werden (Auswahl in der Formel-Zeile) – ihre Wahr-Intervalle erscheinen dann als farbiges Band mit gestrichelten Randlinien direkt auf dieser Spur.</p>
               </div>
 
               <div class="help-section">
@@ -553,6 +554,14 @@
                     <tr><td class="mono-input help-fn">LangGenug(K1, 30) OR LangGenug(K2, 30)</td><td>Aufruf in einer Formel: mindestens eine der beiden Signalgruppen ist seit über 30&nbsp;s grün.</td></tr>
                   </tbody>
                 </table>
+                <p class="help-tip">Eine Formel kann eine <strong>andere Formel</strong> direkt bei ihrem Namen referenzieren – so lassen sich einfache Bausteine zu komplexeren Bedingungen kombinieren, ohne den Ausdruck zu wiederholen:</p>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">M1 := TX &gt;= 10 AND TX &lt;= 30</td><td>Formel „M1“: ein bestimmtes TX-Fenster im Umlauf.</td></tr>
+                    <tr><td class="mono-input help-fn">M1 AND Zustand(K1) == GRUEN</td><td>Formel „R1“ referenziert „M1“: K1 ist innerhalb dieses TX-Fensters grün.</td></tr>
+                  </tbody>
+                </table>
+                <p class="help-tip">Eine zyklische Referenz (eine Formel referenziert sich – direkt oder über Umwege – selbst) wird beim Berechnen erkannt und alle beteiligten Formeln werden mit klarer Meldung übersprungen statt falsch berechnet.</p>
               </div>
             </div>
           </div>

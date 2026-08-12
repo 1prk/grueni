@@ -24,7 +24,30 @@
    (Syntax/Typen, keine Datenauswertung) - erst "Berechnen" wertet über alle
    TX aus und liefert je gültiger Formel eine boolesche Rohreihe, die
    umlaufpruefung.js über getSyntheticColumns() als zusätzliche, farblich
-   abgesetzte Detektor-Spalte (Kürzel FORMEL) einbindet. */
+   abgesetzte Detektor-Spalte (Kürzel FORMEL) einbindet.
+
+   Formeln können ANDERE Formeln direkt bei ihrem Namen referenzieren (z.B.
+   "M1 AND NOT R1", wenn "M1"/"R1" Namen anderer Formeln sind) - dafür meldet
+   currentVarTypes() jeden Formelnamen als BOOL-Bezeichner, im selben
+   Namensraum wie Variablen-Aliase (Kollision = Fehler). Da eine Formel dabei
+   von einer anderen abhängt, wertet berechnen() nicht mehr einfach in
+   formulas-Reihenfolge aus, sondern baut zuerst einen Abhängigkeits-Graphen
+   (aus den Bezeichner-Token jeder Formel) und wertet ihn topologisch
+   sortiert aus - eine bereits fertige Formel steht der nächsten als echter
+   JS-boolean im scope zur Verfügung. Zyklische Referenzen (direkt "M1
+   referenziert M1" oder indirekt über mehrere Formeln) werden erkannt und
+   alle beteiligten Formeln übersprungen (siehe skipReasonById), statt in
+   eine Endlosschleife oder stillschweigend falsche Werte zu laufen - anders
+   als bei benutzerdefinierten FUNKTIONEN (siehe oben) ist das hier nötig,
+   weil Formel-Referenzen NICHT inline expandiert werden, sondern echte
+   Datenabhängigkeiten zwischen vorab berechneten Rohreihen sind.
+
+   Jede Formel trägt außerdem eine feste Identitätsfarbe (formulaColorFor(),
+   Position in der formulas-Liste) - dieselbe Farbe erscheint als Farbpunkt
+   in der Formel-Zeile, als Akzentfarbe ihres Referenz-Chips in ANDEREN
+   Formeln (chipColorFor-Hook von GZ.exprEditor) und als Hervorhebungsfarbe
+   auf einer Objekt-Spur, falls ein Hervorhebungsziel gesetzt ist (siehe
+   getFormulaHighlights()) - eine Formel bleibt so überall wiedererkennbar. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
@@ -158,6 +181,18 @@
       const alias = v.alias.trim();
       if (!alias) return;
       items.push({ group: 'Variablen', label: alias, hint: '', desc: '', insertText: alias, selStart: alias.length, selEnd: alias.length, kind: 'var' });
+    });
+    // Andere Formeln sind wie Variablen per bloßem Namen referenzierbar
+    // (siehe Datei-Kopfkommentar zu Formel-Referenzen) - kind:'var', damit
+    // sie sich nahtlos in dieselbe Kandidatenliste einreihen (Autovervoll-
+    // ständigung, Palette, Chip-Austausch per Klick). Bewusst OHNE Ausschluss
+    // der gerade bearbeiteten Formel selbst - eine Selbstreferenz chippt
+    // dann zwar mit ein, wird aber beim Berechnen als zyklisch erkannt und
+    // klar gemeldet, statt sie hier stillschweigend zu verstecken.
+    formulas.forEach(f => {
+      const name = f.name.trim();
+      if (!name) return;
+      items.push({ group: 'Formeln', label: name, hint: 'WAHR/FALSCH', desc: f.exprText, insertText: name, selStart: name.length, selEnd: name.length, kind: 'var' });
     });
     // Rohe Signalgruppen-/Detektor-/APW-/ÖPNV-Spalten - auch OHNE dass dafür
     // schon eine Variable existiert. Auswahl legt bei Bedarf (siehe onAccept,
@@ -334,6 +369,18 @@
     return { defs, errors };
   }
 
+  // types enthält NEBEN den Variablen-Aliasen auch jeden benannten Formelnamen
+  // als BOOL-Bezeichner (siehe Datei-Kopfkommentar zu Formel-Referenzen) -
+  // eine Formel kann so eine ANDERE Formel direkt beim Namen nennen
+  // ("M1 AND R1"), ohne dafür eine eigene Variable anzulegen. Teilt sich mit
+  // den Variablen-Aliasen dasselbe "seen"-Set (EIN gemeinsamer Bezeichner-
+  // Namensraum): eine Formel darf weder den Namen einer Variable noch einer
+  // anderen Formel tragen, sonst würde eine der beiden Bedeutungen im scope
+  // lautlos verdeckt. Ob eine so referenzierte Formel tatsächlich BERECHENBAR
+  // ist (kompiliert fehlerfrei, keine zyklische Referenz), prüft NICHT diese
+  // rein syntaktische Typprüfung, sondern erst berechnen() (Abhängigkeits-
+  // Graph) - eine (noch) ungültige/zyklische Formel zu referenzieren ist
+  // daher kein Compile-Fehler, sondern führt beim Berechnen zu "übersprungen".
   function currentVarTypes() {
     const types = {};
     const aliasErrors = [];
@@ -347,6 +394,14 @@
       seen.add(alias);
       const col = cols.find(c => c.index === v.colIndex);
       types[alias] = col ? varTypeForCol(col) : 'NUM';
+    });
+    formulas.forEach(f => {
+      const name = f.name.trim();
+      if (!name) return;
+      if (!ALIAS_RE.test(name) || isReserved(name)) { aliasErrors.push(`Formel "${name}" ist kein gültiger Bezeichner`); return; }
+      if (seen.has(name)) { aliasErrors.push(`Formel "${name}" doppelt vergeben oder kollidiert mit einer Variable`); return; }
+      seen.add(name);
+      types[name] = 'BOOL';
     });
     return { types, aliasErrors };
   }
@@ -423,16 +478,23 @@
     validateAllInline();
   }
 
-  // Farbe der "auf Objekt-Spur hervorheben"-Markierung dieser Formel (siehe
-  // HIGHLIGHT_PALETTE oben) - Position unter den AKTUELL hervorhebenden
-  // Formeln, nicht die Formel-ID, damit benachbarte aktive Hervorhebungen
-  // maximal unterscheidbar bleiben (schaltet man eine ab, rücken die übrigen
-  // Farben nach statt Lücken in der Palette zu lassen).
-  function highlightColorFor(f) {
-    if (f.highlightCol == null) return null;
-    const active = formulas.filter(x => x.highlightCol != null);
-    const idx = active.findIndex(x => x.id === f.id);
+  // Feste Identitätsfarbe JEDER Formel (siehe HIGHLIGHT_PALETTE oben) -
+  // Position in der GESAMTEN formulas-Liste, nicht nur unter den aktuell
+  // hervorhebenden. Eine Formel behält so dieselbe Farbe überall, wo sie
+  // auftaucht: eigener Farbpunkt in der Liste, Referenz-Chip in ANDEREN
+  // Formeln (siehe chipColorFor unten) UND ihr Hervorhebungs-Band auf einer
+  // Objekt-Spur (siehe getFormulaHighlights()) - unabhängig davon, ob/wie
+  // viele andere Formeln gerade ein Hervorhebungsziel gesetzt haben.
+  function formulaColorFor(f) {
+    const idx = formulas.findIndex(x => x.id === f.id);
     return idx === -1 ? null : HIGHLIGHT_PALETTE[idx % HIGHLIGHT_PALETTE.length];
+  }
+  // Für chipColorFor(): Farbe der Formel MIT DIESEM NAMEN (falls vorhanden) -
+  // eine Formel-Referenz in einer ANDEREN Formel trägt dieselbe Farbe wie die
+  // referenzierte Formel selbst.
+  function formulaColorByName(name) {
+    const f = formulas.find(x => x.name.trim() === name);
+    return f ? formulaColorFor(f) : null;
   }
 
   function renderFormulaRows() {
@@ -445,7 +507,7 @@
           <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
           <div class="expr-autocomplete" hidden></div>
         </span>
-        <span class="up-formula-color-dot" style="${(() => { const c = highlightColorFor(f); return c ? `background:${c}` : 'visibility:hidden'; })()}"></span>
+        <span class="up-formula-color-dot" style="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Chip in anderen Formeln und als Hervorhebungs-Farbe"></span>
         <select class="up-formula-highlight" title="Wahr-Intervalle dieser Formel farbig auf einer Objekt-Spur hervorheben (nach „Berechnen“ sichtbar)">
           <option value="">– kein Highlight –</option>
           ${cols.map(c => `<option value="${c.index}"${f.highlightCol === c.index ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
@@ -454,11 +516,21 @@
         <button type="button" class="oe-row-remove up-formula-remove">✕</button>
       </div>`).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
 
+    // Formelname ändern kann ANDERE Formeln betreffen, die ihn referenzieren
+    // (siehe currentVarTypes()) - wie bei Variablen-Aliasen/Funktionsnamen
+    // muss das eine Neuprüfung ALLER Zeilen anstoßen, nur eben debounced
+    // (150ms), damit normales Tippen des Namens nicht bei jedem Zeichen die
+    // komplette Liste (inkl. Seitenleiste) neu rendert.
+    const debouncedRevalidate = id => {
+      clearTimeout(debounceTimers.get(`formula:${id}`));
+      debounceTimers.set(`formula:${id}`, setTimeout(validateAllInline, 150));
+    };
+
     els.formulaRows.querySelectorAll('.up-formula-row').forEach(rowEl => {
       const id = Number(rowEl.dataset.id);
       const f = formulas.find(x => x.id === id);
-      rowEl.querySelector('.up-formula-name').oninput = e => { f.name = e.target.value; };
-      rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); };
+      rowEl.querySelector('.up-formula-name').oninput = e => { f.name = e.target.value; debouncedRevalidate(id); };
+      rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); validateAllInline(); };
       rowEl.querySelector('.up-formula-highlight').onchange = e => {
         f.highlightCol = e.target.value ? Number(e.target.value) : null;
         renderFormulaRows();
@@ -467,8 +539,23 @@
       GZ.exprEditor.setup(rowEl, {
         getText: () => f.exprText,
         setText: v => { f.exprText = v; },
-        knownNames: () => new Set(vars.map(v => v.alias.trim()).filter(Boolean)),
+        // Andere Formeln sind wie Variablen per bloßem Namen referenzierbar
+        // (siehe currentVarTypes()/Datei-Kopfkommentar zu Formel-Referenzen) -
+        // daher hier ebenfalls als "bekannt" gemeldet, damit ihr Name beim
+        // Tippen zum Chip einrastet. Der eigene Name bleibt bewusst mit drin
+        // (keine Sonderbehandlung für Selbstreferenz) - eine versehentliche
+        // Selbstreferenz chippt dann zwar auch, wird aber beim Berechnen als
+        // zyklisch erkannt und klar gemeldet (siehe berechnen()).
+        knownNames: () => new Set([
+          ...vars.map(v => v.alias.trim()).filter(Boolean),
+          ...formulas.map(x => x.name.trim()).filter(Boolean)
+        ]),
         getCandidates: exprCandidates,
+        // Eine referenzierte Formel trägt ihre eigene Identitätsfarbe (siehe
+        // formulaColorFor()) statt der generischen Variablen-Chip-Farbe -
+        // macht auf einen Blick sichtbar, DASS und WELCHE andere Formel hier
+        // eingeflossen ist.
+        chipColorFor: formulaColorByName,
         onRevalidate: () => validateFormulaRow(rowEl, f)
       });
       validateFormulaRow(rowEl, f);
@@ -589,9 +676,12 @@
     // AUS DER SEITENLEISTE die Tabstop-Kette - ohne sie sprang die Auswahl
     // nach dem ersten Platzhalter nicht weiter und der nächste Klick landete
     // am Cursor statt im nächsten Argument ("DauerSeit(K1GRUEN, zustand)").
-    const item = (name, meta, insertText, selStart, selEnd, muted, argRanges) =>
+    // color (optional): Farbpunkt vor dem Namen - für Formeln (siehe unten),
+    // dieselbe Identitätsfarbe wie ihr Referenz-Chip/Hervorhebungsband
+    // (formulaColorFor()).
+    const item = (name, meta, insertText, selStart, selEnd, muted, argRanges, color) =>
       `<div class="fsb-item${muted ? ' fsb-item-muted' : ''}" data-insert="${esc(insertText)}" data-sel-start="${selStart}" data-sel-end="${selEnd}"${argRanges ? ` data-arg-ranges="${esc(JSON.stringify(argRanges))}"` : ''} title="${esc(meta)}">
-        <span class="fsb-item-name">${esc(name)}</span><span class="fsb-item-meta">${esc(meta)}</span>
+        <span class="fsb-item-label">${color ? `<span class="fsb-item-dot" style="background:${color}"></span>` : ''}<span class="fsb-item-name">${esc(name)}</span></span><span class="fsb-item-meta">${esc(meta)}</span>
       </div>`;
     // .fsb-section-body kapselt die Einträge in einen eigenen Scrollbereich
     // (siehe components.css) - eine lange Objekt-/Variablenliste schiebt so
@@ -602,6 +692,11 @@
       const alias = v.alias.trim();
       const col = cols.find(c => c.index === v.colIndex);
       return item(alias, col ? `${col.kuerzel} ${col.name}` : '?', alias, alias.length, alias.length);
+    }).join('');
+
+    const formulasHtml = formulas.filter(f => f.name.trim()).map(f => {
+      const name = f.name.trim();
+      return item(name, 'Formel', name, name.length, name.length, false, null, formulaColorFor(f));
     }).join('');
 
     const funcsHtml = funcs.filter(f => f.name.trim()).map(f => {
@@ -630,6 +725,7 @@
 
     els.sidebar.innerHTML = [
       section('Variablen', varsHtml),
+      section('Formeln', formulasHtml),
       section('Funktionen', funcsHtml),
       section('Primitiven', primHtml),
       section('Zustände', `<div class="fsb-chips">${katChips}</div>`),
@@ -734,12 +830,90 @@
     // jeweilige Objekt-Handle (handle.sweep.advance() unten), nicht über TX.
     const varTypesWithTx = { ...types, TX: 'NUM' };
 
-    const computed = [];
-    const skippedList = []; // {name, message} - für Hint-Zeile UND Snackbar
+    // ---------- 1) Kompilieren (rein syntaktisch/typgeprüft) ----------
+    const byId = new Map(formulas.map(f => [f.id, f]));
+    const nameToId = new Map(formulas.map(f => [f.name.trim(), f.id]).filter(([n]) => n));
+    const compiledById = new Map();
+    const skipReasonById = new Map(); // id -> Meldung (Kompilierfehler ODER Abhängigkeits-/Zyklusproblem)
     formulas.forEach(f => {
-      const name = f.name.trim() || `F${f.id}`;
       const compiled = compile(f.exprText, varTypesWithTx, funcDefs);
-      if (!compiled.ok) { f.rawSeries = null; skippedList.push({ name, message: compiled.message }); return; }
+      if (compiled.ok) compiledById.set(f.id, compiled);
+      else skipReasonById.set(f.id, compiled.message);
+    });
+
+    // ---------- 2) Abhängigkeiten ermitteln ----------
+    // Welche ANDEREN Formelnamen referenziert diese Formel als bloßen
+    // Bezeichner (kein Funktionsaufruf)? Über denselben Tokenizer wie das
+    // eigentliche Parsen ermittelt (nicht per Regex) - erkennt so zuverlässig
+    // NUR echte Bezeichner-Vorkommen, nie z.B. einen gleichlautenden Namen
+    // innerhalb eines Text-Literals.
+    const depsById = new Map();
+    compiledById.forEach((_, id) => {
+      const f = byId.get(id);
+      const deps = new Set();
+      const tokens = GZ.exprEngine.tokenize(f.exprText);
+      tokens.forEach((tok, idx) => {
+        if (tok.type !== 'IDENT') return;
+        if (tokens[idx + 1] && tokens[idx + 1].type === '(') return; // Funktionsaufruf, keine Formel-Referenz
+        const depId = nameToId.get(tok.value);
+        // Absichtlich OHNE "depId !== id"-Ausschluss: eine Selbstreferenz
+        // (Formel referenziert sich direkt beim eigenen Namen) muss als
+        // Ein-Knoten-Zyklus im Graphen sichtbar sein, sonst erkennt visit()
+        // unten (das einen Zyklus über ein erneutes Antreffen eines Knotens
+        // MIT Zustand "in Bearbeitung" erkennt) ihn nie - ohne diese Kante
+        // hätte die Formel schlicht keine Abhängigkeiten und würde (mit
+        // ihrem eigenen, zu diesem Zeitpunkt noch undefinierten scope-Wert)
+        // einfach falsch statt erkennbar zyklisch berechnet.
+        if (depId != null) deps.add(depId);
+      });
+      depsById.set(id, deps);
+    });
+
+    // ---------- 3) Topologisch ordnen + Zyklen erkennen ----------
+    // Klassische DFS mit 3 Zuständen (0 unbesucht, 1 in Bearbeitung, 2
+    // fertig): ein Rücksprung auf einen Knoten MIT Zustand 1 ist ein Zyklus -
+    // alle Knoten vom Zyklusbeginn bis zum Stapelende sind daran beteiligt
+    // und werden komplett übersprungen (nicht nur der zuletzt besuchte).
+    const order = [], resolved = new Set(), cyclic = new Set(), state = new Map();
+    function visit(id, stack) {
+      if (state.get(id) === 2) return resolved.has(id);
+      if (state.get(id) === 1) {
+        const cycleStart = stack.indexOf(id);
+        for (let k = cycleStart; k < stack.length; k++) cyclic.add(stack[k]);
+        return false;
+      }
+      if (!compiledById.has(id)) { state.set(id, 2); return false; }
+      state.set(id, 1);
+      stack.push(id);
+      let ok = true;
+      depsById.get(id).forEach(depId => { if (!visit(depId, stack)) ok = false; });
+      stack.pop();
+      state.set(id, 2);
+      if (ok && !cyclic.has(id)) { resolved.add(id); order.push(id); return true; }
+      return false;
+    }
+    formulas.forEach(f => { if (compiledById.has(f.id) && !state.has(f.id)) visit(f.id, []); });
+
+    formulas.forEach(f => {
+      if (resolved.has(f.id) || skipReasonById.has(f.id)) return;
+      if (cyclic.has(f.id)) {
+        skipReasonById.set(f.id, `Zyklische Formel-Referenz (Kreislauf über "${f.name.trim()}")`);
+      } else {
+        const badId = [...(depsById.get(f.id) || [])].find(depId => !resolved.has(depId));
+        const badName = badId != null ? (byId.get(badId).name.trim() || `F${badId}`) : '?';
+        skipReasonById.set(f.id, `Hängt von ungültiger/nicht berechenbarer Formel "${badName}" ab`);
+      }
+    });
+
+    // ---------- 4) In Abhängigkeitsreihenfolge auswerten ----------
+    // Jede bereits fertige Formel steht nachfolgenden (die sie referenzieren)
+    // als BOOL-Wert im scope zur Verfügung - dieselbe Rohreihe, die auch die
+    // synthetische FORMEL-Spalte speist.
+    const rawSeriesById = new Map();
+    order.forEach(id => {
+      const f = byId.get(id);
+      const compiled = compiledById.get(id);
+      const deps = depsById.get(id);
       // scopeSpecs (und damit die Objekt-Handles/Sweeps) sind über ALLE
       // Formeln hinweg dieselben Instanzen (einmal vor der Schleife gebaut,
       // siehe oben) - vor jedem neuen Formel-Durchlauf müssen ihre Sweeps
@@ -762,9 +936,26 @@
           const raw = s.series ? (s.series[i] || '') : '';
           scope[s.alias] = raw.trim() === '' ? NaN : Number(raw);
         });
+        deps.forEach(depId => { scope[byId.get(depId).name.trim()] = rawSeriesById.get(depId)[i] === '1'; });
         rawSeries[i] = compiled.run(scope) ? '1' : '0';
       }
-      // Für getFormulaHighlights() unten: dieselbe Rohreihe, die auch die
+      rawSeriesById.set(id, rawSeries);
+    });
+
+    // ---------- 5) Ergebnis in ORIGINALER Reihenfolge zusammenstellen ----------
+    // (nicht Auswertungsreihenfolge - die Objekt-/Sidebar-Liste soll stabil
+    // in der vom Nutzer angelegten Formel-Reihenfolge bleiben.)
+    const computed = [];
+    const skippedList = []; // {name, message} - für Hint-Zeile UND Snackbar
+    formulas.forEach(f => {
+      const name = f.name.trim() || `F${f.id}`;
+      const rawSeries = rawSeriesById.get(f.id);
+      if (!rawSeries) {
+        f.rawSeries = null;
+        skippedList.push({ name, message: skipReasonById.get(f.id) || 'Unbekannter Fehler' });
+        return;
+      }
+      // Für getFormulaHighlights(): dieselbe Rohreihe, die auch die
       // synthetische FORMEL-Spalte speist, direkt an der Formel selbst
       // hinterlegen - dort in WAHR/FALSCH-Intervalle zu übersetzen ist billig
       // genug, um es bei Bedarf (statt hier vorab) zu tun.
@@ -826,7 +1017,7 @@
         return {
           formulaId: f.id, name: f.name.trim() || `F${f.id}`,
           colKuerzel: col.kuerzel, colName: col.name,
-          color: highlightColorFor(f), intervals
+          color: formulaColorFor(f), intervals
         };
       })
       .filter(Boolean);

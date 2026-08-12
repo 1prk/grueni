@@ -53,6 +53,13 @@
        nächsten offenen Platzhalter weiter (siehe insertAtSelection() unten)
        - Tippen oder ein Klick außerhalb der Kette gibt sie auf, ohne die
        Einfügung selbst zu beeinträchtigen.
+     chipColorFor(label)->string|null - optional: individuelle Akzentfarbe
+       für einen bloßen Bezeichner-Chip (nicht für Funktionsaufrufe/Zustände,
+       siehe isBareIdent-Prüfung in buildEditorDom()) statt der generischen
+       Variablen-Farbe - z.B. formulaBuilder.js: eine referenzierte Formel
+       trägt dieselbe Farbe wie ihre eigene Zeile/ihr Hervorhebungs-Band
+       (siehe formulaColorFor()), damit man sie über Formel-Liste, Chip UND
+       Zeitstrahl-Hervorhebung hinweg wiedererkennt.
      onRevalidate() - debounced (150ms) nach jeder inhaltlichen Änderung.
    Hängt an rowEl.querySelector('.expr-input-wrap'):
      wrap.__exprRefreshHighlight(errPos) - von außen (Validierung) genutzt,
@@ -120,9 +127,10 @@
     return node.textContent.length;
   }
 
-  function buildChipEl(text, kindClass, isErr) {
+  function buildChipEl(text, kindClass, isErr, accentColor) {
     const chip = document.createElement('span');
-    chip.className = 'expr-chip ' + kindClass + (isErr ? ' expr-chip-err' : '');
+    chip.className = 'expr-chip ' + kindClass + (isErr ? ' expr-chip-err' : '') + (accentColor ? ' expr-chip-accent' : '');
+    if (accentColor) chip.style.setProperty('--chip-accent', accentColor);
     chip.contentEditable = 'false';
     chip.dataset.len = text.length;
     const label = document.createElement('span');
@@ -145,7 +153,7 @@
   // Token NIE zum Chip wird (siehe Kopfkommentar), oder null (alles
   // Erkannte wird Chip - für initiales Rendern/Verlassen des Feldes/
   // explizites Einfügen).
-  function buildEditorDom(text, { errPos, knownNames, excludeCaret } = {}) {
+  function buildEditorDom(text, { errPos, knownNames, excludeCaret, chipColorFor } = {}) {
     const frag = document.createDocumentFragment();
     if (!text) return frag;
     let tokens;
@@ -171,7 +179,13 @@
       if (isErr) markedErr = true;
       const touching = excludeCaret != null && excludeCaret > tok.pos && excludeCaret <= tok.end;
       if (isChipToken(tok, nextTok, knownNames) && !touching) {
-        frag.appendChild(buildChipEl(raw, classifyToken(tok, nextTok), isErr));
+        // chipColorFor nur für bloße Bezeichner-Chips relevant (nicht für
+        // Funktionsaufrufe/Zustände) - sonst könnte ein Funktionsname, der
+        // zufällig gleich einem Formelnamen lautet, fälschlich eingefärbt
+        // werden (siehe formulaColorFor()-Aufrufer in formulaBuilder.js).
+        const isBareIdent = tok.type === 'IDENT' && (!nextTok || nextTok.type !== '(');
+        const accent = (chipColorFor && isBareIdent) ? chipColorFor(tok.value) : null;
+        frag.appendChild(buildChipEl(raw, classifyToken(tok, nextTok), isErr, accent));
       } else {
         const span = document.createElement('span');
         span.className = classifyToken(tok, nextTok) + (isErr ? ' expr-tok-err' : '');
@@ -330,12 +344,12 @@
   // excludeCaret IMMER ignoriert (auf null erzwungen) - der Aufrufer setzt
   // dort die neue Cursorposition ohnehin selbst (siehe setCaretOffset()/
   // setCaretRange() oben).
-  function refreshEditorContent(el, text, { errPos = null, knownNames = null, preserveCaret = true, excludeCaret = null } = {}) {
+  function refreshEditorContent(el, text, { errPos = null, knownNames = null, preserveCaret = true, excludeCaret = null, chipColorFor = null } = {}) {
     const isFocused = document.activeElement === el;
     const selNow = (preserveCaret && isFocused) ? getCaretSelection(el) : null;
     const effectiveExclude = preserveCaret ? excludeCaret : null;
     el.innerHTML = '';
-    el.appendChild(buildEditorDom(text, { errPos, knownNames, excludeCaret: effectiveExclude }));
+    el.appendChild(buildEditorDom(text, { errPos, knownNames, excludeCaret: effectiveExclude, chipColorFor }));
     wireChipRemovers(el);
     // Volle Selektion (nicht nur ihren Anfang) wiederherstellen - relevant,
     // wenn z.B. eine per accept() eingefügte Platzhalter-Selektion noch
@@ -393,7 +407,7 @@
     const el = wrap.querySelector('.expr-editor');
     const dropdown = wrap.querySelector('.expr-autocomplete');
     const paletteBtn = wrap.querySelector('.expr-palette-btn');
-    const { getText, setText, knownNames, getCandidates, onRevalidate } = opts;
+    const { getText, setText, knownNames, getCandidates, onRevalidate, chipColorFor } = opts;
 
     // Zeichenposition, deren Token gerade NICHT chippen soll (siehe
     // buildEditorDom()-Kopfkommentar), zuletzt gesetzt von einer echten
@@ -412,7 +426,7 @@
     let lastExcludeCaret = null;
     const refresh = (errPos, options) => {
       if (options && options.preserveCaret === false) lastExcludeCaret = null;
-      return refreshEditorContent(el, getText(), { errPos, knownNames: knownNames(), excludeCaret: lastExcludeCaret, ...options });
+      return refreshEditorContent(el, getText(), { errPos, knownNames: knownNames(), excludeCaret: lastExcludeCaret, chipColorFor, ...options });
     };
     wrap.__exprRefreshHighlight = errPos => refresh(errPos);
     // Externer Einfüge-Hook (z.B. für eine Symbol-Sidebar) - fügt anstelle
