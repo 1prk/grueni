@@ -864,6 +864,26 @@
     const sgRefs = objRefs.filter(r => r.kuerzel === 'SG');
     const traceRefs = objRefs.filter(r => r.kuerzel !== 'SG');
 
+    // Formel-Hervorhebungen (siehe formulaBuilder.js getFormulaHighlights()):
+    // je Zielspalte die WAHR-Intervalle aller Formeln, die dorthin zeigen -
+    // Zuordnung ÜBER KÜRZEL+NAME, nicht Rohindex (formulaBuilder.js verwendet
+    // für Signalgruppen den rohen CSV-Spaltenindex, hier zählt objKey()
+    // Signalgruppen dagegen über ihre Position im allStats-Array - beide
+    // Zählweisen sind nur zufällig identisch, siehe dortiger Kommentar).
+    const highlightsByObjKey = new Map();
+    const formulaHighlights = (GZ.views.formulaBuilder && GZ.views.formulaBuilder.getFormulaHighlights)
+      ? GZ.views.formulaBuilder.getFormulaHighlights() : [];
+    if (formulaHighlights.length) {
+      const targetKeyByName = new Map(objsNow.map(o => [o.kuerzel + '|' + o.name, objKey(o)]));
+      formulaHighlights.forEach(h => {
+        const targetKey = targetKeyByName.get(h.colKuerzel + '|' + h.colName);
+        if (!targetKey) return;
+        const entries = h.intervals.map(iv => ({ start: iv.start, end: iv.end, color: h.color, name: h.name }));
+        if (!highlightsByObjKey.has(targetKey)) highlightsByObjKey.set(targetKey, []);
+        highlightsByObjKey.get(targetKey).push(...entries);
+      });
+    }
+
     if (sgRefs.length === 0) {
       els.tablePanel.style.display = 'none';
       els.diagramControls.style.display = 'none';
@@ -1080,6 +1100,7 @@
           renderLane(mainSvg, {
             wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
             width: mainSize.width, height: mainSize.height, gridStepMs: 5000, laneStyle,
+            highlights: highlightsByObjKey.get(objKey(ref)) || [],
             // Ein Grünsegment, das über die Umlaufgrenze hinausreicht, wird
             // in ZWEI Zeilen sichtbar (Balken-Füllung via segSweep in
             // beiden, siehe carrySegs oben) - hier aber je Zeile nur die
@@ -1133,6 +1154,7 @@
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
             width: subSize.width, height: subSize.height, gridStepMs: 5000,
+            highlights: highlightsByObjKey.get(objKey(c)) || [],
             fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
             segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
             segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
@@ -1147,6 +1169,7 @@
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
             width: subSize.width, height: subSize.height, gridStepMs: 5000,
+            highlights: highlightsByObjKey.get(objKey(c)) || [],
             fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
             segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
           });

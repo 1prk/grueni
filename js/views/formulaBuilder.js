@@ -37,10 +37,18 @@
   let els = null;
   let vars = []; // {id, alias, colIndex}
   let funcs = []; // {id, name, params:string[], bodyText}
-  let formulas = []; // {id, name, exprText}
+  let formulas = []; // {id, name, exprText, highlightCol, rawSeries}
   let nextVarId = 1, nextFuncId = 1, nextFormulaId = 1;
   let syntheticCols = []; // [{index, kuerzel:'FORMEL', name, beschreibung, rawSeries}]
   let debounceTimers = new Map(); // "<kind>:<id>" -> timeout handle
+
+  // Farbpalette für "auf Objekt-Spur hervorheben" (siehe getFormulaHighlights()
+  // unten) - bewusst Blau-/Violett-/Pinktöne, die mit KEINEM Signalzustand
+  // (Rot/Gelb/Grün) kollidieren, damit eine Hervorhebung nie mit einem echten
+  // Signalbild verwechselt werden kann. Farbe ergibt sich aus der Position
+  // unter den AKTUELL hervorhebenden Formeln (nicht aus der Formel-ID), damit
+  // benachbarte aktive Hervorhebungen maximal unterscheidbar bleiben.
+  const HIGHLIGHT_PALETTE = ['#7c4dff', '#00b8d4', '#e91e63', '#3d5afe', '#8e24aa', '#00838f'];
 
   // Case-insensitive (AND/OR/NOT, wie im Tokenizer) bzw. exakt (TX und die
   // Zustands-/Funktionsnamen, ebenfalls exakt wie im Tokenizer/PRIMITIVES von
@@ -271,7 +279,7 @@
   }
 
   function addFormula() {
-    formulas.push({ id: nextFormulaId++, name: `F${nextFormulaId - 1}`, exprText: '' });
+    formulas.push({ id: nextFormulaId++, name: `F${nextFormulaId - 1}`, exprText: '', highlightCol: null, rawSeries: null });
   }
 
   function populateControls() {
@@ -282,6 +290,16 @@
     // Spaltenbezug (siehe Datei-Kopfkommentar) und bleiben unverändert.
     vars.forEach(v => { if (!cols.find(c => c.index === v.colIndex)) v.colIndex = cols.length ? cols[0].index : null; });
     syntheticCols = [];
+    // Rohreihe je Formel gehört zur vorherigen Datei - erst nach dem nächsten
+    // "Berechnen" wieder gültig, sonst könnte getFormulaHighlights() stale
+    // Intervalle gegen eine neue Zeitreihe falscher Länge auswerten. Ein
+    // Hervorhebungs-Ziel, das es in der neuen Datei nicht mehr gibt, wird wie
+    // bei vars oben stillschweigend zurückgesetzt statt auf eine falsche
+    // Spalte zu verweisen.
+    formulas.forEach(f => {
+      if (f.highlightCol != null && !cols.find(c => c.index === f.highlightCol)) f.highlightCol = null;
+      f.rawSeries = null;
+    });
     renderVarRows();
     renderFuncRows();
     renderFormulaRows();
@@ -405,7 +423,20 @@
     validateAllInline();
   }
 
+  // Farbe der "auf Objekt-Spur hervorheben"-Markierung dieser Formel (siehe
+  // HIGHLIGHT_PALETTE oben) - Position unter den AKTUELL hervorhebenden
+  // Formeln, nicht die Formel-ID, damit benachbarte aktive Hervorhebungen
+  // maximal unterscheidbar bleiben (schaltet man eine ab, rücken die übrigen
+  // Farben nach statt Lücken in der Palette zu lassen).
+  function highlightColorFor(f) {
+    if (f.highlightCol == null) return null;
+    const active = formulas.filter(x => x.highlightCol != null);
+    const idx = active.findIndex(x => x.id === f.id);
+    return idx === -1 ? null : HIGHLIGHT_PALETTE[idx % HIGHLIGHT_PALETTE.length];
+  }
+
   function renderFormulaRows() {
+    const cols = sourceCols();
     els.formulaRows.innerHTML = formulas.map(f => `
       <div class="up-formula-row" data-id="${f.id}">
         <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
@@ -414,6 +445,11 @@
           <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
           <div class="expr-autocomplete" hidden></div>
         </span>
+        <span class="up-formula-color-dot" style="${(() => { const c = highlightColorFor(f); return c ? `background:${c}` : 'visibility:hidden'; })()}"></span>
+        <select class="up-formula-highlight" title="Wahr-Intervalle dieser Formel farbig auf einer Objekt-Spur hervorheben (nach „Berechnen“ sichtbar)">
+          <option value="">– kein Highlight –</option>
+          ${cols.map(c => `<option value="${c.index}"${f.highlightCol === c.index ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select>
         <span class="up-formula-status"></span>
         <button type="button" class="oe-row-remove up-formula-remove">✕</button>
       </div>`).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
@@ -423,6 +459,11 @@
       const f = formulas.find(x => x.id === id);
       rowEl.querySelector('.up-formula-name').oninput = e => { f.name = e.target.value; };
       rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); };
+      rowEl.querySelector('.up-formula-highlight').onchange = e => {
+        f.highlightCol = e.target.value ? Number(e.target.value) : null;
+        renderFormulaRows();
+        if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshFormulaColumns();
+      };
       GZ.exprEditor.setup(rowEl, {
         getText: () => f.exprText,
         setText: v => { f.exprText = v; },
@@ -698,7 +739,7 @@
     formulas.forEach(f => {
       const name = f.name.trim() || `F${f.id}`;
       const compiled = compile(f.exprText, varTypesWithTx, funcDefs);
-      if (!compiled.ok) { skippedList.push({ name, message: compiled.message }); return; }
+      if (!compiled.ok) { f.rawSeries = null; skippedList.push({ name, message: compiled.message }); return; }
       // scopeSpecs (und damit die Objekt-Handles/Sweeps) sind über ALLE
       // Formeln hinweg dieselben Instanzen (einmal vor der Schleife gebaut,
       // siehe oben) - vor jedem neuen Formel-Durchlauf müssen ihre Sweeps
@@ -723,6 +764,11 @@
         });
         rawSeries[i] = compiled.run(scope) ? '1' : '0';
       }
+      // Für getFormulaHighlights() unten: dieselbe Rohreihe, die auch die
+      // synthetische FORMEL-Spalte speist, direkt an der Formel selbst
+      // hinterlegen - dort in WAHR/FALSCH-Intervalle zu übersetzen ist billig
+      // genug, um es bei Bedarf (statt hier vorab) zu tun.
+      f.rawSeries = rawSeries;
       computed.push({
         index: SYNTH_INDEX_BASE + f.id, kuerzel: 'FORMEL', name,
         beschreibung: f.exprText, rawSeries
@@ -750,6 +796,42 @@
   // einem neuen Datenimport - siehe populateControls()).
   function getSyntheticColumns() { return syntheticCols; }
 
+  // Lesezugriff für umlaufpruefung.js: je Formel mit gesetztem Hervorhebungs-
+  // Ziel die WAHR-Intervalle (aus derselben Rohreihe wie die synthetische
+  // FORMEL-Spalte, siehe berechnen()) plus Zielspalte (Kürzel+Name - NICHT
+  // Rohindex, siehe Kopfkommentar unten) und zugeteilte Farbe. Leer, solange
+  // "Berechnen" noch nicht geklickt wurde (kein f.rawSeries) oder kein Ziel
+  // gewählt ist.
+  //
+  // WICHTIG: das Ziel wird über Kürzel+Name statt Rohindex identifiziert.
+  // sourceCols() liefert für Signalgruppen den ROHEN CSV-Spaltenindex
+  // (col.index aus parser.js), während umlaufpruefung.js seine eigenen
+  // SG-Objekte stattdessen über die POSITION im allStats-Array indiziert
+  // (siehe dortiges allObjects()) - beide Zählweisen fallen nur zufällig
+  // zusammen, wenn vor der ersten Signalgruppe keine andere Spalte in der
+  // CSV steht. Kürzel+Name ist die einzige zwischen beiden Dateien stabile
+  // Kennung (dasselbe Muster wie bei vars/getConfig() oben).
+  function getFormulaHighlights() {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) return [];
+    const cols = sourceCols();
+    return formulas
+      .filter(f => f.highlightCol != null && f.rawSeries && f.rawSeries.length === a.times.length)
+      .map(f => {
+        const col = cols.find(c => c.index === f.highlightCol);
+        if (!col) return null;
+        const intervals = buildSegments(a.times, f.rawSeries, v => v === '1' ? 'WAHR' : 'FALSCH')
+          .filter(s => s.cat === 'WAHR');
+        if (!intervals.length) return null;
+        return {
+          formulaId: f.id, name: f.name.trim() || `F${f.id}`,
+          colKuerzel: col.kuerzel, colName: col.name,
+          color: highlightColorFor(f), intervals
+        };
+      })
+      .filter(Boolean);
+  }
+
   // Für die Konfiguration speichern/laden (siehe umlaufpruefung.js): Spalten
   // werden über Kürzel+Name statt Rohindex referenziert (siehe GZ.configIO)
   // - bleibt über neue Exports derselben Anlage hinweg gültig.
@@ -763,7 +845,13 @@
       // Funktionen haben keinen Spaltenbezug (siehe Datei-Kopfkommentar) -
       // params als Kopie speichern, nicht die Live-Referenz.
       funcs: funcs.map(f => ({ name: f.name, params: f.params.slice(), bodyText: f.bodyText })),
-      formulas: formulas.map(f => ({ name: f.name, exprText: f.exprText }))
+      formulas: formulas.map(f => {
+        const col = cols.find(c => c.index === f.highlightCol);
+        return {
+          name: f.name, exprText: f.exprText,
+          highlightColKuerzel: col ? col.kuerzel : null, highlightColName: col ? col.name : null
+        };
+      })
     };
   }
 
@@ -784,7 +872,14 @@
       return { id: nextVarId++, alias: v.alias, colIndex: col ? col.index : (cols.length ? cols[0].index : null) };
     });
     funcs = (cfg.funcs || []).map(f => ({ id: nextFuncId++, name: f.name, params: (f.params || []).slice(), bodyText: f.bodyText || '' }));
-    formulas = (cfg.formulas || []).map(f => ({ id: nextFormulaId++, name: f.name, exprText: f.exprText }));
+    formulas = (cfg.formulas || []).map(f => {
+      let highlightCol = null;
+      if (f.highlightColKuerzel && f.highlightColName) {
+        const col = cols.find(c => c.kuerzel === f.highlightColKuerzel && c.name === f.highlightColName);
+        highlightCol = col ? col.index : null; // still ohne Hervorhebung, aber kein Skip-Eintrag (rein optisch, nicht kritisch)
+      }
+      return { id: nextFormulaId++, name: f.name, exprText: f.exprText, highlightCol, rawSeries: null };
+    });
     renderVarRows();
     renderFuncRows();
     renderFormulaRows();
@@ -793,5 +888,5 @@
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.formulaBuilder = { init, populateControls, getSyntheticColumns, getConfig, applyConfig };
+  GZ.views.formulaBuilder = { init, populateControls, getSyntheticColumns, getFormulaHighlights, getConfig, applyConfig };
 })(window.GZ = window.GZ || {});

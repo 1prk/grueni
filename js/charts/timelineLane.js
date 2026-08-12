@@ -89,7 +89,15 @@
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
   //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
   //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, edgeLabelsFor,
-  //   gridStepMs, laneStyle, width, height}
+  //   gridStepMs, laneStyle, highlights, width, height}
+  // highlights: [{start, end, color, name}] - Formel-Hervorhebung (siehe
+  // formulaBuilder.js getFormulaHighlights()): eine frei einfärbbare Markierung
+  // "diese Formel war hier wahr", als halbtransparentes Band über die volle
+  // Spurhöhe PLUS gestrichelte Randlinien an echten Intervallgrenzen (nicht am
+  // Zeilenrand, falls das Intervall über die Zeile hinausreicht - dieselbe
+  // "nur den tatsächlichen Rand zeigen"-Logik wie bei edgeLabelsFor). Rein
+  // dekorativ (pointer-events:none), damit Klicks/Strg-Messung weiterhin das
+  // darunterliegende Segment treffen, nicht das Overlay.
   // laneStyle: 'default' (bisherige, flächige Darstellung) oder 'minimal'
   // (umrandete Kästen auf dünner roter Grundlinie, Rot-Gelb voll, Gelb mit
   // Diagonalstrich - siehe MINIMAL_FILL oben). Rein visuell: dieselben
@@ -134,7 +142,7 @@
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
       baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
       segTitle = defaultTitle, onGreenClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
-      edgeLabelsFor, gridStepMs, laneStyle = 'default'
+      edgeLabelsFor, gridStepMs, laneStyle = 'default', highlights = []
     } = opts;
 
     const minimal = laneStyle === 'minimal';
@@ -297,6 +305,30 @@
       .append('title').text(d => d.unresolved
         ? `Anforderungsbeginn: ${fmtTimeShort(d.t)} – bis Datenende unaufgelöst (kein Grün erhalten)`
         : `Anforderungsbeginn (erste Detektorbelegung): ${fmtTimeShort(d.t)}`);
+
+    // Formel-Hervorhebung ZULETZT (über allem anderen), damit die Einfärbung
+    // auch auf vollflächigen Segmenten (z.B. GRUEN) sichtbar bleibt. Eine
+    // Randlinie nur zeichnen, wenn die Zeile den echten Intervallrand enthält
+    // (start/end >= wMin/<= wMax) - sonst entstünde am Zeilenrand eine falsche
+    // Grenze, obwohl das Intervall dort in Wirklichkeit weiterläuft.
+    const hlVis = highlights.filter(h => h.end > wMin && h.start < wMax);
+    if (hlVis.length) {
+      const hlG = svg.append('g').attr('class', 'formula-highlights');
+      hlG.selectAll('rect.formula-hl-band').data(hlVis).join('rect')
+        .attr('class', 'formula-hl-band')
+        .attr('x', d => x(Math.max(d.start, wMin))).attr('y', 0)
+        .attr('width', d => Math.max(x(Math.min(d.end, wMax)) - x(Math.max(d.start, wMin)), 1))
+        .attr('height', height)
+        .style('fill', d => d.color);
+      hlG.selectAll('line.formula-hl-edge-start').data(hlVis.filter(d => d.start >= wMin)).join('line')
+        .attr('class', 'formula-hl-edge')
+        .attr('x1', d => x(d.start)).attr('x2', d => x(d.start)).attr('y1', 0).attr('y2', height)
+        .style('stroke', d => d.color);
+      hlG.selectAll('line.formula-hl-edge-end').data(hlVis.filter(d => d.end <= wMax)).join('line')
+        .attr('class', 'formula-hl-edge')
+        .attr('x1', d => x(d.end)).attr('x2', d => x(d.end)).attr('y1', 0).attr('y2', height)
+        .style('stroke', d => d.color);
+    }
 
     return true;
   }
