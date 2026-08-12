@@ -544,8 +544,12 @@
     const boundIdx = new Set(vars.map(v => v.colIndex));
     const unboundCols = cols.filter(c => !boundIdx.has(c.index));
 
-    const item = (name, meta, insertText, selStart, selEnd, muted) =>
-      `<div class="fsb-item${muted ? ' fsb-item-muted' : ''}" data-insert="${esc(insertText)}" data-sel-start="${selStart}" data-sel-end="${selEnd}" title="${esc(meta)}">
+    // argRanges (Primitiven/eigene Funktionen): ermöglicht auch beim Einfügen
+    // AUS DER SEITENLEISTE die Tabstop-Kette - ohne sie sprang die Auswahl
+    // nach dem ersten Platzhalter nicht weiter und der nächste Klick landete
+    // am Cursor statt im nächsten Argument ("DauerSeit(K1GRUEN, zustand)").
+    const item = (name, meta, insertText, selStart, selEnd, muted, argRanges) =>
+      `<div class="fsb-item${muted ? ' fsb-item-muted' : ''}" data-insert="${esc(insertText)}" data-sel-start="${selStart}" data-sel-end="${selEnd}"${argRanges ? ` data-arg-ranges="${esc(JSON.stringify(argRanges))}"` : ''} title="${esc(meta)}">
         <span class="fsb-item-name">${esc(name)}</span><span class="fsb-item-meta">${esc(meta)}</span>
       </div>`;
     // .fsb-section-body kapselt die Einträge in einen eigenen Scrollbereich
@@ -563,12 +567,14 @@
       const name = f.name.trim();
       const params = f.params.map(p => p.trim()).filter(Boolean);
       const argList = params.join(', ');
-      return item(name, `(${argList})`, `${name}(${argList})`, name.length + 1, name.length + 1 + (params[0] ? params[0].length : 0));
+      const ranges = params.length ? argRangesFor(name, params) : [{ start: name.length + 1, end: name.length + 1 }];
+      return item(name, `(${argList})`, `${name}(${argList})`, ranges[0].start, ranges[0].end, false, ranges);
     }).join('');
 
     const primHtml = GZ.exprEngine.PRIMITIVE_INFO.map(p => {
       const argList = p.params.join(', ');
-      return item(p.name, `(${argList})`, `${p.name}(${argList})`, p.name.length + 1, p.name.length + 1 + p.params[0].length);
+      const ranges = argRangesFor(p.name, p.params);
+      return item(p.name, `(${argList})`, `${p.name}(${argList})`, ranges[0].start, ranges[0].end, false, ranges);
     }).join('');
 
     const katChips = Object.entries(GZ.exprEngine.KAT_TOKENS).map(([tok, katType]) =>
@@ -592,7 +598,9 @@
     els.sidebar.querySelectorAll('[data-insert]').forEach(el => {
       el.onmousedown = ev => {
         ev.preventDefault(); // Fokus im Ausdrucksfeld erhalten (siehe insertTextAtFocused())
-        insertTextAtFocused(el.dataset.insert, Number(el.dataset.selStart), Number(el.dataset.selEnd));
+        let ranges = null;
+        try { ranges = el.dataset.argRanges ? JSON.parse(el.dataset.argRanges) : null; } catch (e) { ranges = null; }
+        insertTextAtFocused(el.dataset.insert, Number(el.dataset.selStart), Number(el.dataset.selEnd), ranges);
       };
     });
     els.sidebar.querySelectorAll('[data-col-index]').forEach(el => {
@@ -627,9 +635,9 @@
 
   // Fügt Text in das aktuell fokussierte Ausdrucksfeld ein - no-op mit
   // Hinweis, wenn gerade keins fokussiert ist (siehe activeExprWrap()).
-  function insertTextAtFocused(text, selStart, selEnd) {
+  function insertTextAtFocused(text, selStart, selEnd, argRanges) {
     const wrap = activeExprWrap();
-    const ok = wrap && wrap.__exprInsertAt && wrap.__exprInsertAt(text, selStart, selEnd);
+    const ok = wrap && wrap.__exprInsertAt && wrap.__exprInsertAt(text, selStart, selEnd, argRanges);
     if (!ok && GZ.snackbar) {
       GZ.snackbar.show('Kein Eingabefeld aktiv', { type: 'info', description: 'Zuerst in ein Funktions- oder Formelfeld klicken, dann aus der Übersicht auswählen.' });
     }

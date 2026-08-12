@@ -420,10 +420,10 @@
     // dass der Aufrufer Interna dieser Zeile (Modell-Feld, Debounce,
     // Tabstop-Kette...) kennen muss. Liefert false, wenn das Feld gerade
     // keine Selektion hat (z.B. nicht fokussiert).
-    wrap.__exprInsertAt = (text, selStart, selEnd) => {
+    wrap.__exprInsertAt = (text, selStart, selEnd, argRanges) => {
       const sel = getCaretSelection(el);
       if (sel == null) return false;
-      insertAtSelection(sel.start, sel.end, text, selStart, selEnd, null);
+      insertAtSelection(sel.start, sel.end, text, selStart, selEnd, argRanges || null);
       return true;
     };
 
