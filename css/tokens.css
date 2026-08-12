@@ -26,6 +26,10 @@
   --sig-yellow:#e0a721;
   --sig-green:#1f8a4c;
   --sig-dark:#4b5563;
+  /* Umrandung der Segmentkästen im Spur-Stil "Minimal" (siehe charts.css) -
+     bewusst fast schwarz wie im gedruckten Signalzeitenplan, nicht das
+     hellere --border-strong der Flächenelemente. */
+  --lane-outline:#1a1f26;
   --req-marker:#7c4fd1;
   --req-marker-bg:#efe8fb;
 

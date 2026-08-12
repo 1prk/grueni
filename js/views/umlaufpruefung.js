@@ -79,6 +79,7 @@
       objList: root.querySelector('#upObjList'),
       objSearch: root.querySelector('#upObjSearch'),
       fzToggle: root.querySelector('#upFzToggle'),
+      laneStyle: root.querySelector('#upLaneStyle'),
       filterRowsEl: root.querySelector('#upFilterRows'),
       addFilterBtn: root.querySelector('#upAddFilterBtn'),
       hint: root.querySelector('#upHint'),
@@ -464,6 +465,7 @@
       objects: objectsCfg,
       filters: filtersCfg,
       fzEnabled: !!(els.fzToggle && els.fzToggle.checked),
+      laneStyle: currentLaneStyle(),
       windowSize: windowCount
     };
   }
@@ -503,6 +505,7 @@
     }).filter(Boolean);
 
     if (els.fzToggle) els.fzToggle.checked = !!cfg.fzEnabled;
+    if (els.laneStyle && cfg.laneStyle) els.laneStyle.value = cfg.laneStyle;
     if (cfg.windowSize) { windowCount = cfg.windowSize; els.winSize.value = windowCount; }
     windowStartIdx = 0;
 
@@ -590,6 +593,7 @@
 
   function wireEvents() {
     els.fzToggle.onchange = render;
+    if (els.laneStyle) els.laneStyle.onchange = render;
   }
 
   function windowRange(n) {
@@ -815,6 +819,12 @@
     return matches;
   }
 
+  // Spur-Stil (rein optisch, siehe renderLane laneStyle in timelineLane.js) -
+  // "minimal" ahmt die Darstellung eines gedruckten Signalzeitenplans nach.
+  function currentLaneStyle() {
+    return (els && els.laneStyle && els.laneStyle.value === 'minimal') ? 'minimal' : 'default';
+  }
+
   function render() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -860,6 +870,11 @@
     const TU = computeGlobalTU(cycleStarts);
     const anomalyCtx = GZ.state.anomalyCtx();
     const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
+    const laneStyle = currentLaneStyle();
+    // Container-Klasse für die stilabhängige Beschriftungsfarbe (siehe
+    // .lane-minimal in charts.css) - die Segmente selbst bekommen ihre
+    // Klassen direkt von renderLane().
+    if (els.rows) els.rows.classList.toggle('lane-minimal', laneStyle === 'minimal');
 
     const sgData = sgRefs.map(r => {
       const sgIdx = r.index;
@@ -1060,7 +1075,7 @@
           sgCursor++;
           renderLane(mainSvg, {
             wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
-            width: mainSize.width, height: mainSize.height, gridStepMs: 5000,
+            width: mainSize.width, height: mainSize.height, gridStepMs: 5000, laneStyle,
             // Ein Grünsegment, das über die Umlaufgrenze hinausreicht, wird
             // in ZWEI Zeilen sichtbar (Balken-Füllung via segSweep in
             // beiden, siehe carrySegs oben) - hier aber je Zeile nur die
@@ -1082,7 +1097,7 @@
             renderLane(fzSvg, {
               wMin: r.start, wMax: r.end, segs: sr.fzVisSegs[fi],
               baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-              width: subSize.width, height: subSize.height, gridStepMs: 5000,
+              width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
               fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
               segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
               segTitle: d => d.cat === 'FZ_SOLL'
@@ -1095,7 +1110,7 @@
             renderLane(zwlSvg, {
               wMin: r.start, wMax: r.end, segs: sr.zwlVisSegs[fi],
               baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-              width: subSize.width, height: subSize.height, gridStepMs: 5000,
+              width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
               fillFor: () => 'url(#gz-pat-zwl)',
               segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
               segLabelColorFor: () => 'var(--text)',
@@ -1113,7 +1128,7 @@
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height, gridStepMs: 5000,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
             fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
             segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
             segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
@@ -1127,7 +1142,7 @@
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height, gridStepMs: 5000,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
             fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
             segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
           });

@@ -18,6 +18,25 @@
     GELB: 'url(#gz-pat-wedge-y)',
     BELEGT: 'var(--accent)'
   };
+  // "Minimal": Darstellung angelehnt an klassische Signalzeitenpläne (LISA+
+  // u.ä.) - dünne rote Grundlinie, darüber UMRANDETE Kästen statt flächiger
+  // Balken. Fachlich entscheidend ist die Unterscheidung der beiden
+  // Übergänge: Rot-Gelb (Freigabe beginnt) wird VOLL gefüllt, das
+  // abschließende Gelb (Freigabe endet) bekommt einen einzelnen
+  // Diagonalstrich (siehe drawMinimalGelbSlashes() unten). Dadurch bleiben
+  // beide auch in Schwarzweiß-Ausdrucken auseinanderzuhalten - genau wie im
+  // gedruckten Signalzeitenplan.
+  const MINIMAL_FILL = {
+    GRUEN: 'var(--sig-green)',
+    DUNKEL: 'var(--sig-dark)',
+    UNBEKANNT: 'url(#gz-pat-unknown)',
+    INV: 'url(#gz-pat-unknown)',
+    LUECKE: 'url(#gz-pat-gap)',
+    ROTGELB: 'var(--sig-yellow)', // voll gefüllt
+    GELB: 'var(--sig-yellow)',    // voll gefüllt + Diagonalstrich
+    BELEGT: 'var(--accent)'
+  };
+
   const CAT_LABEL = GZ.parser.CAT_LABEL;
 
   let defsInstalled = false;
@@ -73,7 +92,11 @@
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
   //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
   //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, edgeLabelsFor,
-  //   gridStepMs, width, height}
+  //   gridStepMs, laneStyle, width, height}
+  // laneStyle: 'default' (bisherige, flächige Darstellung) oder 'minimal'
+  // (umrandete Kästen auf dünner roter Grundlinie, Rot-Gelb voll, Gelb mit
+  // Diagonalstrich - siehe MINIMAL_FILL oben). Rein visuell: dieselben
+  // Segmentdaten, dieselben Beschriftungen/Interaktionen.
   // gridStepMs: optionales festes Zeitraster (z.B. 5000 = 5s-Schritte) als
   // dünne, helle senkrechte Hilfslinien ÜBER den Segmenten (damit sie auch
   // auf vollflächig gefüllten Segmenten wie GRUEN als Ablesehilfe sichtbar
@@ -114,29 +137,50 @@
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
       baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
       segTitle = defaultTitle, onGreenClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
-      edgeLabelsFor, gridStepMs
+      edgeLabelsFor, gridStepMs, laneStyle = 'default'
     } = opts;
+
+    const minimal = laneStyle === 'minimal';
+    const fillMap = minimal ? MINIMAL_FILL : CAT_FILL;
+    // Im Minimal-Stil sind die Kästen etwas niedriger als die Spurhöhe, damit
+    // die Umrandung frei steht und die dünne Grundlinie an den Rändern
+    // sichtbar durchläuft (wie im gedruckten Plan).
+    const segInset = minimal ? 3 : 1.5;
+    const baseH = minimal ? 2 : baselineHeight;
 
     const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
     const svg = d3.select(svgEl).attr('viewBox', `0 0 ${width} ${height}`).attr('preserveAspectRatio', 'none');
     svg.selectAll('*').remove();
 
     svg.append('rect').attr('class', 'lane-baseline')
-      .attr('x', 0).attr('y', height / 2 - baselineHeight / 2).attr('width', width).attr('height', baselineHeight)
+      .attr('x', 0).attr('y', height / 2 - baseH / 2).attr('width', width).attr('height', baseH)
       .style('fill', baselineColor);
 
     const visSegs = segs.filter(s => s.end > wMin && s.start < wMax && s.cat !== baselineCat);
     const segSel = svg.append('g').attr('class', 'segs')
       .selectAll('rect.seg').data(visSegs).join('rect')
-      .attr('class', d => 'seg seg-' + d.cat)
+      .attr('class', d => 'seg seg-' + d.cat + (minimal ? ' seg-minimal' : ''))
       .attr('x', d => x(Math.max(d.start, wMin)))
-      .attr('y', 1.5)
+      .attr('y', segInset)
       .attr('width', d => Math.max(x(Math.min(d.end, wMax)) - x(Math.max(d.start, wMin)), 1.2))
-      .attr('height', height - 3)
-      .style('fill', d => (fillFor && fillFor(d)) || CAT_FILL[d.cat] || '#9aa4b0')
+      .attr('height', height - 2 * segInset)
+      .style('fill', d => (fillFor && fillFor(d)) || fillMap[d.cat] || '#9aa4b0')
       .style('opacity', d => segOpacityFor ? segOpacityFor(d) : 1)
       .style('cursor', d => (d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default');
     segSel.append('title').text(segTitle);
+
+    // Einzelner Diagonalstrich im abschließenden Gelb (siehe MINIMAL_FILL) -
+    // bewusst als echte Linie je Segment statt als Schraffur-Muster: im
+    // Signalzeitenplan trägt jedes Gelb-Kästchen GENAU EINEN Strich,
+    // unabhängig von seiner Breite.
+    if (minimal) {
+      const gelbSegs = visSegs.filter(d => d.cat === 'GELB');
+      svg.append('g').attr('class', 'seg-gelb-slash').selectAll('line')
+        .data(gelbSegs).join('line')
+        .attr('x1', d => x(Math.max(d.start, wMin))).attr('y1', height - segInset)
+        .attr('x2', d => x(Math.min(d.end, wMax))).attr('y2', segInset)
+        .style('pointer-events', 'none');
+    }
 
     // Zeitraster ÜBER den Segmenten (nicht dahinter), sonst wäre es unter
     // vollflächig deckenden Füllungen (z.B. GRUEN) unsichtbar - dünn/hell

@@ -124,6 +124,20 @@
 .seg-edge-label-right{ text-anchor:end; }
 .seg-edge-overflow{ font-family:var(--mono); font-size:12px; font-weight:900; fill:#fff; text-anchor:middle; pointer-events:none; }
 
+/* ---------- Spur-Stil "Minimal" (renderLane laneStyle:'minimal') ----------
+   Angelehnt an klassische Signalzeitenpläne: umrandete Kästen auf dünner
+   roter Grundlinie statt flächiger Balken. Rot-Gelb ist voll gefüllt, das
+   abschließende Gelb trägt zusätzlich einen Diagonalstrich (als eigene
+   Linie gezeichnet, siehe timelineLane.js) - so bleiben beide Übergänge
+   auch ohne Farbe unterscheidbar. */
+.seg-minimal{ stroke:var(--lane-outline); stroke-width:1; }
+.seg-gelb-slash line{ stroke:var(--lane-outline); stroke-width:1; }
+/* Beschriftungen sitzen im Minimal-Stil auf hellen Flächen (Gelb) bzw. am
+   Kastenrand - dunkler Text mit hellem Halo liest sich dort besser als der
+   weiße Text des Standardstils. */
+.lane-minimal .seg-edge-label{ fill:var(--text); stroke:rgba(255,255,255,.85); }
+.lane-minimal .seg-edge-overflow{ fill:var(--text); }
+
 /* d3-drawn primitives shared across charts */
 .d3-axis-x .domain{ display:none; }
 .d3-axis-x .tick line{ display:none; }
