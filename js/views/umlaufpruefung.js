@@ -819,10 +819,14 @@
     return matches;
   }
 
-  // Spur-Stil (rein optisch, siehe renderLane laneStyle in timelineLane.js) -
-  // "minimal" ahmt die Darstellung eines gedruckten Signalzeitenplans nach.
+  // Spur-Stil der SIGNALGRUPPEN-Hauptzeilen (rein optisch, siehe renderLane
+  // laneStyle in timelineLane.js) - "minimal" ahmt die Darstellung eines
+  // gedruckten Signalzeitenplans nach und ist die Voreinstellung. Gilt
+  // bewusst NUR für die Signalgruppen-Zeilen: die Detektor-/APW-/Formel-
+  // sowie die ÖV-Fahrzeit-Zusatzspuren behalten ihre gewohnte Darstellung,
+  // da sie kein Bestandteil eines Signalzeitenplans sind.
   function currentLaneStyle() {
-    return (els && els.laneStyle && els.laneStyle.value === 'minimal') ? 'minimal' : 'default';
+    return (els && els.laneStyle && els.laneStyle.value === 'default') ? 'default' : 'minimal';
   }
 
   function render() {
@@ -1097,7 +1101,7 @@
             renderLane(fzSvg, {
               wMin: r.start, wMax: r.end, segs: sr.fzVisSegs[fi],
               baselineCat: 'FZ_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-              width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
+              width: subSize.width, height: subSize.height, gridStepMs: 5000,
               fillFor: d => d.cat === 'FZ_SOLL' ? 'var(--fz-soll)' : 'var(--fz-verlust)',
               segLabelFor: d => d.cat === 'FZ_SOLL' ? String(Math.round(d.sollfahrzeitSek)) : String(Math.round(d.verlustSek)),
               segTitle: d => d.cat === 'FZ_SOLL'
@@ -1110,7 +1114,7 @@
             renderLane(zwlSvg, {
               wMin: r.start, wMax: r.end, segs: sr.zwlVisSegs[fi],
               baselineCat: 'ZWL_NONE', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-              width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
+              width: subSize.width, height: subSize.height, gridStepMs: 5000,
               fillFor: () => 'url(#gz-pat-zwl)',
               segLabelFor: d => String(Math.round(d.zwangsloeschSek)),
               segLabelColorFor: () => 'var(--text)',
@@ -1128,7 +1132,7 @@
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: '__apw_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000,
             fillFor: d => d.cat === 'LUECKE' ? 'url(#gz-pat-gap)' : (d.idx % 2 === 0 ? 'var(--apw-a)' : 'var(--apw-b)'),
             segLabelFor: d => d.cat === 'LUECKE' ? '' : d.cat,
             segLabelColorFor: d => d.idx % 2 === 0 ? '#fff' : 'var(--text)',
@@ -1142,7 +1146,7 @@
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
             baselineCat: 'FREI', baselineColor: 'var(--text-faint)', baselineHeight: 2,
-            width: subSize.width, height: subSize.height, gridStepMs: 5000, laneStyle,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000,
             fillFor: isFormula ? (d => d.cat === 'BELEGT' ? 'var(--formula-on)' : undefined) : undefined,
             segTitle: s => `${esc(c.name)}${isFormula ? ` (Formel: ${esc(c.beschreibung)})` : ''} – ${s.cat === 'BELEGT' ? (isFormula ? 'Formel wahr' : 'Belegt') : s.cat === 'LUECKE' ? 'Datenlücke' : 'Unbekannt/INV'}: ${fmtTimeShort(s.start)}–${fmtTimeShort(s.end)} (${Math.round((s.end - s.start) / 1000)}s)`
           });

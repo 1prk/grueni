@@ -20,12 +20,9 @@
   };
   // "Minimal": Darstellung angelehnt an klassische Signalzeitenpläne (LISA+
   // u.ä.) - dünne rote Grundlinie, darüber UMRANDETE Kästen statt flächiger
-  // Balken. Fachlich entscheidend ist die Unterscheidung der beiden
-  // Übergänge: Rot-Gelb (Freigabe beginnt) wird VOLL gefüllt, das
-  // abschließende Gelb (Freigabe endet) bekommt einen einzelnen
-  // Diagonalstrich (siehe drawMinimalGelbSlashes() unten). Dadurch bleiben
-  // beide auch in Schwarzweiß-Ausdrucken auseinanderzuhalten - genau wie im
-  // gedruckten Signalzeitenplan.
+  // Balken. Beide Gelbphasen (Rot-Gelb am Freigabebeginn und Gelb am
+  // Freigabeende) werden voll gefüllt und tragen je EINEN Diagonalstrich,
+  // genau wie im gedruckten Plan (siehe Slash-Block in renderLane()).
   const MINIMAL_FILL = {
     GRUEN: 'var(--sig-green)',
     DUNKEL: 'var(--sig-dark)',
@@ -169,14 +166,15 @@
       .style('cursor', d => (d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default');
     segSel.append('title').text(segTitle);
 
-    // Einzelner Diagonalstrich im abschließenden Gelb (siehe MINIMAL_FILL) -
-    // bewusst als echte Linie je Segment statt als Schraffur-Muster: im
-    // Signalzeitenplan trägt jedes Gelb-Kästchen GENAU EINEN Strich,
-    // unabhängig von seiner Breite.
+    // Einzelner Diagonalstrich in BEIDEN Gelbphasen - Rot-Gelb am Anfang wie
+    // Gelb am Ende der Freigabe (siehe MINIMAL_FILL) - bewusst als echte
+    // Linie je Segment statt als Schraffur-Muster: im Signalzeitenplan trägt
+    // jedes Gelb-Kästchen GENAU EINEN Strich, unabhängig von seiner Breite
+    // (ein Muster würde je nach Breite mal mehrere, mal gar keinen zeigen).
     if (minimal) {
-      const gelbSegs = visSegs.filter(d => d.cat === 'GELB');
-      svg.append('g').attr('class', 'seg-gelb-slash').selectAll('line')
-        .data(gelbSegs).join('line')
+      const amberSegs = visSegs.filter(d => d.cat === 'GELB' || d.cat === 'ROTGELB');
+      svg.append('g').attr('class', 'seg-amber-slash').selectAll('line')
+        .data(amberSegs).join('line')
         .attr('x1', d => x(Math.max(d.start, wMin))).attr('y1', height - segInset)
         .attr('x2', d => x(Math.min(d.end, wMax))).attr('y2', segInset)
         .style('pointer-events', 'none');

@@ -126,17 +126,19 @@
 
 /* ---------- Spur-Stil "Minimal" (renderLane laneStyle:'minimal') ----------
    Angelehnt an klassische Signalzeitenpläne: umrandete Kästen auf dünner
-   roter Grundlinie statt flächiger Balken. Rot-Gelb ist voll gefüllt, das
-   abschließende Gelb trägt zusätzlich einen Diagonalstrich (als eigene
-   Linie gezeichnet, siehe timelineLane.js) - so bleiben beide Übergänge
-   auch ohne Farbe unterscheidbar. */
+   roter Grundlinie statt flächiger Balken. Beide Gelbphasen (Rot-Gelb und
+   Gelb) sind voll gefüllt und tragen je einen Diagonalstrich (als eigene
+   Linie gezeichnet, siehe timelineLane.js). */
 .seg-minimal{ stroke:var(--lane-outline); stroke-width:1; }
-.seg-gelb-slash line{ stroke:var(--lane-outline); stroke-width:1; }
-/* Beschriftungen sitzen im Minimal-Stil auf hellen Flächen (Gelb) bzw. am
-   Kastenrand - dunkler Text mit hellem Halo liest sich dort besser als der
-   weiße Text des Standardstils. */
-.lane-minimal .seg-edge-label{ fill:var(--text); stroke:rgba(255,255,255,.85); }
-.lane-minimal .seg-edge-overflow{ fill:var(--text); }
+.seg-amber-slash line{ stroke:var(--lane-outline); stroke-width:1; }
+/* Beschriftungen im Minimal-Stil: Arial wie im gedruckten Signalzeitenplan
+   (statt der sonst app-weiten Monospace) und dunkler Text mit hellem Halo -
+   auf Gelb/Grün besser lesbar als der weiße Text des Standardstils. */
+.lane-minimal .seg-edge-label{
+  font-family:Arial, Helvetica, sans-serif; font-weight:400; font-size:10px;
+  fill:var(--text); stroke:rgba(255,255,255,.85);
+}
+.lane-minimal .seg-edge-overflow{ font-family:Arial, Helvetica, sans-serif; fill:var(--text); }
 
 /* d3-drawn primitives shared across charts */
 .d3-axis-x .domain{ display:none; }
