@@ -227,18 +227,10 @@ tr.oe-hidden{ display:none; }
 .oe-row-remove:hover{ background:var(--crit-bg); }
 
 /* ---------- Umlaufprüfung: Formel-Builder ---------- */
-.up-formula-list{ display:flex; flex-direction:column; gap:6px; }
-.up-var-row, .up-formula-row{ display:flex; align-items:center; gap:6px; }
+.up-formula-list{ display:flex; flex-direction:column; gap:8px; }
+.up-var-row{ display:flex; align-items:center; gap:6px; }
 .up-var-row .up-var-alias{ width:120px; flex-shrink:0; }
 .up-var-row .up-var-col{ flex:1; min-width:0; }
-.up-formula-row .up-formula-name{ width:90px; flex-shrink:0; }
-.up-formula-row .expr-input-wrap{ flex:1; min-width:0; }
-/* "Auf Objekt-Spur hervorheben" (siehe getFormulaHighlights() in
-   formulaBuilder.js): Zielauswahl + Farbpunkt, der die für diese Formel
-   zugeteilte Hervorhebungsfarbe zeigt (sonst unsichtbar, kein Layout-Sprung
-   beim Umschalten). */
-.up-formula-highlight{ width:92px; flex-shrink:0; font-size:11.5px; padding:5px 6px; }
-.up-formula-color-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.25); }
 .up-var-status, .up-formula-status, .oe-filter-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
 .up-var-status.ok, .up-formula-status.ok, .oe-filter-status.ok{ color:var(--sig-green); }
 .up-var-status.err, .up-formula-status.err, .oe-filter-status.err{ color:var(--sig-red); }
@@ -248,6 +240,97 @@ tr.oe-hidden{ display:none; }
 .mono-input{ font-family:var(--mono); }
 .oe-filter-row{ display:flex; align-items:flex-start; gap:6px; }
 .oe-filter-row .expr-input-wrap{ flex:1; min-width:0; }
+
+/* Formel-Zeile als Karte statt Ein-Zeiler (Kopf: Name/Status/Aktionen,
+   darunter der Ausdruck über die volle Breite - dadurch mehr Platz für
+   längere/verschachtelte Formeln, siehe .expr-editor white-space:pre-wrap).
+   up-formula-row-{ok,err,pending} (siehe validateFormulaRow() in
+   formulaBuilder.js) färbt den linken Rand als sofort sichtbaren
+   Status-Streifen, ohne dafür jede Zeile bis zum Ende lesen zu müssen. */
+.up-formula-row{
+  display:flex; flex-direction:column; gap:8px;
+  background:var(--bg-surface); border:1px solid var(--border); border-left:3px solid var(--border-strong);
+  border-radius:var(--radius-md); padding:9px 11px 10px; transition:border-left-color .15s;
+}
+.up-formula-row.up-formula-row-ok{ border-left-color:var(--sig-green); }
+.up-formula-row.up-formula-row-err{ border-left-color:var(--sig-red); }
+.up-formula-row.up-formula-row-pending{ border-left-color:var(--border-strong); }
+.up-formula-head{ display:flex; align-items:center; gap:7px; }
+.up-formula-color-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.25); }
+.up-formula-row .up-formula-name{
+  width:96px; flex-shrink:0; border:1px solid transparent; background:transparent; padding:3px 4px;
+  border-radius:var(--radius-sm); font-weight:700;
+}
+.up-formula-row .up-formula-name:hover{ border-color:var(--border-strong); }
+.up-formula-row .up-formula-name:focus{ outline:none; border-color:var(--accent); background:var(--bg-surface); }
+.up-formula-head-spacer{ flex:1; }
+.up-formula-row .expr-input-wrap{ flex:1; min-width:0; }
+
+/* Kompakte quadratische Symbol-Buttons (ƒ / Hervorheben / Entfernen) statt
+   unterschiedlich gestalteter Einzelelemente - eine Bauform für alle
+   sekundären Aktionen im Kartenkopf. */
+.up-formula-head .icon-btn, .up-formula-head .expr-palette-btn{
+  width:25px; height:25px; flex-shrink:0; padding:0; box-sizing:border-box;
+  display:inline-flex; align-items:center; justify-content:center;
+  border:1px solid var(--border-strong); border-radius:6px; background:var(--bg-surface);
+  color:var(--text-muted); cursor:pointer; font-size:12px;
+}
+.up-formula-head .icon-btn:hover, .up-formula-head .expr-palette-btn:hover{
+  background:var(--accent-bg); border-color:var(--accent); color:var(--accent-strong);
+}
+.up-formula-head .icon-btn svg{ width:13px; height:13px; }
+.up-formula-head .icon-btn.up-formula-hl-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.up-formula-head .up-formula-remove{ color:var(--sig-red); border-color:var(--sig-red); }
+.up-formula-head .up-formula-remove:hover{ background:var(--crit-bg); }
+
+/* Hervorhebungs-Popover (ersetzt das frühere <select>, dessen eigener
+   Platzhaltertext im festen 92px-Feld abgeschnitten wurde) - position:fixed
+   wie .expr-autocomplete, aus demselben Grund: umgeht das overflow:hidden
+   von .panel (siehe positionHlPopover() in formulaBuilder.js). */
+.up-formula-hl-wrap{ position:relative; }
+.up-formula-hl-pop{
+  position:fixed; z-index:45; min-width:170px; max-height:230px; overflow-y:auto;
+  background:var(--bg-surface); border:1px solid var(--border-strong); border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-md); padding:6px;
+}
+.up-formula-hl-pop-title{ font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); padding:3px 7px 5px; }
+.up-formula-hl-opt{
+  display:block; width:100%; text-align:left; font:inherit; font-size:12px; padding:5px 7px;
+  border:none; border-radius:4px; background:transparent; color:var(--text); cursor:pointer;
+}
+.up-formula-hl-opt:hover{ background:var(--accent-bg); }
+.up-formula-hl-opt.active{ background:var(--accent); color:#fff; font-weight:700; }
+
+/* Fehler-/Hinweistext direkt unter dem Ausdruck (siehe validateFormulaRow())
+   statt ausschließlich im Tooltip des Status-Zeichens - sichtbar, sobald man
+   die Zeile überhaupt anschaut, nicht erst bei Hover. */
+.up-formula-msg{ font-size:11px; line-height:1.5; padding:5px 8px; border-radius:6px; }
+.up-formula-msg.err{ color:var(--crit-text); background:var(--crit-bg); }
+.up-formula-msg.pending{ color:var(--text-muted); background:var(--bg-surface-2); }
+
+/* Farb-Schlüssel unter der Formel-Liste (siehe .legend/.swatch, sonst für
+   Diagramm-Legenden genutzt) - erklärt einmal fest, was die Chip-Farben
+   bedeuten, statt es nur je Chip als Tooltip zu verstecken. */
+.up-formula-legend{ border:1px solid var(--border); border-radius:var(--radius-sm); margin-top:10px; }
+
+/* ---------- "Bausteine" (Variablen/Funktionen, einklappbar) ----------
+   Dieselbe Mechanik wie .data-panel (siehe layout.css): Klick auf den Kopf
+   togglet die Klasse "open" am Container, CSS zeigt/versteckt den Body und
+   tauscht den Umschalter-Text per ::before - kein zusätzlicher JS-Zustand
+   nötig. Formeln bleiben dadurch der primäre, immer offene Arbeitsbereich;
+   Variablen/Funktionen (nach dem Einrichten selten gebraucht) starten
+   eingeklappt. */
+.baustein-panel{ border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-surface-2); overflow:hidden; }
+.baustein-panel-head{
+  display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer; user-select:none;
+}
+.baustein-panel-title{ font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--text-faint); flex-shrink:0; }
+.baustein-panel-summary{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.baustein-panel-toggle{ font-size:11px; color:var(--accent); font-weight:600; white-space:nowrap; }
+.baustein-panel.open .baustein-panel-toggle::before{ content:"Einklappen"; }
+.baustein-panel:not(.open) .baustein-panel-toggle::before{ content:"Bearbeiten"; }
+.baustein-panel-body{ display:none; padding:0 12px 12px; flex-direction:column; gap:14px; background:var(--bg-surface); }
+.baustein-panel.open .baustein-panel-body{ display:flex; }
 
 .up-func-row{ display:flex; align-items:flex-start; gap:6px; flex-wrap:wrap; }
 .up-func-row .up-func-name{ width:110px; flex-shrink:0; }

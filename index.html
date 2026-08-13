@@ -483,20 +483,35 @@
           </div>
           <div class="formula-layout">
             <div class="cfg-stack formula-main">
-              <div class="cfg-field">
-                <label>Variablen <span class="cfg-field-hint">(Alias für Signalgruppen-/Detektor-Spalten (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder APW/ÖPNV-Spalten (Zahl))</span></label>
-                <div id="upVarRows" class="up-formula-list"></div>
-                <button type="button" id="upAddVarBtn" class="btn">+ Variable hinzufügen</button>
-              </div>
-              <div class="cfg-field">
-                <label>Funktionen <span class="cfg-field-hint">(benutzerdefinierte, parametrisierte Ausdrücke aus den Primitiven, z.&nbsp;B. Name „LangGenug“ mit Parametern „sg, schwelle“ und Rumpf „DauerSeit(sg, GRUEN) &gt; schwelle“ – aus Formeln (oder anderen Funktionen) mit konkreten Argumenten aufrufbar, z.&nbsp;B. „LangGenug(K1, 30)“; Parameter sind generisch, kein fester Typ nötig)</span></label>
-                <div id="upFuncRows" class="up-formula-list"></div>
-                <button type="button" id="upAddFuncBtn" class="btn">+ Funktion hinzufügen</button>
-              </div>
+              <section class="baustein-panel" id="upBausteinPanel">
+                <div class="baustein-panel-head" id="upBausteinPanelHead">
+                  <span class="baustein-panel-title">Bausteine</span>
+                  <span class="baustein-panel-summary" id="upBausteinPanelSummary"></span>
+                  <span class="baustein-panel-toggle"></span>
+                </div>
+                <div class="baustein-panel-body">
+                  <div class="cfg-field">
+                    <label>Variablen <span class="cfg-field-hint">(Alias für Signalgruppen-/Detektor-Spalten (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder APW/ÖPNV-Spalten (Zahl))</span></label>
+                    <div id="upVarRows" class="up-formula-list"></div>
+                    <button type="button" id="upAddVarBtn" class="btn">+ Variable hinzufügen</button>
+                  </div>
+                  <div class="cfg-field">
+                    <label>Funktionen <span class="cfg-field-hint">(benutzerdefinierte, parametrisierte Ausdrücke aus den Primitiven, z.&nbsp;B. Name „LangGenug“ mit Parametern „sg, schwelle“ und Rumpf „DauerSeit(sg, GRUEN) &gt; schwelle“ – aus Formeln (oder anderen Funktionen) mit konkreten Argumenten aufrufbar, z.&nbsp;B. „LangGenug(K1, 30)“; Parameter sind generisch, kein fester Typ nötig)</span></label>
+                    <div id="upFuncRows" class="up-formula-list"></div>
+                    <button type="button" id="upAddFuncBtn" class="btn">+ Funktion hinzufügen</button>
+                  </div>
+                </div>
+              </section>
               <div class="cfg-field">
                 <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det), Dauer(sg|det), DauerSeit(sg|det, zustand) sowie eigene Funktionen · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · der Auswertungszeitpunkt (TX) wird automatisch berücksichtigt, nicht als Argument nötig · eine Formel kann eine ANDERE Formel bei ihrem Namen referenzieren, z.&nbsp;B. „M1 AND NOT R1“ · wahlweise auf einer Objekt-Spur farbig hervorheben)</span></label>
                 <div id="upFormulaRows" class="up-formula-list"></div>
                 <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
+                <div class="legend up-formula-legend">
+                  <span class="item"><span class="swatch" style="background:var(--accent)"></span>Objekt/Variable</span>
+                  <span class="item"><span class="swatch" style="background:var(--formula-on)"></span>Zustand</span>
+                  <span class="item"><span class="swatch" style="background:var(--req-marker)"></span>Funktion/Primitive</span>
+                  <span class="item"><span class="swatch" style="background:#3d5afe"></span>Formel-Referenz (eigene Farbe je Formel)</span>
+                </div>
               </div>
             </div>
             <aside id="upFormulaSidebar" class="formula-sidebar" aria-label="Verfügbare Symbole"></aside>

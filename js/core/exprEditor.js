@@ -406,7 +406,12 @@
     if (!wrap) return;
     const el = wrap.querySelector('.expr-editor');
     const dropdown = wrap.querySelector('.expr-autocomplete');
-    const paletteBtn = wrap.querySelector('.expr-palette-btn');
+    // rowEl statt wrap durchsucht (Superset - wrap liegt immer innerhalb
+    // rowEl) - lässt Aufrufer den ƒ-Button außerhalb von .expr-input-wrap
+    // platzieren (z.B. formulaBuilder.js: im Kartenkopf statt neben dem
+    // Editor selbst), ohne bestehende Aufrufer zu brechen, bei denen er
+    // weiterhin innerhalb von wrap liegt.
+    const paletteBtn = rowEl.querySelector('.expr-palette-btn');
     const { getText, setText, knownNames, getCandidates, onRevalidate, chipColorFor } = opts;
 
     // Zeichenposition, deren Token gerade NICHT chippen soll (siehe

@@ -65,13 +65,17 @@
   let syntheticCols = []; // [{index, kuerzel:'FORMEL', name, beschreibung, rawSeries}]
   let debounceTimers = new Map(); // "<kind>:<id>" -> timeout handle
 
-  // Farbpalette für "auf Objekt-Spur hervorheben" (siehe getFormulaHighlights()
-  // unten) - bewusst Blau-/Violett-/Pinktöne, die mit KEINEM Signalzustand
-  // (Rot/Gelb/Grün) kollidieren, damit eine Hervorhebung nie mit einem echten
-  // Signalbild verwechselt werden kann. Farbe ergibt sich aus der Position
-  // unter den AKTUELL hervorhebenden Formeln (nicht aus der Formel-ID), damit
-  // benachbarte aktive Hervorhebungen maximal unterscheidbar bleiben.
-  const HIGHLIGHT_PALETTE = ['#7c4dff', '#00b8d4', '#e91e63', '#3d5afe', '#8e24aa', '#00838f'];
+  // Identitätsfarbe je Formel (siehe formulaColorFor() unten, Position in
+  // der formulas-Liste) - bewusst Blau-/Violett-/Pinktöne, die mit KEINEM
+  // Signalzustand (Rot/Gelb/Grün) kollidieren, damit eine Hervorhebung nie
+  // mit einem echten Signalbild verwechselt werden kann. Zusätzlich per
+  // HSL-Abstand gegen die App-eigenen Töne geprüft (Zustand/Funktion/
+  // Variable/Akzent), NICHT nur gegen die Signalfarben: die ursprüngliche
+  // erste Farbe (#7c4dff) lag nur 5° Farbton von --req-marker entfernt (der
+  // Funktions-/Primitiven-Chip-Farbe) und war im Farb-Schlüssel praktisch
+  // nicht von ihr zu unterscheiden - jetzt hat jeder Eintrag mindestens
+  // ~18° Abstand zu jedem reservierten App-Ton.
+  const HIGHLIGHT_PALETTE = ['#3d5afe', '#00b8d4', '#e91e63', '#8e24aa', '#1a237e', '#ad1457'];
 
   // Case-insensitive (AND/OR/NOT, wie im Tokenizer) bzw. exakt (TX und die
   // Zustands-/Funktionsnamen, ebenfalls exakt wie im Tokenizer/PRIMITIVES von
@@ -225,12 +229,23 @@
       helpBtn: root.querySelector('#upFormulaHelpBtn'),
       helpModal: root.querySelector('#upFormulaHelpModal'),
       helpClose: root.querySelector('#upFormulaHelpClose'),
-      sidebar: root.querySelector('#upFormulaSidebar')
+      sidebar: root.querySelector('#upFormulaSidebar'),
+      bausteinPanel: root.querySelector('#upBausteinPanel'),
+      bausteinPanelHead: root.querySelector('#upBausteinPanelHead'),
+      bausteinPanelSummary: root.querySelector('#upBausteinPanelSummary')
     };
     els.addVarBtn.onclick = () => { addVar(); renderVarRows(); };
     els.addFuncBtn.onclick = () => { addFunc(); renderFuncRows(); };
     els.addFormulaBtn.onclick = () => { addFormula(); renderFormulaRows(); };
     els.calcBtn.onclick = berechnen;
+
+    // "Bausteine" (Variablen/Funktionen) starten eingeklappt - dieselbe
+    // open-Klassen-Mechanik wie .data-panel (siehe layout.css), nur lokal
+    // hier verdrahtet statt in app.js, da dieser Baustein spezifisch zum
+    // Formel-Builder gehört.
+    if (els.bausteinPanel && els.bausteinPanelHead) {
+      els.bausteinPanelHead.onclick = () => els.bausteinPanel.classList.toggle('open');
+    }
 
     if (els.helpBtn && els.helpModal) {
       const closeHelp = () => { els.helpModal.hidden = true; };
@@ -239,6 +254,53 @@
       els.helpModal.addEventListener('click', e => { if (e.target === els.helpModal) closeHelp(); });
       document.addEventListener('keydown', e => { if (e.key === 'Escape' && !els.helpModal.hidden) closeHelp(); });
     }
+
+    // Hervorhebungs-Popover (siehe renderFormulaRows()/positionHlPopover()):
+    // EIN globaler Klick-Handler statt je Popover einen eigenen - schließt
+    // jedes offene Popover, sobald außerhalb seines .up-formula-hl-wrap
+    // geklickt wird. Da das Öffnen/Schließen rein über das hidden-Attribut
+    // des bereits vorhandenen DOM-Knotens läuft (kein renderFormulaRows()-
+    // Neuaufbau bei jedem Klick), bleibt e.target während der gesamten
+    // Ereignisverarbeitung im Baum verankert - anders als bei einem vollen
+    // Neuaufbau, der e.target mitten in der Bubble-Phase aus dem DOM lösen
+    // und damit closest() fälschlich leer laufen lassen würde.
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.up-formula-hl-wrap')) closeAllHlPopovers();
+    });
+    window.addEventListener('scroll', () => closeAllHlPopovers(), true);
+    window.addEventListener('resize', () => closeAllHlPopovers());
+  }
+
+  function closeAllHlPopovers() {
+    if (!els || !els.formulaRows) return;
+    els.formulaRows.querySelectorAll('.up-formula-hl-pop').forEach(pop => { pop.hidden = true; });
+  }
+
+  // Positioniert das Hervorhebungs-Popover einer Formel-Zeile relativ zum
+  // Augen-Symbol - position:fixed + hier berechnete Koordinaten statt
+  // position:absolute, da .panel weiter oben overflow:hidden setzt (für die
+  // abgerundeten Ecken) und ein absolut positioniertes Popover sonst am
+  // Panel-Rand abgeschnitten würde (dieselbe Begründung wie bei
+  // positionDropdown() in exprEditor.js).
+  function positionHlPopover(rowEl) {
+    const btn = rowEl.querySelector('.up-formula-hl-btn');
+    const pop = rowEl.querySelector('.up-formula-hl-pop');
+    if (!btn || !pop) return;
+    const rect = btn.getBoundingClientRect();
+    pop.style.visibility = 'hidden';
+    pop.hidden = false;
+    requestAnimationFrame(() => {
+      if (pop.hidden) return; // in der Zwischenzeit wieder geschlossen
+      const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let left = rect.right - pw;
+      if (left < 8) left = 8;
+      if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+      let top = rect.bottom + 4;
+      if (top + ph > window.innerHeight - 8) top = Math.max(8, rect.top - ph - 4);
+      pop.style.left = Math.round(left) + 'px';
+      pop.style.top = Math.round(top) + 'px';
+      pop.style.visibility = '';
+    });
   }
 
   // Quellspalten für Variablen: Signalgruppen (SG) und Detektoren (DET) als
@@ -338,6 +400,7 @@
     renderVarRows();
     renderFuncRows();
     renderFormulaRows();
+    renderBausteinSummary();
     els.hint.textContent = '';
     els.hint.className = 'hint';
   }
@@ -497,24 +560,41 @@
     return f ? formulaColorFor(f) : null;
   }
 
+  // Augen-Symbol fürs Hervorhebungs-Popover (siehe closeAllHlPopovers()/
+  // positionHlPopover()) - dieselbe Form wie im begutachteten Redesign-
+  // Mockup, damit "hier lässt sich etwas hervorheben" auch ohne Text auf
+  // Anhieb erkennbar ist.
+  const EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+
   function renderFormulaRows() {
     const cols = sourceCols();
-    els.formulaRows.innerHTML = formulas.map(f => `
+    els.formulaRows.innerHTML = formulas.map(f => {
+      const hlTarget = f.highlightCol != null ? cols.find(c => c.index === f.highlightCol) : null;
+      const hlTitle = hlTarget ? `Hervorgehoben auf: ${esc(hlTarget.kuerzel)} ${esc(hlTarget.name)}` : 'Wahr-Intervalle dieser Formel farbig auf einer Objekt-Spur hervorheben';
+      return `
       <div class="up-formula-row" data-id="${f.id}">
-        <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
+        <div class="up-formula-head">
+          <span class="up-formula-color-dot" style="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Chip in anderen Formeln und als Hervorhebungs-Farbe"></span>
+          <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
+          <span class="up-formula-status"></span>
+          <span class="up-formula-head-spacer"></span>
+          <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
+          <span class="up-formula-hl-wrap">
+            <button type="button" class="icon-btn up-formula-hl-btn${f.highlightCol != null ? ' active' : ''}" title="${hlTitle}">${EYE_SVG}</button>
+            <div class="up-formula-hl-pop" hidden>
+              <div class="up-formula-hl-pop-title">Auf Spur hervorheben</div>
+              <button type="button" class="up-formula-hl-opt${f.highlightCol == null ? ' active' : ''}" data-col="">– kein Highlight –</button>
+              ${cols.map(c => `<button type="button" class="up-formula-hl-opt${f.highlightCol === c.index ? ' active' : ''}" data-col="${c.index}">${esc(c.kuerzel)} ${esc(c.name)}</button>`).join('')}
+            </div>
+          </span>
+          <button type="button" class="icon-btn up-formula-remove" title="Formel entfernen">✕</button>
+        </div>
         <span class="expr-input-wrap">
           <div class="up-formula-expr expr-editor mono-input" contenteditable="true" spellcheck="false" data-placeholder="z.B. DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT" role="textbox" aria-multiline="false"></div>
-          <button type="button" class="expr-palette-btn" title="Primitiven/Funktionen/Zustände einfügen">ƒ</button>
           <div class="expr-autocomplete" hidden></div>
         </span>
-        <span class="up-formula-color-dot" style="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Chip in anderen Formeln und als Hervorhebungs-Farbe"></span>
-        <select class="up-formula-highlight" title="Wahr-Intervalle dieser Formel farbig auf einer Objekt-Spur hervorheben (nach „Berechnen“ sichtbar)">
-          <option value="">– kein Highlight –</option>
-          ${cols.map(c => `<option value="${c.index}"${f.highlightCol === c.index ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
-        </select>
-        <span class="up-formula-status"></span>
-        <button type="button" class="oe-row-remove up-formula-remove">✕</button>
-      </div>`).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
+      </div>`;
+    }).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
 
     // Formelname ändern kann ANDERE Formeln betreffen, die ihn referenzieren
     // (siehe currentVarTypes()) - wie bei Variablen-Aliasen/Funktionsnamen
@@ -531,11 +611,27 @@
       const f = formulas.find(x => x.id === id);
       rowEl.querySelector('.up-formula-name').oninput = e => { f.name = e.target.value; debouncedRevalidate(id); };
       rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); validateAllInline(); };
-      rowEl.querySelector('.up-formula-highlight').onchange = e => {
-        f.highlightCol = e.target.value ? Number(e.target.value) : null;
-        renderFormulaRows();
-        if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshFormulaColumns();
+      // Öffnen/Schließen rein über das hidden-Attribut des bereits
+      // gerenderten Popover-Knotens (siehe closeAllHlPopovers()) - KEIN
+      // renderFormulaRows()-Neuaufbau nur fürs Auf-/Zuklappen, damit der
+      // globale Klick-außerhalb-Handler in init() e.target zuverlässig noch
+      // im DOM vorfindet (siehe dortiger Kommentar).
+      rowEl.querySelector('.up-formula-hl-btn').onclick = ev => {
+        ev.stopPropagation();
+        const pop = rowEl.querySelector('.up-formula-hl-pop');
+        const willOpen = pop.hidden;
+        closeAllHlPopovers();
+        if (willOpen) positionHlPopover(rowEl);
       };
+      rowEl.querySelectorAll('.up-formula-hl-opt').forEach(optEl => {
+        optEl.onclick = ev => {
+          ev.stopPropagation();
+          f.highlightCol = optEl.dataset.col === '' ? null : Number(optEl.dataset.col);
+          closeAllHlPopovers();
+          renderFormulaRows();
+          if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshFormulaColumns();
+        };
+      });
       GZ.exprEditor.setup(rowEl, {
         getText: () => f.exprText,
         setText: v => { f.exprText = v; },
@@ -572,11 +668,29 @@
     const { defs: funcDefs, errors: funcErrors } = currentFuncDefs();
     const wrap = rowEl.querySelector('.expr-input-wrap');
     const markHighlight = pos => { if (wrap && wrap.__exprRefreshHighlight) wrap.__exprRefreshHighlight(pos); };
+    // Spiegelt den Status zusätzlich als Randfarbe der ganzen Karte (siehe
+    // .up-formula-row-{ok,err,pending} in components.css) - sofort sichtbar
+    // beim Überfliegen der Liste, ohne bis zum Status-Zeichen lesen zu
+    // müssen. Der Fehlertext erscheint zusätzlich als Zeile unter dem
+    // Ausdruck (nicht nur im Tooltip) - bewusst NUR bei "err", nicht bei
+    // "pending" (siehe incomplete-Zweig unten), sonst würde beim normalen
+    // Tippen ständig eine Meldung aufblitzen, die keine ist.
+    const setRowState = (state, errMsg) => {
+      rowEl.classList.remove('up-formula-row-ok', 'up-formula-row-err', 'up-formula-row-pending');
+      rowEl.classList.add('up-formula-row-' + state);
+      let msgEl = rowEl.querySelector('.up-formula-msg');
+      if (state !== 'err') { if (msgEl) msgEl.remove(); return; }
+      if (!msgEl) { msgEl = document.createElement('div'); rowEl.appendChild(msgEl); }
+      msgEl.className = 'up-formula-msg err';
+      msgEl.textContent = errMsg;
+    };
     if (aliasErrors.length || funcErrors.length) {
+      const desc = [...aliasErrors, ...funcErrors].join('; ');
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
-      statusEl.title = [...aliasErrors, ...funcErrors].join('; ');
+      statusEl.title = desc;
       markHighlight(null); // Fehler liegt in Alias-/Funktionsdefinitionen, nicht im Formel-Text selbst
+      setRowState('err', desc);
       return;
     }
     const result = compile(f.exprText, { ...types, TX: 'NUM' }, funcDefs);
@@ -585,6 +699,7 @@
       statusEl.className = 'up-formula-status ok';
       statusEl.title = 'Gültig';
       markHighlight(null);
+      setRowState('ok');
     } else if (result.incomplete) {
       // Noch nicht fertig statt falsch (siehe exprEngine ExprError) - neutral
       // anzeigen und KEINE rote Fehlerwelle zeichnen, sonst blinkt beim
@@ -593,11 +708,13 @@
       statusEl.className = 'up-formula-status pending';
       statusEl.title = result.message;
       markHighlight(null);
+      setRowState('pending');
     } else {
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
       statusEl.title = result.message;
       markHighlight(result.pos);
+      setRowState('err', result.message);
     }
   }
 
@@ -657,7 +774,21 @@
       statusEl.className = 'up-var-status ' + (msg ? 'err' : 'ok');
       statusEl.title = msg || 'Gültig';
     });
+    renderBausteinSummary();
     renderSidebar();
+  }
+
+  // Ein-Zeilen-Zusammenfassung im (standardmäßig eingeklappten) Bausteine-
+  // Kopf, siehe .baustein-panel in components.css - damit der Inhalt auch
+  // zugeklappt auf einen Blick erkennbar bleibt, statt ihn erst aufklappen
+  // zu müssen.
+  function renderBausteinSummary() {
+    if (!els.bausteinPanelSummary) return;
+    const parts = [
+      ...vars.filter(v => v.alias.trim()).map(v => v.alias.trim()),
+      ...funcs.filter(f => f.name.trim()).map(f => f.name.trim() + '()')
+    ];
+    els.bausteinPanelSummary.textContent = parts.length ? parts.join(', ') : 'Keine Variablen/Funktionen definiert';
   }
 
   // Live-Symbolübersicht ("IDE-Gefühl") neben Variablen/Funktionen/Formeln -
