@@ -616,7 +616,15 @@
       // renderFormulaRows()-Neuaufbau nur fürs Auf-/Zuklappen, damit der
       // globale Klick-außerhalb-Handler in init() e.target zuverlässig noch
       // im DOM vorfindet (siehe dortiger Kommentar).
-      rowEl.querySelector('.up-formula-hl-btn').onclick = ev => {
+      const hlBtn = rowEl.querySelector('.up-formula-hl-btn');
+      // preventDefault auf mousedown verhindert, dass der Button dem gerade
+      // fokussierten Ausdrucks-Editor den Fokus entzieht (siehe dieselbe
+      // Absicherung bei .expr-palette-btn in exprEditor.js) - sonst löst ein
+      // Klick auf das Auge zusätzlich noch den blur-Handler des Editors aus
+      // (der Autovervollständigung schließt und den Editor-Inhalt neu
+      // einrasten lässt), rein als Nebenwirkung des Fokuswechsels.
+      hlBtn.addEventListener('mousedown', ev => ev.preventDefault());
+      hlBtn.onclick = ev => {
         ev.stopPropagation();
         const pop = rowEl.querySelector('.up-formula-hl-pop');
         const willOpen = pop.hidden;
@@ -624,6 +632,7 @@
         if (willOpen) positionHlPopover(rowEl);
       };
       rowEl.querySelectorAll('.up-formula-hl-opt').forEach(optEl => {
+        optEl.addEventListener('mousedown', ev => ev.preventDefault());
         optEl.onclick = ev => {
           ev.stopPropagation();
           f.highlightCol = optEl.dataset.col === '' ? null : Number(optEl.dataset.col);
