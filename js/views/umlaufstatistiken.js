@@ -43,6 +43,40 @@
   // Absturz bemerkt.
   const PER_ROW_ONLY_FNS = new Set(['Zustand', 'Dauer', 'DauerSeit']);
 
+  // exprEngine.js meldet unbekannte Namen ohne Vorschlag ("Unbekannte
+  // Variable/Funktion "X""). Für Umlaufstatistiken lokal um eine "meinten
+  // Sie …?"-Ergänzung per Editierdistanz erweitert, statt den gemeinsamen
+  // Formel-Builder-Motor dafür anzufassen.
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    let prev = new Array(n + 1);
+    for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
+      prev = cur;
+    }
+    return prev[n];
+  }
+  function nearestMatch(name, candidates) {
+    if (!candidates || candidates.length === 0) return null;
+    const lname = String(name).toLowerCase();
+    let best = null, bestD = Infinity;
+    candidates.forEach(c => { const d = levenshtein(lname, String(c).toLowerCase()); if (d < bestD) { bestD = d; best = c; } });
+    return bestD <= Math.max(2, Math.ceil(lname.length * 0.4)) ? best : null;
+  }
+  function enhanceErrorMessage(message) {
+    const mVar = message.match(/^Unbekannte Variable "(.+)"$/);
+    const mFn = message.match(/^Unbekannte Funktion "(.+)"$/);
+    const name = mVar ? mVar[1] : (mFn ? mFn[1] : null);
+    if (!name || !ctxAll) return message;
+    const candidates = mVar ? ctxAll.index.sgList.concat(ctxAll.index.detList, US_SCALARS) : US_FUNCTIONS;
+    const sug = nearestMatch(name, candidates);
+    return sug ? `${message} — meinten Sie „${sug}“?` : message;
+  }
+
   function init(root) {
     els = {
       root,
@@ -363,7 +397,8 @@
 
       const compiled = GZ.exprEngine.compileValue(expr, ctxAll.index.varTypes, {});
       if (!compiled.ok) {
-        return { col, incomplete: !!compiled.incomplete, values: null, kind: null, skip: false, error: { message: compiled.message, pos: compiled.pos } };
+        const message = compiled.incomplete ? compiled.message : enhanceErrorMessage(compiled.message);
+        return { col, incomplete: !!compiled.incomplete, values: null, kind: null, skip: false, error: { message, pos: compiled.pos } };
       }
       const values = ctxAll.cycles.map(cyc => compiled.run(cyc.scope));
       const kind = compiled.resultType === 'NUM' ? 'number' : compiled.resultType === 'BOOL' ? 'bool' : 'text';
