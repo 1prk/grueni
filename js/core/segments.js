@@ -159,6 +159,27 @@
     };
   }
 
+  // Bildet stats.greens (nur GRUEN-Segmente) auf ihre Indizes im
+  // vollständigen segs-Array ab - einmalig je Signalgruppe, damit
+  // adjacentTransitionDurations() nicht pro Umlauf linear nach dem passenden
+  // Segment suchen muss (siehe GZ.umlaufContext).
+  function mapGreensToSegIndex(segs) {
+    const out = [];
+    segs.forEach((s, i) => { if (s.cat === 'GRUEN') out.push(i); });
+    return out;
+  }
+
+  // Rotgelb-/Gelb-Dauer unmittelbar vor/nach EINEM Grünsegment (0, falls
+  // nicht angrenzend) - dieselbe Nachbarschaftslogik wie computeSignalplanRow,
+  // aber für ein einzelnes Vorkommen statt für den Median über alle.
+  function adjacentTransitionDurations(segs, segIndex) {
+    const prev = segs[segIndex - 1];
+    const rotgelb = (prev && prev.cat === 'ROTGELB') ? (prev.end - prev.start) / 1000 : 0;
+    const next = segs[segIndex + 1];
+    const gelb = (next && next.cat === 'GELB') ? (next.end - next.start) / 1000 : 0;
+    return { rotgelb, gelb };
+  }
+
   function typicalCycleSegments(segs, stats) {
     if (stats.greens.length === 0) return [];
     const anomalies = GZ.stats.detectAnomalies(stats.greenDurations);
@@ -304,6 +325,7 @@
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
     findSplAt, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
+    mapGreensToSegIndex, adjacentTransitionDurations,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
     computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep
   };

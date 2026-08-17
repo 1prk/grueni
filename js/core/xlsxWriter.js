@@ -148,5 +148,53 @@
     return new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
 
-  GZ.xlsxWriter = { buildWorkbookBlob };
+  // Mehrblatt-Variante von buildWorkbookBlob: sheets = [{name, header, rows}, ...],
+  // sonst gleiche Zellregeln (Zahl -> <v>, sonst Inline-String). Nutzt
+  // dieselben Zell-/ZIP-Helfer, braucht aber je Blatt einen zusätzlichen
+  // Content-Types- und Beziehungs-Eintrag statt der fest verdrahteten
+  // Einzelblatt-Referenzen von buildWorkbookBlob.
+  function buildMultiSheetWorkbookBlob(sheets) {
+    const enc = new TextEncoder();
+    const sheetFiles = sheets.map((s, i) => {
+      const rowsXml = [rowXml(1, s.header)];
+      (s.rows || []).forEach((r, ri) => rowsXml.push(rowXml(ri + 2, r)));
+      const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+        `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml.join('')}</sheetData></worksheet>`;
+      return { index: i + 1, name: sanitizeSheetName(s.name), xml };
+    });
+
+    const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+      `<sheets>${sheetFiles.map(f => `<sheet name="${xmlEscape(f.name)}" sheetId="${f.index}" r:id="rId${f.index}"/>`).join('')}</sheets></workbook>`;
+
+    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/>` +
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+      sheetFiles.map(f => `<Override PartName="/xl/worksheets/sheet${f.index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') +
+      `</Types>`;
+
+    const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+      `</Relationships>`;
+
+    const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      sheetFiles.map(f => `<Relationship Id="rId${f.index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${f.index}.xml"/>`).join('') +
+      `</Relationships>`;
+
+    const files = [
+      { name: '[Content_Types].xml', data: enc.encode(contentTypesXml) },
+      { name: '_rels/.rels', data: enc.encode(rootRelsXml) },
+      { name: 'xl/workbook.xml', data: enc.encode(workbookXml) },
+      { name: 'xl/_rels/workbook.xml.rels', data: enc.encode(workbookRelsXml) },
+      ...sheetFiles.map(f => ({ name: `xl/worksheets/sheet${f.index}.xml`, data: enc.encode(f.xml) }))
+    ];
+    const zipBytes = buildZip(files);
+    return new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+
+  GZ.xlsxWriter = { buildWorkbookBlob, buildMultiSheetWorkbookBlob };
 })(window.GZ = window.GZ || {});
