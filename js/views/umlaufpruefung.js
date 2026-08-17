@@ -147,6 +147,26 @@
     return GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getSyntheticColumns() : [];
   }
 
+  // Umlaufstatistiken-Kennzahlen (siehe umlaufstatistiken.js): read-only
+  // Zugriff wie formulaCols() oben, gleiches Muster. Anders als FORMEL sind
+  // Kennzahlen NICHT zwangsläufig WAHR/FALSCH (Zahl/Text möglich) und schon
+  // umlaufweise statt zeilenweise vorberechnet (kein rawSeries je Zeile,
+  // sondern valuesByCycleIdx - ein Wert je Umlaufindex).
+  function kennzahlCols() {
+    return GZ.views.umlaufstatistiken ? GZ.views.umlaufstatistiken.getSyntheticColumns() : [];
+  }
+
+  // Anzeige eines Kennzahl-Werts auf der Spur (Balken-Label/Tooltip) und in
+  // der Legende - dieselben Ergebnistypen wie GZ.exprEngine.compileValue()
+  // (Zahl/Wahr-Falsch/Text), NaN bedeutet "in diesem Umlauf kein Wert"
+  // (siehe cycleMetrics-Konvention in exprEngine.js).
+  function formatKennzahlValue(v) {
+    if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '–';
+    if (typeof v === 'boolean') return v ? 'Wahr' : 'Falsch';
+    if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(1);
+    return String(v);
+  }
+
   // Eindeutiger, stabiler (innerhalb einer Sitzung) Schlüssel für ein
   // Objekt - SG-Spalten haben von Haus aus kein "kuerzel"-Feld, daher wie
   // schon beim bisherigen Filter synthetisch mit 'SG' getaggt; ihr "index"
@@ -168,7 +188,7 @@
     const a = GZ.state.data.currentAnalysis;
     if (!a) return [];
     const sg = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', index: i, name: col.name, beschreibung: col.beschreibung }));
-    const det = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols());
+    const det = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols(), kennzahlCols());
     const apw = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
     return sg.concat(det, apw);
   }
@@ -427,12 +447,13 @@
       <select class="up-filter-val-state">${opts.map(o => `<option value="${esc(o)}" ${o === fr.value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   }
 
-  // Nach "Berechnen" im Formel-Builder aufgerufen: Objekt-Liste + Filter-
-  // zeilen (die jetzt ggf. neue/geänderte Formel-Spalten enthalten/
+  // Nach "Berechnen" im Formel-Builder ODER nach einer Änderung an den
+  // Umlaufstatistiken-Kennzahlen aufgerufen: Objekt-Liste + Filterzeilen
+  // (die jetzt ggf. neue/geänderte synthetische Spalten enthalten/
   // referenzieren) neu aufbauen und neu rendern - bewusst OHNE Fenster-
   // position/Messungen zurückzusetzen (anders als populateControls() bei
   // einem komplett neuen Datenimport).
-  function refreshFormulaColumns() {
+  function refreshSyntheticColumns() {
     if (!els) return;
     renderObjList();
     renderFilterRows();
@@ -925,6 +946,10 @@
     // Signalgruppen verschachteln lassen.
     const traceMeta = new Map();
     traceRefs.forEach(r => {
+      if (r.kuerzel === 'KENNZAHL') {
+        traceMeta.set(objKey(r), { col: r, kind: 'kennzahl', valuesByCycleIdx: r.valuesByCycleIdx || [], valueKind: r.valueKind });
+        return;
+      }
       const kind = isNumericKuerzel(r.kuerzel) ? 'apw' : (r.kuerzel === 'FORMEL' ? 'formula' : 'det');
       const catFn = kind === 'apw' ? (v => v.trim()) : categorizeDetRaw;
       const segs = buildSegments(times, seriesByCol.get(r.index), catFn);
@@ -1007,6 +1032,7 @@
 
       const traceRows = traceRefs.map(r => {
         const m = traceMeta.get(objKey(r));
+        if (m.kind === 'kennzahl') return { col: m.col, kind: m.kind, value: m.valuesByCycleIdx[i], valueKind: m.valueKind };
         return { col: m.col, kind: m.kind, visSegs: m.sweep(start, end) };
       });
 
@@ -1163,6 +1189,27 @@
               : `${esc(c.name)}: ${esc(d.cat)} (${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)}, ${Math.round((d.end - d.start) / 1000)}s)`
           });
           wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
+        } else if (tr.kind === 'kennzahl') {
+          // Kennzahl (siehe umlaufstatistiken.js): kein Rohreihen-Sweep,
+          // sondern EIN vorberechneter Wert für den ganzen Umlauf - als
+          // durchgehender Balken mit zentriertem Wert dargestellt (analog zu
+          // den tFZ/ZwL-Spuren oben, nur ohne mehrere Segmente). Bei WAHR/
+          // FALSCH-Kennzahlen (kind: 'bool') wie eine Formel-Spur behandelt:
+          // nur FALSCH bleibt Grundlinie, WAHR wird eingefärbt, ohne
+          // zusätzliches Text-Label (deckt sich sonst mit der Balkenfarbe).
+          const v = tr.value;
+          const isBool = tr.valueKind === 'bool';
+          const on = isBool ? v === true : !(v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v)));
+          const segs = on ? [{ start: r.start, end: r.end, cat: 'WERT' }] : [];
+          renderLane(subSvg, {
+            wMin: r.start, wMax: r.end, segs,
+            baselineCat: '__kennzahl_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000,
+            fillFor: () => 'var(--kennzahl-bg)',
+            segLabelFor: isBool ? undefined : () => formatKennzahlValue(v),
+            segTitle: () => `${esc(c.name)}: ${formatKennzahlValue(v)}`
+          });
+          wireMeasure(subSvg, r.start, r.end, `${r.i}|kennzahl|${c.index}`);
         } else {
           const isFormula = tr.kind === 'formula';
           renderLane(subSvg, {
@@ -1186,5 +1233,5 @@
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.umlaufpruefung = { init, populateControls, render, refreshFormulaColumns };
+  GZ.views.umlaufpruefung = { init, populateControls, render, refreshSyntheticColumns };
 })(window.GZ = window.GZ || {});
