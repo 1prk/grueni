@@ -1,17 +1,22 @@
 /* GZ.views.umlaufstatistiken — Tab "Umlaufstatistiken": beliebig viele
    selbst definierte Spalten (Bezeichnung + Formel in der GZ.exprEngine-
-   Ausdruckssprache), je einmal ausgewertet über ALLE Umläufe der
-   Aufzeichnung. Ergebnis: eine gefensterte Tabelle (Performance bei vielen
-   Umläufen, wie js/views/umlaufpruefung.js) + eine Aggregatstatistik-Tabelle
-   je Spalte (Zahl -> Ø/Median/StdAbw/Min/Max/P85, Wahr/Falsch -> Anteil) +
-   Excel-Export (beide Tabellen, IMMER über die komplette Aufzeichnung,
-   unabhängig vom sichtbaren Fenster).
+   Ausdruckssprache - derselben, die auch der Formel-Builder in
+   Umlaufprüfung nutzt, siehe js/core/exprEngine.js/umlaufContext.js), je
+   einmal ausgewertet über ALLE Umläufe der Aufzeichnung. Ergebnis: eine
+   gefensterte Tabelle (Performance bei vielen Umläufen, wie
+   js/views/umlaufpruefung.js) + eine Aggregatstatistik-Tabelle je Spalte
+   (Zahl -> Ø/Median/StdAbw/Min/Max/P85, Wahr/Falsch -> Anteil) + Excel-
+   Export (beide Tabellen, IMMER über die komplette Aufzeichnung, unabhängig
+   vom sichtbaren Fenster).
 
-   Die teure Arbeit (GZ.umlaufContext.buildAll) läuft einmal je Analyse; das
-   Bearbeiten einer Formel wertet danach nur noch einen kleinen Ausdrucksbaum
-   je Umlauf aus - siehe js/core/exprEngine.js und js/core/umlaufContext.js
-   für die eigentliche Rechenlogik. Autocomplete/Fehleranzeige nutzen
-   GZ.exprEngine.suggestAt()/nearestMatch() (Positionsangaben je Token). */
+   Anders als der zeilenweise Formel-Builder (eine boolesche Rohreihe je
+   Formel, Primitiven Zustand/Dauer/DauerSeit) wertet dieser Tab GENAU EINMAL
+   JE UMLAUF aus und lässt beliebige Ergebnistypen zu (GZ.exprEngine.
+   compileValue() statt compile()) - die Primitiven An/Ab/TF/RG/GE/
+   Ausgeloest/AnzahlAusloesungen lesen dafür aus handle.cycleMetrics statt
+   handle.sweep (siehe GZ.umlaufContext.buildAll()). Zustand/Dauer/DauerSeit
+   sind hier bewusst NICHT nutzbar (kein wohldefinierter "aktueller
+   Zeitpunkt" für einen ganzen Umlauf) - siehe findPerRowOnlyUsage(). */
 (function (GZ) {
   'use strict';
   const { esc, fmtTs, fmtTimeShort } = GZ.format;
@@ -20,12 +25,23 @@
   let els = null;
   let nextColId = 1;
   let ctxAll = null; // {index, cycles} - einmal je Analyse gebaut (GZ.umlaufContext.buildAll)
-  let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, values, kind, skip}
+  let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, incomplete, values, kind, skip}
   let windowCount = 25, windowStartIdx = 0, showAll = false;
 
   // Aktueller Autocomplete-Zustand - es ist immer höchstens ein Dropdown
   // gleichzeitig offen (das des fokussierten Ausdrucksfelds).
   let acItems = [], acActive = -1, acRange = null;
+
+  const SG_ARG_FNS = new Set(['An', 'Ab', 'TF', 'RG', 'GE']);
+  const DET_ARG_FNS = new Set(['Ausgeloest', 'AnzahlAusloesungen']);
+  const US_FUNCTIONS = ['An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD'];
+  const US_SCALARS = ['TU', 'TU_MED', 'SPL'];
+  // Zeilenweise Primitiven des Formel-Builders - hier syntaktisch zwar
+  // bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne handle.sweep würde
+  // ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu liefern. Wird VOR
+  // der Auswertung geprüft (siehe findPerRowOnlyUsage()), nicht erst beim
+  // Absturz bemerkt.
+  const PER_ROW_ONLY_FNS = new Set(['Zustand', 'Dauer', 'DauerSeit']);
 
   function init(root) {
     els = {
@@ -103,13 +119,14 @@
     if (!ctxAll) { els.legendBody.innerHTML = ''; return; }
     const sg = ctxAll.index.sgList.join(', ') || '–';
     const det = ctxAll.index.detList.join(', ') || '–';
-    const fns = GZ.exprEngine.FUNCTION_NAMES.join(', ');
-    const scalars = [...GZ.exprEngine.SCALAR_KEYWORDS].join(', ');
+    const fns = US_FUNCTIONS.join(', ');
+    const scalars = US_SCALARS.join(', ');
     els.legendBody.innerHTML =
       `<div><b>Signalgruppen:</b> ${esc(sg)}</div>` +
       `<div><b>Detektor-/APW-Namen:</b> ${esc(det)}</div>` +
       `<div><b>Funktionen:</b> ${esc(fns)}(…)</div>` +
-      `<div><b>Bezeichner:</b> ${esc(scalars)}</div>`;
+      `<div><b>Bezeichner:</b> ${esc(scalars)}</div>` +
+      `<div style="margin-top:4px;color:var(--text-faint);">Zustand/Dauer/DauerSeit (Formel-Builder in Umlaufprüfung) sind hier nicht verfügbar - kein einzelner Zeitpunkt je Umlauf.</div>`;
   }
 
   /* ---------------- Spaltenzeilen (Bezeichnung + Formel) ---------------- */
@@ -176,9 +193,48 @@
 
   const AC_KIND_LABEL = { fn: 'Funktion', sg: 'Signalgruppe', det: 'Detektor/Wert', scalar: 'Bezeichner' };
 
+  // Kontextsensitiv: innerhalb An(/Ab(/TF(/RG(/GE( -> Signalgruppennamen,
+  // innerhalb Ausgeloest(/AnzahlAusloesungen( -> Detektor-/APW-Namen, sonst
+  // Funktionen + skalare Bezeichner (TU/TU_MED/SPL). tokenize() liefert bei
+  // einem (seltenen, während des Tippens meist irrelevanten) Lexer-Fehler
+  // keine Teil-Token-Liste - in dem Fall werden schlicht keine Vorschläge
+  // gezeigt, statt eine unvollständige Liste zu raten.
+  function suggestAt(text, cursorPos, index) {
+    let tokens;
+    try { tokens = GZ.exprEngine.tokenize(text); }
+    catch (e) { return { replaceStart: cursorPos, replaceEnd: cursorPos, items: [] }; }
+
+    let replaceStart = cursorPos, replaceEnd = cursorPos, partial = '';
+    const cur = tokens.find(t => t.type === 'IDENT' && t.pos <= cursorPos && cursorPos <= t.end);
+    if (cur) { replaceStart = cur.pos; replaceEnd = cur.end; partial = text.slice(cur.pos, cursorPos); }
+
+    const stack = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (t.pos >= replaceStart) break;
+      if (t.type === '(') {
+        const prevTok = tokens[i - 1];
+        stack.push(prevTok && prevTok.type === 'IDENT' && prevTok.end === t.pos ? prevTok.value : null);
+      } else if (t.type === ')') {
+        stack.pop();
+      }
+    }
+    const owner = stack.length ? stack[stack.length - 1] : null;
+
+    let candidates;
+    if (owner && SG_ARG_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' }));
+    else if (owner && DET_ARG_FNS.has(owner)) candidates = index.detList.map(n => ({ value: n, label: n, kind: 'det' }));
+    else candidates = US_FUNCTIONS.map(n => ({ value: n, label: n + '(…)', kind: 'fn' }))
+      .concat(US_SCALARS.map(n => ({ value: n, label: n, kind: 'scalar' })));
+
+    const p = partial.toLowerCase();
+    const items = candidates.filter(c => c.value.toLowerCase().startsWith(p)).slice(0, 8);
+    return { replaceStart, replaceEnd, items };
+  }
+
   function showAutocomplete(input, listEl) {
     if (!ctxAll) { listEl.hidden = true; return; }
-    const s = GZ.exprEngine.suggestAt(input.value, input.selectionStart, ctxAll.index);
+    const s = suggestAt(input.value, input.selectionStart, ctxAll.index);
     acRange = { start: s.replaceStart, end: s.replaceEnd };
     acItems = s.items;
     acActive = -1;
@@ -229,17 +285,33 @@
 
   /* ---------------- Auswertung ---------------- */
 
+  // Position eines Fehlers (ein einzelner Zeichen-Offset, siehe ExprError in
+  // exprEngine.js) auf die Spanne des dort stehenden Tokens ausgeweitet, für
+  // eine lesbare <mark>-Hervorhebung statt eines einzelnen Zeichens.
+  function findTokenSpanAt(text, pos) {
+    try {
+      const tokens = GZ.exprEngine.tokenize(text);
+      const tok = tokens.find(t => t.pos <= pos && pos < t.end) || tokens.find(t => t.pos === pos);
+      if (tok && tok.end > tok.pos) return { start: tok.pos, end: tok.end };
+    } catch (e) { /* Text selbst nicht tokenisierbar - Einzelzeichen-Fallback unten */ }
+    return { start: pos, end: Math.min(pos + 1, text.length) };
+  }
+
   function renderErrorSnippet(expr, pos) {
-    if (!pos) return esc(expr);
-    const s = Math.max(0, Math.min(pos.start, expr.length));
-    const e = Math.max(s, Math.min(pos.end, expr.length));
+    const span = findTokenSpanAt(expr, pos);
+    const s = Math.max(0, Math.min(span.start, expr.length));
+    const e = Math.max(s, Math.min(span.end, expr.length));
     return esc(expr.slice(0, s)) + '<mark>' + (esc(expr.slice(s, e)) || ' ') + '</mark>' + esc(expr.slice(e));
   }
 
   function renderColumnError(rowEl, entry) {
     const errBox = rowEl.querySelector('.us-col-error');
     const exprInput = rowEl.querySelector('.us-col-expr');
-    if (!entry || !entry.error) {
+    // "incomplete" = mitten im Tippen ein für sich unfertiger, aber kein
+    // wirklich falscher Ausdruck (siehe ExprError.incomplete in
+    // exprEngine.js) - bewusst NICHT als roter Fehler markiert, sonst
+    // blinkt bei jedem Tastendruck eine Fehlermeldung auf.
+    if (!entry || !entry.error || entry.incomplete) {
       errBox.hidden = true;
       exprInput.classList.remove('invalid');
       return;
@@ -248,6 +320,16 @@
     errBox.hidden = false;
     errBox.querySelector('.us-col-error-msg').textContent = entry.error.message;
     errBox.querySelector('.us-col-error-snippet').innerHTML = renderErrorSnippet(exprInput.value, entry.error.pos);
+  }
+
+  function findPerRowOnlyUsage(text) {
+    try {
+      const tokens = GZ.exprEngine.tokenize(text);
+      for (let i = 0; i < tokens.length - 1; i++) {
+        if (tokens[i].type === 'IDENT' && PER_ROW_ONLY_FNS.has(tokens[i].value) && tokens[i + 1].type === '(') return tokens[i];
+      }
+    } catch (e) { /* Tokenize-Fehler übernimmt compileValue() bereits */ }
+    return null;
   }
 
   function currentValidCols() { return evaluated.filter(e => !e.error && !e.skip && e.values); }
@@ -269,16 +351,23 @@
     const cols = GZ.state.data.umlaufSpalten;
     evaluated = cols.map(col => {
       const expr = (col.expr || '').trim();
-      if (!expr) return { col, error: null, values: null, kind: null, skip: true };
-      let ast;
-      try { ast = GZ.exprEngine.parse(expr).ast; }
-      catch (e) { return { col, error: e, values: null, kind: null, skip: false }; }
-      const values = [];
-      for (const cycle of ctxAll.cycles) {
-        try { values.push(GZ.exprEngine.evaluate(ast, { index: ctxAll.index, cycle })); }
-        catch (e) { return { col, error: e, values: null, kind: null, skip: false }; }
+      if (!expr) return { col, error: null, incomplete: false, values: null, kind: null, skip: true };
+
+      const guardTok = findPerRowOnlyUsage(expr);
+      if (guardTok) {
+        return {
+          col, incomplete: false, values: null, kind: null, skip: false,
+          error: { message: `„${guardTok.value}“ ist nur zeilenweise (Formel-Builder in Umlaufprüfung) verfügbar, nicht in Umlaufstatistiken.`, pos: guardTok.pos }
+        };
       }
-      return { col, error: null, values, kind: GZ.exprEngine.inferKind(values), skip: false };
+
+      const compiled = GZ.exprEngine.compileValue(expr, ctxAll.index.varTypes, {});
+      if (!compiled.ok) {
+        return { col, incomplete: !!compiled.incomplete, values: null, kind: null, skip: false, error: { message: compiled.message, pos: compiled.pos } };
+      }
+      const values = ctxAll.cycles.map(cyc => compiled.run(cyc.scope));
+      const kind = compiled.resultType === 'NUM' ? 'number' : compiled.resultType === 'BOOL' ? 'bool' : 'text';
+      return { col, error: null, incomplete: false, values, kind, skip: false };
     });
 
     els.colRows.querySelectorAll('.us-col-row').forEach(rowEl => {
@@ -293,7 +382,7 @@
     els.statsPanel.style.display = validCols.length ? '' : 'none';
     els.exportBtn.disabled = validCols.length === 0;
 
-    const errCount = evaluated.filter(e => e.error).length;
+    const errCount = evaluated.filter(e => e.error && !e.incomplete).length;
     els.hint.textContent = cols.length === 0
       ? 'Bitte mindestens eine Spalte definieren.'
       : `${validCols.length} von ${cols.length} Spalte(n) gültig` + (errCount ? ` · ${errCount} mit Fehler` : '') + ` · ${ctxAll.cycles.length} Umlauf/Umläufe.`;
@@ -310,7 +399,7 @@
 
   function fmtNum(v) { return Number.isInteger(v) ? String(v) : v.toFixed(1); }
   function formatCellHtml(v) {
-    if (v === null || v === undefined) return '<span class="us-empty-cell">–</span>';
+    if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '<span class="us-empty-cell">–</span>';
     if (typeof v === 'boolean') return v ? '<span class="us-bool-true">Wahr</span>' : '<span class="us-bool-false">Falsch</span>';
     if (typeof v === 'number') return esc(fmtNum(v));
     return esc(String(v));
@@ -339,7 +428,7 @@
     const rows = [];
     for (let i = from; i < to; i++) {
       const cyc = ctxAll.cycles[i];
-      const cells = [String(i + 1), fmtTimeShort(cyc.START), esc(cyc.SPL || '–'), String(cyc.TU)]
+      const cells = [String(i + 1), fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
         .concat(validCols.map(c => formatCellHtml(c.values[i])));
       rows.push(`<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`);
     }
@@ -352,12 +441,13 @@
     const sorted = [...vals].sort((a, b) => a - b);
     return { n: vals.length, mean: mean(vals), median: median(vals), sd: stdDev(vals), min: Math.min(...vals), max: Math.max(...vals), p85: percentile(sorted, 85) };
   }
+  function numericValues(c) { return c.values.filter(v => typeof v === 'number' && !Number.isNaN(v)); }
 
   function renderStats(validCols) {
     const rows = validCols.map(c => {
       const label = esc(c.col.label || '(ohne Bezeichnung)');
       if (c.kind === 'number') {
-        const vals = c.values.filter(v => typeof v === 'number');
+        const vals = numericValues(c);
         if (!vals.length) return `<tr><td>${label}</td><td colspan="7" class="us-aggregate-note">keine numerischen Werte</td></tr>`;
         const s = numStats(vals);
         return `<tr><td>${label}</td><td>${s.n}</td><td>${s.mean.toFixed(1)}</td><td>${s.median.toFixed(1)}</td><td>${s.sd.toFixed(1)}</td><td>${s.min.toFixed(1)}</td><td>${s.max.toFixed(1)}</td><td>${s.p85.toFixed(1)}</td></tr>`;
@@ -376,7 +466,7 @@
   /* ---------------- Excel-Export (immer die komplette Aufzeichnung) ---------------- */
 
   function exportValue(v) {
-    if (v === null || v === undefined) return '';
+    if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '';
     if (typeof v === 'boolean') return v ? 'Wahr' : 'Falsch';
     return v;
   }
@@ -385,7 +475,7 @@
   function statsRowForExport(c) {
     const label = c.col.label || '(ohne Bezeichnung)';
     if (c.kind === 'number') {
-      const vals = c.values.filter(v => typeof v === 'number');
+      const vals = numericValues(c);
       if (!vals.length) return [label, 0, '', '', '', '', '', ''];
       const s = numStats(vals);
       return [label, s.n, round1(s.mean), round1(s.median), round1(s.sd), round1(s.min), round1(s.max), round1(s.p85)];
@@ -404,7 +494,7 @@
 
     const header = ['#', 'Start', 'SPL', 'TU', 'TX'].concat(validCols.map(c => c.col.label || '(ohne Bezeichnung)'));
     const rows = ctxAll.cycles.map((cyc, i) => {
-      const base = [i + 1, fmtTs(new Date(cyc.START)), cyc.SPL, cyc.TU, cyc.TX];
+      const base = [i + 1, fmtTs(new Date(cyc.start)), cyc.SPL, cyc.TU, cyc.TX];
       validCols.forEach(c => base.push(exportValue(c.values[i])));
       return base;
     });

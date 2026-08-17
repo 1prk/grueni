@@ -127,12 +127,58 @@ tbody tr.spl-group-row td{
 
 /* ---------- Config forms (Wartezeit / Umlaufprüfung Zuweisung) ---------- */
 .cfg-grid{ display:grid; grid-template-columns:1fr 1.3fr; gap:18px 26px; padding:16px; }
+.cfg-stack{ display:flex; flex-direction:column; gap:18px; padding:16px; }
 .cfg-field{ display:flex; flex-direction:column; gap:7px; }
 .cfg-field label{ font-size:11.5px; font-weight:700; color:var(--text-muted); }
 .cfg-field-hint{ font-weight:400; color:var(--text-faint); font-size:10.5px; }
 .det-checks{ display:flex; flex-direction:column; gap:5px; max-height:120px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm); padding:7px 9px; background:var(--bg-surface); }
 .det-check{ display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer; }
+.filter-kuerzel{ font-family:var(--mono); font-size:10px; font-weight:700; color:var(--text-faint); }
 .cfg-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; }
+.cfg-field-wide{ grid-column:1 / -1; }
+
+/* ---------- Umlaufprüfung: vereinheitlichte Objekt-Liste (SG/DET/APW/
+   ÖPNV/FORMEL in einer sortierbaren Liste statt getrennter Checklisten) -
+   Reihenfolge = Zeilen-Reihenfolge im DOM, per Ziehen am Griff links
+   (.obj-drag) neu anordenbar (siehe wireObjList() in umlaufpruefung.js);
+   ausgewählt = angehakt, unabhängig von der Suche (die nur die Sichtbarkeit
+   filtert, siehe .obj-row-hidden). */
+.obj-search{ margin-bottom:6px; }
+.obj-list{ display:flex; flex-direction:column; gap:1px; max-height:280px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm); padding:5px; background:var(--bg-surface); }
+.obj-row{ display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:var(--radius-sm); }
+.obj-row:hover{ background:var(--bg-surface-2); }
+.obj-row.obj-row-hidden{ display:none; }
+.obj-row.dragging{ opacity:.35; }
+/* Mehrfachauswahl per Strg-Klick (nur zum gemeinsamen Ziehen, siehe
+   multiSelectKeys in umlaufpruefung.js) - eigenständig vom Anhak-Status. */
+.obj-row.obj-row-selected{ background:var(--accent-bg); box-shadow:inset 0 0 0 1px var(--accent); }
+.obj-row.obj-row-selected:hover{ background:var(--accent-bg-strong); }
+.obj-row.dragging-group{ opacity:.35; }
+.obj-drag{
+  flex-shrink:0; width:16px; text-align:center; color:var(--text-faint);
+  cursor:grab; font-size:13px; line-height:1; user-select:none;
+}
+.obj-drag:hover{ color:var(--text-muted); }
+.obj-drag:active{ cursor:grabbing; }
+.obj-drag-hint{ font-family:var(--mono); }
+.obj-row-label{ display:flex; align-items:center; gap:7px; flex:1; min-width:0; font-size:12.5px; cursor:pointer; }
+.obj-row-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.obj-list-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:4px 2px; }
+
+/* ---------- Umlaufprüfung: Filterbedingungen (separat von der Objekt-
+   Auswahl oben) - je Zeile ein Objekt + eine typabhängige Bedingung
+   (Zustand-Gleichheit für SG/DET/FORMEL, Operator+Zahl für APW/ÖPNV), siehe
+   renderFilterRows()/buildFilterCondEl() in umlaufpruefung.js. ---------- */
+.up-filter-rows{ display:flex; flex-direction:column; gap:6px; }
+.up-filter-row{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.up-filter-obj{ flex:1; min-width:200px; }
+.up-filter-cond{ display:flex; align-items:center; gap:5px; }
+.up-filter-row select, .up-filter-row input[type=number]{
+  font-family:var(--mono); font-size:12px; padding:4px 6px;
+  border:1px solid var(--border-strong); border-radius:var(--radius-sm);
+  background:var(--bg-surface); color:var(--text);
+}
+.up-filter-row input[type=number]{ width:80px; }
 .radio-group{ display:flex; flex-direction:column; gap:5px; }
 .radio-group label{ display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer; }
 .num-row{ display:flex; align-items:center; gap:7px; font-size:12.5px; flex-wrap:wrap; }
@@ -180,15 +226,271 @@ tr.oe-hidden{ display:none; }
 .oe-row-remove{ font-size:11px; padding:4px 9px; color:var(--sig-red); border-color:var(--sig-red); }
 .oe-row-remove:hover{ background:var(--crit-bg); }
 
+/* ---------- Umlaufprüfung: Formel-Builder ---------- */
+.up-formula-list{ display:flex; flex-direction:column; gap:8px; }
+.up-var-row{ display:flex; align-items:center; gap:6px; }
+.up-var-row .up-var-alias{ width:120px; flex-shrink:0; }
+.up-var-row .up-var-col{ flex:1; min-width:0; }
+.up-var-status, .up-formula-status, .oe-filter-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
+.up-var-status.ok, .up-formula-status.ok, .oe-filter-status.ok{ color:var(--sig-green); }
+.up-var-status.err, .up-formula-status.err, .oe-filter-status.err{ color:var(--sig-red); }
+/* "noch nicht fertig" (siehe exprEngine incomplete) - bewusst unauffällig,
+   damit normales Tippen nicht permanent nach Fehler aussieht. */
+.up-formula-status.pending, .oe-filter-status.pending{ color:var(--text-faint); }
+.mono-input{ font-family:var(--mono); }
+.oe-filter-row{ display:flex; align-items:flex-start; gap:6px; }
+.oe-filter-row .expr-input-wrap{ flex:1; min-width:0; }
+
+/* Formel-Zeile als Karte statt Ein-Zeiler (Kopf: Name/Status/Aktionen,
+   darunter der Ausdruck über die volle Breite - dadurch mehr Platz für
+   längere/verschachtelte Formeln, siehe .expr-editor white-space:pre-wrap).
+   up-formula-row-{ok,err,pending} (siehe validateFormulaRow() in
+   formulaBuilder.js) färbt den linken Rand als sofort sichtbaren
+   Status-Streifen, ohne dafür jede Zeile bis zum Ende lesen zu müssen. */
+.up-formula-row{
+  display:flex; flex-direction:column; gap:8px;
+  background:var(--bg-surface); border:1px solid var(--border); border-left:3px solid var(--border-strong);
+  border-radius:var(--radius-md); padding:9px 11px 10px; transition:border-left-color .15s;
+}
+.up-formula-row.up-formula-row-ok{ border-left-color:var(--sig-green); }
+.up-formula-row.up-formula-row-err{ border-left-color:var(--sig-red); }
+.up-formula-row.up-formula-row-pending{ border-left-color:var(--border-strong); }
+.up-formula-head{ display:flex; align-items:center; gap:7px; }
+.up-formula-color-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.25); }
+.up-formula-row .up-formula-name{
+  width:96px; flex-shrink:0; border:1px solid transparent; background:transparent; padding:3px 4px;
+  border-radius:var(--radius-sm); font-weight:700;
+}
+.up-formula-row .up-formula-name:hover{ border-color:var(--border-strong); }
+.up-formula-row .up-formula-name:focus{ outline:none; border-color:var(--accent); background:var(--bg-surface); }
+.up-formula-head-spacer{ flex:1; }
+.up-formula-row .expr-input-wrap{ flex:1; min-width:0; }
+
+/* Kompakte quadratische Symbol-Buttons (ƒ / Hervorheben / Entfernen) statt
+   unterschiedlich gestalteter Einzelelemente - eine Bauform für alle
+   sekundären Aktionen im Kartenkopf. */
+.up-formula-head .icon-btn, .up-formula-head .expr-palette-btn{
+  width:25px; height:25px; flex-shrink:0; padding:0; box-sizing:border-box;
+  display:inline-flex; align-items:center; justify-content:center;
+  border:1px solid var(--border-strong); border-radius:6px; background:var(--bg-surface);
+  color:var(--text-muted); cursor:pointer; font-size:12px;
+}
+.up-formula-head .icon-btn:hover, .up-formula-head .expr-palette-btn:hover{
+  background:var(--accent-bg); border-color:var(--accent); color:var(--accent-strong);
+}
+.up-formula-head .icon-btn svg{ width:13px; height:13px; }
+.up-formula-head .icon-btn.up-formula-hl-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.up-formula-head .up-formula-remove{ color:var(--sig-red); border-color:var(--sig-red); }
+.up-formula-head .up-formula-remove:hover{ background:var(--crit-bg); }
+
+/* Hervorhebungs-Popover (ersetzt das frühere <select>, dessen eigener
+   Platzhaltertext im festen 92px-Feld abgeschnitten wurde) - position:fixed
+   wie .expr-autocomplete, aus demselben Grund: umgeht das overflow:hidden
+   von .panel (siehe positionHlPopover() in formulaBuilder.js). */
+.up-formula-hl-wrap{ position:relative; }
+.up-formula-hl-pop{
+  position:fixed; z-index:45; min-width:170px; max-height:230px; overflow-y:auto;
+  background:var(--bg-surface); border:1px solid var(--border-strong); border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-md); padding:6px;
+}
+.up-formula-hl-pop-title{ font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); padding:3px 7px 5px; }
+.up-formula-hl-opt{
+  display:block; width:100%; text-align:left; font:inherit; font-size:12px; padding:5px 7px;
+  border:none; border-radius:4px; background:transparent; color:var(--text); cursor:pointer;
+}
+.up-formula-hl-opt:hover{ background:var(--accent-bg); }
+.up-formula-hl-opt.active{ background:var(--accent); color:#fff; font-weight:700; }
+
+/* Fehler-/Hinweistext direkt unter dem Ausdruck (siehe validateFormulaRow())
+   statt ausschließlich im Tooltip des Status-Zeichens - sichtbar, sobald man
+   die Zeile überhaupt anschaut, nicht erst bei Hover. */
+.up-formula-msg{ font-size:11px; line-height:1.5; padding:5px 8px; border-radius:6px; }
+.up-formula-msg.err{ color:var(--crit-text); background:var(--crit-bg); }
+.up-formula-msg.pending{ color:var(--text-muted); background:var(--bg-surface-2); }
+
+/* Farb-Schlüssel unter der Formel-Liste (siehe .legend/.swatch, sonst für
+   Diagramm-Legenden genutzt) - erklärt einmal fest, was die Chip-Farben
+   bedeuten, statt es nur je Chip als Tooltip zu verstecken. */
+.up-formula-legend{ border:1px solid var(--border); border-radius:var(--radius-sm); margin-top:10px; }
+
+/* ---------- "Bausteine" (Variablen/Funktionen, einklappbar) ----------
+   Dieselbe Mechanik wie .data-panel (siehe layout.css): Klick auf den Kopf
+   togglet die Klasse "open" am Container, CSS zeigt/versteckt den Body und
+   tauscht den Umschalter-Text per ::before - kein zusätzlicher JS-Zustand
+   nötig. Formeln bleiben dadurch der primäre, immer offene Arbeitsbereich;
+   Variablen/Funktionen (nach dem Einrichten selten gebraucht) starten
+   eingeklappt. */
+.baustein-panel{ border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-surface-2); overflow:hidden; }
+.baustein-panel-head{
+  display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer; user-select:none;
+}
+.baustein-panel-title{ font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--text-faint); flex-shrink:0; }
+.baustein-panel-summary{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.baustein-panel-toggle{ font-size:11px; color:var(--accent); font-weight:600; white-space:nowrap; }
+.baustein-panel.open .baustein-panel-toggle::before{ content:"Einklappen"; }
+.baustein-panel:not(.open) .baustein-panel-toggle::before{ content:"Bearbeiten"; }
+.baustein-panel-body{ display:none; padding:0 12px 12px; flex-direction:column; gap:14px; background:var(--bg-surface); }
+.baustein-panel.open .baustein-panel-body{ display:flex; }
+
+.up-func-row{ display:flex; align-items:flex-start; gap:6px; flex-wrap:wrap; }
+.up-func-row .up-func-name{ width:110px; flex-shrink:0; }
+.up-func-row .expr-input-wrap{ flex:1; min-width:220px; }
+.up-func-params{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.up-func-param-chip{ display:flex; align-items:center; gap:2px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:2px 3px 2px 6px; }
+.up-func-param-input{ width:80px; border:none; background:transparent; padding:2px 0; }
+.up-func-param-input:focus{ outline:none; }
+.up-func-param-remove{ font-size:10px; line-height:1; padding:2px 5px; color:var(--text-faint); border:none; background:transparent; cursor:pointer; }
+.up-func-param-remove:hover{ color:var(--sig-red); }
+.up-func-param-add{ font-size:10.5px; padding:3px 8px; }
+.up-func-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
+.up-func-status.ok{ color:var(--sig-green); }
+.up-func-status.err{ color:var(--sig-red); }
+
+/* ---------- Umlaufprüfung: Formel-Builder Layout (Hauptbereich + Symbol-
+   Übersicht) ---------- */
+.formula-layout{ display:flex; align-items:flex-start; gap:18px; padding:16px; }
+.formula-main{ flex:1; min-width:0; padding:0; }
+/* Feste Höhenobergrenze (statt an der Viewporthöhe zu hängen): die Seiten-
+   leiste sitzt in einem flex-Container neben .formula-main - ohne harte
+   Kappung bestimmt bei vielen Objekten/Variablen SIE die Panelhöhe und
+   streckt den ganzen Tab. Zusätzlich scrollt jede Sektion INTERN (siehe
+   .fsb-section-body), damit eine einzelne lange Liste nicht die übrigen
+   Abschnitte unerreichbar weit nach unten schiebt. */
+.formula-sidebar{
+  width:230px; flex-shrink:0; position:sticky; top:12px;
+  border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-surface-2);
+  max-height:400px; overflow-y:auto;
+}
+@media (max-width:900px){
+  .formula-layout{ flex-direction:column; }
+  .formula-sidebar{ width:100%; position:static; max-height:260px; }
+}
+.fsb-section{ border-bottom:1px solid var(--border); padding:9px 11px; }
+.fsb-section-body{ max-height:132px; overflow-y:auto; }
+.fsb-section:last-child{ border-bottom:none; }
+.fsb-section-title{ font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); margin-bottom:6px; }
+.fsb-empty{ font-size:11px; color:var(--text-faint); font-style:italic; }
+.fsb-item{
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+  padding:3px 5px; margin:0 -5px; border-radius:var(--radius-sm); cursor:pointer;
+  font-family:var(--mono); font-size:11.5px;
+}
+.fsb-item:hover{ background:var(--accent-bg); }
+/* Name (+ optional Farbpunkt, siehe .fsb-item-dot) als EIN Flex-Kind, damit
+   justify-content:space-between auf .fsb-item nur zwischen Name UND Meta
+   Platz verteilt - nicht zusätzlich zwischen Punkt und Name auseinanderzieht. */
+.fsb-item-label{ display:flex; align-items:center; gap:5px; min-width:0; }
+/* Identitätsfarbe einer Formel (siehe formulaColorFor() in formulaBuilder.js)
+   - dieselbe Farbe wie ihr Referenz-Chip in anderen Formeln und ihr
+   Hervorhebungsband auf einer Objekt-Spur. */
+.fsb-item-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.25); }
+.fsb-item-name{ font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fsb-item-meta{ color:var(--text-faint); font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fsb-item.fsb-item-muted .fsb-item-name{ color:var(--text-muted); font-weight:400; }
+.fsb-chips{ display:flex; flex-wrap:wrap; gap:5px; }
+.fsb-chip{
+  font-family:var(--mono); font-size:11px; font-weight:600; padding:2px 7px; border-radius:10px;
+  background:var(--formula-on); color:#fff; cursor:pointer; opacity:.88;
+}
+.fsb-chip:hover{ opacity:1; }
+.fsb-chip.fsb-chip-det{ background:var(--accent); }
+
+/* ---------- Umlaufprüfung: Ausdrucks-Editor (echte, interaktive Chips,
+   Fehler-Markierung, Autovervollständigung, Funktions-Palette) ----------
+   contenteditable statt <input> - siehe formulaBuilder.js Kopfkommentar
+   beim "Ausdrucks-Editor"-Abschnitt für die Begründung (der frühere
+   Overlay-Trick mit unsichtbarem <input> über farbigem <div> hatte einen
+   strukturellen Makel: Textauswahl wurde von manchen Browsern trotz
+   color:transparent sichtbar gerendert und überlappte mit dem Highlight
+   darunter). */
+.expr-input-wrap{ position:relative; display:flex; align-items:flex-start; gap:4px; }
+.expr-editor{
+  flex:1; min-width:0; box-sizing:border-box; border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm); background:var(--bg-surface); padding:5px 9px;
+  font-family:var(--mono); font-size:12.5px; line-height:1.7;
+  cursor:text; outline:none; min-height:32px; white-space:pre-wrap; word-break:break-word;
+}
+.expr-editor:focus{ border-color:var(--accent); }
+.expr-editor:empty::before{ content:attr(data-placeholder); color:var(--text-faint); }
+.expr-palette-btn{
+  flex-shrink:0; font-family:var(--mono); font-style:italic; font-weight:700; font-size:12px;
+  padding:5px 9px; border:1px solid var(--border-strong); border-radius:var(--radius-sm);
+  background:var(--bg-surface); color:var(--text-muted); cursor:pointer;
+}
+.expr-palette-btn:hover{ background:var(--accent-bg); color:var(--accent-strong); border-color:var(--accent); }
+/* position:fixed statt :absolute (Koordinaten per JS, siehe positionDropdown()
+   in formulaBuilder.js) - umgeht das overflow:hidden von .panel, das ein
+   absolut positioniertes Dropdown sonst am Panel-Rand abschneiden würde. */
+.expr-autocomplete{
+  position:fixed; min-width:260px; max-width:420px;
+  max-height:240px; overflow-y:auto; background:var(--bg-surface); border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm); box-shadow:var(--shadow-md); z-index:50;
+}
+.expr-ac-group{ padding:5px 10px 2px; font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); }
+.expr-ac-item{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:5px 10px; font-family:var(--mono); font-size:12px; cursor:pointer; }
+.expr-ac-item:hover, .expr-ac-item.active{ background:var(--accent-bg); }
+.expr-ac-label{ font-weight:700; color:var(--text); }
+.expr-ac-hint{ color:var(--text-faint); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* Nur-Text-Token (Zahlen/Operatoren/Klammern/AND-OR-NOT sowie noch nicht
+   eingerastete, gerade getippte Bezeichner) - "freier Text für Werte etc." */
+.expr-tok-num{ color:var(--accent-strong); }
+.expr-tok-kw{ color:var(--text-muted); font-weight:700; }
+.expr-tok-op{ color:var(--text); }
+.expr-tok-punc{ color:var(--text-faint); }
+.expr-tok-err{ text-decoration:underline wavy var(--sig-red); text-decoration-thickness:1.5px; text-underline-offset:2px; }
+/* Zustand/Funktionsname/Variable, SOLANGE noch nicht zum Chip eingerastet
+   (Cursor berührt das Token noch, siehe "touching" in formulaBuilder.js) -
+   schon farblich erkennbar, aber noch normaler, frei weitertippbarer Text. */
+.expr-tok-kat{ color:var(--formula-on); font-weight:600; }
+.expr-tok-func{ color:var(--req-marker); font-weight:600; }
+.expr-tok-var{ color:var(--accent); }
+/* Text-Literal ("..."/'...') - z.B. für den ÖPNV-Zeilenfilter (SPL-
+   Vergleich). Bleibt immer nur eingefärbter Text, nie Chip (siehe
+   isChipToken() in js/core/exprEditor.js). */
+.expr-tok-text{ color:var(--sig-redyellow); font-weight:600; }
+
+/* Echte, entfernbare Chips (contenteditable="false", MUI-artig) - siehe
+   buildChipEl()/isChipToken() in formulaBuilder.js. */
+.expr-chip{
+  display:inline-flex; align-items:center; gap:2px; margin:1px 3px 1px 0;
+  padding:1px 3px 1px 9px; border-radius:11px; font-weight:600; font-size:12px;
+  cursor:pointer; vertical-align:middle; white-space:nowrap;
+}
+/* Chips sind austauschbar (Klick öffnet die gefilterte Auswahlliste, siehe
+   gz-chip-replace in exprEditor.js) - das darf man ihnen ansehen. */
+.expr-chip:hover{ box-shadow:0 0 0 2px var(--accent-bg-strong); }
+.expr-chip-label{ line-height:1.6; }
+.expr-chip-remove{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:15px; height:15px; margin-left:1px; border-radius:50%; border:none;
+  background:rgba(255,255,255,.3); color:inherit; font-size:12px; line-height:1;
+  cursor:pointer; padding:0;
+}
+.expr-chip-remove:hover{ background:rgba(255,255,255,.6); }
+.expr-chip.expr-tok-kat{ background:var(--formula-on); color:#fff; }
+.expr-chip.expr-tok-func{ background:var(--req-marker); color:#fff; }
+.expr-chip.expr-tok-var{ background:var(--accent); color:#fff; }
+/* Formel-Referenz-Chip (siehe chipColorFor()-Hook in exprEditor.js): eigene,
+   je Formel zugeteilte Farbe statt der generischen Variablen-Farbe - dieselbe
+   Farbe wie in der Formel-Liste (Farbpunkt) und ggf. der Zeitstrahl-
+   Hervorhebung, damit eine referenzierte Formel überall wiedererkennbar ist. */
+.expr-chip.expr-tok-var.expr-chip-accent{ background:var(--chip-accent); }
+.expr-chip.expr-chip-err{ box-shadow:0 0 0 2px var(--sig-red); }
+
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }
-.up-group{ padding:7px 0 10px; border-bottom:1px solid var(--border); }
+.up-group{ position:relative; padding:7px 0 22px; border-bottom:1px solid var(--border); }
 .up-group:last-child{ border-bottom:none; }
 .up-group:hover{ background:var(--bg-surface-2); }
-.up-apw-row{ display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 0 100px; font-size:10.5px; font-family:var(--mono); }
-.up-apw-pill{ padding:1px 7px; border:1px solid var(--border-strong); border-radius:10px; color:var(--text-muted); background:var(--bg-surface-2); }
-.up-apw-pill.changed{ border-color:var(--req-marker); color:var(--req-marker); background:var(--req-marker-bg); font-weight:700; }
-.up-apw-pill.empty{ opacity:.5; }
+
+/* Hover-Fadenkreuz (alle Spuren eines Umlaufs), siehe wireCrosshair() */
+.up-crosshair-label{
+  position:absolute; bottom:2px; display:none; transform:translateX(-50%);
+  font-family:var(--mono); font-size:10px; font-weight:700; color:var(--text);
+  background:var(--bg-surface); border:1px solid var(--border-strong); border-radius:3px;
+  padding:1px 5px; pointer-events:none; white-space:nowrap; z-index:2;
+}
 
 /* ---------- Stammdaten LSA: Phasenmatrix ---------- */
 .phase-matrix-wrap{ overflow-x:auto; }
@@ -243,3 +545,65 @@ table.static-rows tbody tr{ cursor:default; }
 .us-bool-false{ color:var(--text-faint); }
 .us-empty-cell{ color:var(--text-faint); }
 .us-aggregate-note{ text-align:left; font-style:italic; color:var(--text-muted); font-family:var(--sans); }
+
+/* ---------- Snackbar (GZ.snackbar) ---------- */
+.snackbar-stack{
+  position:fixed; right:18px; bottom:18px; z-index:1000;
+  display:flex; flex-direction:column-reverse; gap:8px; max-width:380px;
+  pointer-events:none;
+}
+.snackbar{
+  display:flex; align-items:flex-start; gap:9px; padding:10px 11px;
+  border-radius:var(--radius-md); background:var(--bg-header-2); box-shadow:var(--shadow-md);
+  opacity:0; transform:translateY(10px); transition:opacity .18s ease, transform .18s ease;
+  pointer-events:auto;
+}
+.snackbar-show{ opacity:1; transform:translateY(0); }
+.snackbar-icon{
+  flex-shrink:0; width:18px; height:18px; margin-top:1px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:700;
+}
+.snackbar-error .snackbar-icon{ background:var(--sig-red); color:#fff; }
+.snackbar-warning .snackbar-icon{ background:var(--sig-yellow); color:#3a2a00; }
+.snackbar-info .snackbar-icon{ background:var(--accent); color:#fff; }
+.snackbar-body{ flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.snackbar-msg{ font-size:12.5px; font-weight:700; line-height:1.35; color:var(--text-on-dark); }
+.snackbar-desc{ font-size:11.5px; color:var(--text-on-dark-muted); line-height:1.4; }
+.snackbar-close{
+  flex-shrink:0; background:none; border:none; color:var(--text-on-dark-muted);
+  font-size:11px; cursor:pointer; padding:2px; line-height:1;
+}
+.snackbar-close:hover{ color:var(--text-on-dark); }
+
+.panel-head-actions{ display:flex; align-items:center; gap:8px; }
+
+/* ---------- Modal (Hilfe & Beispiele) ---------- */
+.modal-overlay{
+  position:fixed; inset:0; z-index:900; background:rgba(20,30,45,.45);
+  display:flex; align-items:center; justify-content:center; padding:24px;
+}
+.modal-overlay[hidden]{ display:none; }
+.modal-box{
+  background:var(--bg-surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-md);
+  max-width:640px; width:100%; max-height:min(80vh, 720px); display:flex; flex-direction:column; overflow:hidden;
+}
+.modal-head{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:13px 18px; border-bottom:1px solid var(--border); font-weight:700; font-size:13.5px;
+  background:var(--bg-surface-2); flex-shrink:0;
+}
+.modal-close{
+  background:none; border:none; font-size:14px; color:var(--text-faint); cursor:pointer; padding:2px 6px; line-height:1;
+}
+.modal-close:hover{ color:var(--sig-red); }
+.modal-body{ padding:16px 18px 20px; overflow-y:auto; }
+.help-section{ margin-bottom:18px; }
+.help-section:last-child{ margin-bottom:0; }
+.help-section h4{ margin:0 0 7px; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); }
+.help-section p{ margin:0 0 8px; font-size:12.5px; line-height:1.55; color:var(--text); }
+.help-section p:last-child{ margin-bottom:0; }
+.help-tip{ color:var(--text-muted); font-size:11.5px; }
+.help-table{ width:100%; border-collapse:collapse; margin-bottom:8px; }
+.help-table td{ padding:6px 10px 6px 0; font-size:12px; vertical-align:top; border-bottom:1px solid var(--border); line-height:1.5; }
+.help-table tr:last-child td{ border-bottom:none; }
+.help-fn{ white-space:nowrap; width:1%; color:var(--accent-strong); font-weight:600; padding-right:16px; }

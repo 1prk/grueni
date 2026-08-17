@@ -1,22 +1,18 @@
-/* GZ.umlaufContext — baut je Umlauf den Auswertungskontext für
-   GZ.exprEngine: SG-Werte (An/Ab/TF/Rotgelb/Gelb), Detektor-/APW-Treffer
-   (ausgelöst/Anzahl/erste/letzte Flanke), SPL/TU/TU_MED/TX/Start. Reine
-   Logik auf den von GZ.parser/GZ.segments gelieferten Analyse-Daten,
-   sweep-basiert (ein fortlaufender Zeiger je Signalgruppe/Spalte über
-   aufsteigend besuchte Umläufe) für lineare statt quadratische Laufzeit bei
-   vielen Umläufen - siehe die Sweep-Kommentare in js/views/umlaufpruefung.js
-   für dasselbe Muster. */
+/* GZ.umlaufContext — baut für Umlaufstatistiken je Umlauf den Auswertungs-
+   scope für GZ.exprEngine.compileValue(): SG-/DET-Objekt-Handles im selben
+   Grundformat wie js/views/formulaBuilder.js (class + cycleMetrics, siehe
+   dort und exprEngine.js), aber OHNE zeilenweisen Sweep - Umlaufstatistiken
+   braucht nur EINEN Wert je Umlauf, nicht je Zeile. Anders als der Formel-
+   Builder (Variablen mit frei wählbarem Alias) werden hier die OCIT-Spalten-
+   namen selbst direkt als Bezeichner nutzbar gemacht - kein separater
+   "Variable anlegen"-Schritt. */
 (function (GZ) {
   'use strict';
-  const {
-    makeIndexSweep, findSplAt, computeSegmentAnAbTf, computeGlobalTU,
-    mapGreensToSegIndex, adjacentTransitionDurations
-  } = GZ.segments;
+  const { computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, findSplAt } = GZ.segments;
   const { wzIstBelegt } = GZ.wartezeitLogic;
 
-  // Statischer Bezeichner-Index (Signalgruppen-/Detektornamen) - unabhängig
-  // vom einzelnen Umlauf. Grundlage für die Namensauflösung in
-  // GZ.exprEngine.evaluate() UND für Vorschläge in suggestAt()/nearestMatch().
+  // Statischer Bezeichner-Index (Namen + Typen) - Grundlage für varTypes je
+  // compileValue()-Aufruf UND für die Vorschlagsliste in umlaufstatistiken.js.
   function buildIdentifierIndex(analysis) {
     const { allStats, otherColumns } = analysis;
     const sg = new Map(), det = new Map();
@@ -29,43 +25,34 @@
       const l = col.name.toLowerCase();
       if (!det.has(l)) { det.set(l, col.name); detList.push(col.name); }
     });
-    return { sg, det, sgList, detList };
+    const varTypes = { TU: 'NUM', TU_MED: 'NUM', SPL: 'TEXT' };
+    sgList.forEach(n => { varTypes[n] = 'SG'; });
+    detList.forEach(n => { varTypes[n] = 'DET'; });
+    return { sg, det, sgList, detList, varTypes };
   }
 
-  // Baut den Kontext für JEDEN Umlauf der Aufzeichnung auf einmal (nicht
-  // erst bei Bedarf je Spalte) - die teure Sweep-Arbeit läuft einmal über die
-  // Aufzeichnung, danach ist das Auswerten einer Formel je Umlauf nur noch
-  // ein Baum-Durchlauf über wenige Knoten.
+  // Baut den Kontext für JEDEN Umlauf der Aufzeichnung auf einmal - die
+  // teure Sweep-Arbeit (GZ.segments.computeCycleSgMetrics/-DetMetrics) läuft
+  // einmal über die Aufzeichnung, danach ist das Auswerten einer Formel je
+  // Umlauf nur noch ein Baum-Durchlauf über wenige Knoten (compiled.run()).
   function buildAll(analysis) {
     const index = buildIdentifierIndex(analysis);
     const { allStats, otherColumns, cycleStarts, tMax, times, seriesByCol, splValues } = analysis;
     if (!cycleStarts || cycleStarts.length === 0) return { index, cycles: [] };
 
-    const TU_MED = computeGlobalTU(cycleStarts) || 0;
+    const TU_MED = computeGlobalTU(cycleStarts);
     const n = cycleStarts.length;
 
-    const sgSweeps = allStats.map(({ col, segs, stats }) => ({
-      lname: col.name.toLowerCase(),
-      greenSweep: makeIndexSweep(stats.greens),
-      segIndexOfGreen: mapGreensToSegIndex(segs),
-      segs, greens: stats.greens
-    }));
-
-    // Je andere Spalte (DET/APW/ÖPNV/BLK): sortierte Liste der steigenden
-    // Flanken (Belegt-Beginn) einmal vorab bilden; pro Umlauf genügt ein
-    // monoton fortschreitender Zweizeiger-Scan über diese Liste.
-    const detCols = otherColumns.map(col => {
-      const vals = seriesByCol.get(col.index);
-      const edges = [];
-      let prevBelegt = false;
-      for (let k = 0; k < times.length; k++) {
-        const belegt = wzIstBelegt(vals[k]);
-        if (belegt && !prevBelegt) edges.push(times[k]);
-        prevBelegt = belegt;
-      }
-      return { lname: col.name.toLowerCase(), edges };
+    const sgMetricsByName = new Map();
+    allStats.forEach(({ col, segs, stats }) => {
+      sgMetricsByName.set(col.name, computeCycleSgMetrics(segs, stats.greens, cycleStarts, tMax, TU_MED));
     });
-    const detPtrs = detCols.map(() => 0);
+    const detMetricsByName = new Map();
+    otherColumns.forEach(col => {
+      const rawVals = seriesByCol.get(col.index);
+      const occupied = times.map((_, k) => wzIstBelegt(rawVals[k]));
+      detMetricsByName.set(col.name, computeCycleDetMetrics(times, occupied, cycleStarts, tMax));
+    });
 
     const cycles = [];
     for (let i = 0; i < n; i++) {
@@ -74,39 +61,15 @@
       const spl = findSplAt(start, times, splValues) || '';
       const tu = Math.round((end - start) / 1000);
 
-      const sg = new Map();
-      sgSweeps.forEach(sw => {
-        const gIdx = sw.greenSweep(start, end);
-        if (gIdx === -1) { sg.set(sw.lname, { an: null, ab: null, tf: null, rotgelb: 0, gelb: 0 }); return; }
-        const seg = sw.greens[gIdx];
-        const anab = TU_MED ? computeSegmentAnAbTf(seg, cycleStarts, TU_MED) : null;
-        const segIdx = sw.segIndexOfGreen[gIdx];
-        const extra = segIdx != null ? adjacentTransitionDurations(sw.segs, segIdx) : { rotgelb: 0, gelb: 0 };
-        sg.set(sw.lname, {
-          an: anab ? anab.an : null,
-          ab: anab ? anab.ab : null,
-          tf: anab ? anab.tf : (seg.end - seg.start) / 1000,
-          rotgelb: extra.rotgelb, gelb: extra.gelb
-        });
+      const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl };
+      index.sgList.forEach(name => {
+        scope[name] = { class: 'SG', cycleMetrics: sgMetricsByName.get(name)[i] || null };
+      });
+      index.detList.forEach(name => {
+        scope[name] = { class: 'DET', cycleMetrics: detMetricsByName.get(name)[i] || null };
       });
 
-      const det = new Map();
-      detCols.forEach((dc, di) => {
-        let ptr = detPtrs[di];
-        while (ptr < dc.edges.length && dc.edges[ptr] < start) ptr++;
-        const from = ptr;
-        while (ptr < dc.edges.length && dc.edges[ptr] < end) ptr++;
-        const to = ptr;
-        detPtrs[di] = ptr;
-        const count = to - from;
-        det.set(dc.lname, {
-          triggered: count > 0, count,
-          first: count > 0 ? (dc.edges[from] - start) / 1000 : null,
-          last: count > 0 ? (dc.edges[to - 1] - start) / 1000 : null
-        });
-      });
-
-      cycles.push({ sg, det, TU: tu, TU_MED, TX: i + 1, SPL: spl, START: start });
+      cycles.push({ scope, start, end, TX: i + 1, SPL: spl, TU: tu });
     }
 
     return { index, cycles };

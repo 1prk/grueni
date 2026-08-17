@@ -174,6 +174,7 @@
     const tcValues = [];
     const cycleStarts = [];
     let prevTx = null;
+    let prevTxNum = null;
     // TC und SP werden datensparsam geloggt: ein Wert steht nur in der Zeile,
     // in der er sich ändert, danach bleibt die Zelle leer, bis sich der Wert
     // wieder ändert. Beim Einlesen wird das aufgefüllt (letzter bekannter
@@ -194,8 +195,21 @@
       if (rawSpl !== '') lastSpl = rawSpl;
       splValues.push(lastSpl);
       const txVal = (r[txCol] || '').trim();
-      if (txVal === '0' && prevTx !== '0') cycleStarts.push(t);
-      if (txVal !== '') prevTx = txVal;
+      if (txVal !== '') {
+        const txNum = Number(txVal);
+        // Normalfall: TX zählt seit Umlaufbeginn hoch und die Zeile mit dem
+        // exakten Rücksprung auf "0" markiert den nächsten Umlaufbeginn.
+        const isZeroEdge = txVal === '0' && prevTx !== '0';
+        // Fallback für Datenlücken: fehlt genau diese "0"-Zeile im Rohexport
+        // (z. B. eine ausgelassene Sekunde), springt TX ohne isZeroEdge direkt
+        // von einem hohen Wert auf einen kleinen zurück (z. B. 89 -> 1). Ohne
+        // diesen Fallback verschmelzen zwei Umläufe unerkannt zu einem
+        // einzigen mit verdoppelter Umlaufzeit (z. B. 90s+90s -> 180s).
+        const isWrapEdge = !isZeroEdge && Number.isFinite(txNum) && prevTxNum !== null && txNum < prevTxNum;
+        if (isZeroEdge || isWrapEdge) cycleStarts.push(t);
+        prevTx = txVal;
+        if (Number.isFinite(txNum)) prevTxNum = txNum;
+      }
     }
     if (times.length === 0) throw new Error('Keine gültigen Zeitstempel gefunden (Spalte A, ggf. + Spalte B als getrennte Uhrzeit).');
 

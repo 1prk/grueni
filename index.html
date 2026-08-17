@@ -364,6 +364,26 @@
           <div id="oeHint" class="hint"></div>
         </div>
 
+        <div class="panel" id="oeFilterPanel">
+          <div class="panel-head">
+            <span>Filtern</span>
+          </div>
+          <div class="cfg-grid">
+            <div class="cfg-field cfg-field-wide">
+              <label>Filterausdruck <span class="cfg-field-hint">(schränkt Kennzahlen, Diagramm und Ereignistabelle unten auf die zutreffenden Anmeldungen ein – leer = alle anzeigen. Felder: TX (Zahl, Sekunden im Umlauf), SPL (Text), Verlustzeit/IstFahrzeit (Zahl, Sekunden), QSV (A–F), Ergebnis (ABGEMELDET/ZWANGSGELOESCHT/AUSGESCHLOSSEN/UNAUFGELOEST), SG (Text, Signalgruppen-Name) – z.&nbsp;B. „TX &gt; 30 AND QSV == A“ oder „SPL == &quot;10&quot;“)</span></label>
+              <div class="oe-filter-row" id="oeFilterField">
+                <span class="expr-input-wrap">
+                  <div id="oeFilterExpr" class="expr-editor mono-input" contenteditable="true" spellcheck="false" data-placeholder="z.B. TX &gt; 30 AND QSV == A" role="textbox" aria-multiline="false"></div>
+                  <button type="button" class="expr-palette-btn" title="Felder/Zustände einfügen">ƒ</button>
+                  <div class="expr-autocomplete" hidden></div>
+                </span>
+                <span id="oeFilterStatus" class="oe-filter-status"></span>
+              </div>
+            </div>
+          </div>
+          <div id="oeFilterHint" class="hint"></div>
+        </div>
+
         <div class="panel" id="oeRawPanel" style="display:none;">
           <div class="panel-head">Rohpunkte — An-/Abmeldung im Zeitverlauf</div>
           <div style="padding:12px 16px 2px;" id="oeRawRows"></div>
@@ -422,30 +442,145 @@
       <div class="view">
 
         <div class="panel">
-          <div class="panel-head">Umlaufprüfung — Auswahl</div>
+          <div class="panel-head">
+            <span>Umlaufprüfung — Auswahl</span>
+            <div class="table-head-tools">
+              <button type="button" id="upConfigSaveBtn" class="btn" title="Auswahl, Filter und Formeln als JSON-Datei speichern (ohne Rohdaten)">Konfiguration speichern</button>
+              <label class="btn" for="upConfigLoadInput">Konfiguration laden …</label>
+              <input type="file" id="upConfigLoadInput" accept=".json" style="display:none;">
+            </div>
+          </div>
           <div class="cfg-grid">
-            <div class="cfg-field">
-              <label>Signalgruppe(n) <span class="cfg-field-hint">(mehrere = gestapelte Hauptzeilen je Umlauf)</span></label>
-              <div id="upSgChecks" class="det-checks"></div>
-            </div>
-            <div class="cfg-field">
-              <label>Detektor(en) zuschalten <span class="cfg-field-hint">(Rohzustand als Mini-Zeitleiste je Umlauf)</span></label>
-              <div id="upDetChecks" class="det-checks"></div>
-            </div>
-            <div class="cfg-field">
-              <label>APW / ÖPNV-Wert zuschalten <span class="cfg-field-hint">(zeigt nur, ob sich der Wert im Umlauf geändert hat)</span></label>
-              <div id="upApwChecks" class="det-checks"></div>
+            <div class="cfg-field cfg-field-wide">
+              <label>Objekte <span class="cfg-field-hint">(Signalgruppen, Detektoren, APW-/ÖPNV-Werte, Formeln in einer Liste – Häkchen = im Umlauf-Output anzeigen · am Griff <span class="obj-drag-hint">⠿</span> links ziehen, um die Reihenfolge im Output festzulegen · mindestens eine Signalgruppe nötig)</span></label>
+              <input type="text" id="upObjSearch" class="table-search obj-search" placeholder="Objekt suchen …">
+              <div id="upObjList" class="obj-list"></div>
             </div>
             <div class="cfg-field">
               <label>ÖV-Fahrzeiten zuschalten <span class="cfg-field-hint">(übernimmt die im Tab „ÖPNV“ für diese Signalgruppe konfigurierten Zeilen)</span></label>
               <label class="det-check"><input type="checkbox" id="upFzToggle"> Sollfahrzeit/Verlustzeit + Zwangslöschzeit-Fenster anzeigen</label>
+              <label>Darstellung der Signalgruppen <span class="cfg-field-hint">(rein optisch – gleiche Daten, gleiche Beschriftungen; Detektor-/APW-/Formel-Spuren bleiben unverändert)</span></label>
+              <select id="upLaneStyle">
+                <option value="minimal" selected>Minimal – wie Signalzeitenplan (umrandete Kästen, Gelbphasen mit Diagonale)</option>
+                <option value="default">Original – flächige Balken</option>
+              </select>
             </div>
-            <div class="cfg-field">
-              <label>Filtern <span class="cfg-field-hint">(nur Umläufe anzeigen, in denen alle gewählten Spalten einen Wert haben)</span></label>
-              <div id="upFilterChecks" class="det-checks"></div>
+            <div class="cfg-field cfg-field-wide">
+              <label>Filtern <span class="cfg-field-hint">(separat von der Objekt-Auswahl/Reihenfolge oben – zeigt nur Umläufe, die ALLE folgenden Bedingungen erfüllen, z.&nbsp;B. Signalgruppe = GRUEN, APW-Wert &gt; 10, Detektor/Formel = BELEGT)</span></label>
+              <div id="upFilterRows" class="up-filter-rows"></div>
+              <button type="button" id="upAddFilterBtn" class="btn">+ Filterbedingung hinzufügen</button>
             </div>
           </div>
           <div id="upHint" class="hint"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>Formeln (synthetische Detektoren)</span>
+            <span class="panel-head-actions">
+              <button type="button" id="upFormulaHelpBtn" class="btn" title="Hilfe &amp; Beispiele">? Hilfe</button>
+              <button type="button" id="upFormulaCalcBtn" class="btn primary">Berechnen</button>
+            </span>
+          </div>
+          <div class="formula-layout">
+            <div class="cfg-stack formula-main">
+              <section class="baustein-panel" id="upBausteinPanel">
+                <div class="baustein-panel-head" id="upBausteinPanelHead">
+                  <span class="baustein-panel-title">Bausteine</span>
+                  <span class="baustein-panel-summary" id="upBausteinPanelSummary"></span>
+                  <span class="baustein-panel-toggle"></span>
+                </div>
+                <div class="baustein-panel-body">
+                  <div class="cfg-field">
+                    <label>Variablen <span class="cfg-field-hint">(Alias für Signalgruppen-/Detektor-Spalten (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder APW/ÖPNV-Spalten (Zahl))</span></label>
+                    <div id="upVarRows" class="up-formula-list"></div>
+                    <button type="button" id="upAddVarBtn" class="btn">+ Variable hinzufügen</button>
+                  </div>
+                  <div class="cfg-field">
+                    <label>Funktionen <span class="cfg-field-hint">(benutzerdefinierte, parametrisierte Ausdrücke aus den Primitiven, z.&nbsp;B. Name „LangGenug“ mit Parametern „sg, schwelle“ und Rumpf „DauerSeit(sg, GRUEN) &gt; schwelle“ – aus Formeln (oder anderen Funktionen) mit konkreten Argumenten aufrufbar, z.&nbsp;B. „LangGenug(K1, 30)“; Parameter sind generisch, kein fester Typ nötig)</span></label>
+                    <div id="upFuncRows" class="up-formula-list"></div>
+                    <button type="button" id="upAddFuncBtn" class="btn">+ Funktion hinzufügen</button>
+                  </div>
+                </div>
+              </section>
+              <div class="cfg-field">
+                <label>Formeln <span class="cfg-field-hint">(müssen zu WAHR/FALSCH auswerten, z.&nbsp;B. „DauerSeit(K1, GRUEN) &gt; 45 AND Zustand(D1) == BELEGT“ – Operatoren: + − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT Klammern · Funktionen: Zustand(sg|det), Dauer(sg|det), DauerSeit(sg|det, zustand) sowie eigene Funktionen · Zustände: GRUEN/ROT/GELB/ROTGELB/DUNKEL (Signalgruppe), BELEGT/FREI (Detektor) · der Auswertungszeitpunkt (TX) wird automatisch berücksichtigt, nicht als Argument nötig · eine Formel kann eine ANDERE Formel bei ihrem Namen referenzieren, z.&nbsp;B. „M1 AND NOT R1“ · wahlweise auf einer Objekt-Spur farbig hervorheben)</span></label>
+                <div id="upFormulaRows" class="up-formula-list"></div>
+                <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
+                <div class="legend up-formula-legend">
+                  <span class="item"><span class="swatch" style="background:var(--accent)"></span>Objekt/Variable</span>
+                  <span class="item"><span class="swatch" style="background:var(--formula-on)"></span>Zustand</span>
+                  <span class="item"><span class="swatch" style="background:var(--req-marker)"></span>Funktion/Primitive</span>
+                  <span class="item"><span class="swatch" style="background:#3d5afe"></span>Formel-Referenz (eigene Farbe je Formel)</span>
+                </div>
+              </div>
+            </div>
+            <aside id="upFormulaSidebar" class="formula-sidebar" aria-label="Verfügbare Symbole"></aside>
+          </div>
+          <div id="upFormulaHint" class="hint"></div>
+        </div>
+
+        <div id="upFormulaHelpModal" class="modal-overlay" hidden>
+          <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="upFormulaHelpTitle">
+            <div class="modal-head">
+              <span id="upFormulaHelpTitle">Formel-Builder – Hilfe &amp; Beispiele</span>
+              <button type="button" id="upFormulaHelpClose" class="modal-close" title="Schließen">✕</button>
+            </div>
+            <div class="modal-body">
+              <div class="help-section">
+                <h4>Grundidee</h4>
+                <p><strong>Variablen</strong> sind Aliase auf eine Signalgruppen-/Detektor-Spalte (Objekt, ausgewertet über Zustand/Dauer/DauerSeit) oder eine APW-/ÖPNV-Spalte (Zahl, roher Wert). <strong>Funktionen</strong> sind optionale, selbst benannte Bausteine aus wiederverwendbaren Ausdrücken. <strong>Formeln</strong> kombinieren beides und müssen zu WAHR/FALSCH auswerten – jede gültige Formel erscheint nach „Berechnen“ als zusätzlicher, synthetischer Detektor (Kürzel FORMEL).</p>
+                <p class="help-tip">Tipp: Im Ausdrucksfeld muss man Variablen nicht vorher anlegen – beim Tippen (Autovervollständigung) oder über den „ƒ“-Button lassen sich auch rohe Objekte (Signalgruppen/Detektoren/APW/ÖPNV) direkt auswählen; die passende Variable wird automatisch angelegt bzw. wiederverwendet.</p>
+                <p class="help-tip">Jede Formel trägt eine feste Farbe (Punkt vor ihrem Namen) und kann wahlweise auf einer Objekt-Spur hervorgehoben werden (Auswahl in der Formel-Zeile) – ihre Wahr-Intervalle erscheinen dann als farbiges Band mit gestrichelten Randlinien direkt auf dieser Spur.</p>
+              </div>
+
+              <div class="help-section">
+                <h4>Primitiven</h4>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">Zustand(objekt)</td><td>aktueller Zustand des Objekts – GRUEN/ROT/GELB/ROTGELB/DUNKEL bei einer Signalgruppe, BELEGT/FREI bei einem Detektor.</td></tr>
+                    <tr><td class="mono-input help-fn">Dauer(objekt)</td><td>Sekunden, die das Objekt bereits ununterbrochen im aktuellen Zustand ist.</td></tr>
+                    <tr><td class="mono-input help-fn">DauerSeit(objekt, zustand)</td><td>Sekunden seit dem letzten Eintritt in „zustand“ – 0, wenn das Objekt gerade nicht in diesem Zustand ist.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="help-section">
+                <h4>Zustände &amp; Operatoren</h4>
+                <p><strong>Signalgruppe:</strong> GRUEN, ROT, GELB, ROTGELB, DUNKEL &nbsp;·&nbsp; <strong>Detektor:</strong> BELEGT, FREI</p>
+                <p><strong>Operatoren:</strong> <span class="mono-input">+ − * / &gt; &gt;= &lt; &lt;= == != AND OR NOT ( )</span></p>
+                <p class="help-tip">Der aktuelle Auswertungszeitpunkt wird intern automatisch berücksichtigt – man muss ihn nirgends als Argument angeben. Für fortgeschrittene, eigene Bedingungen (z.&nbsp;B. in einer Funktion) steht er trotzdem als Variable <span class="mono-input">TX</span> zur Verfügung (Sekunden seit Umlaufbeginn).</p>
+              </div>
+
+              <div class="help-section">
+                <h4>Beispiele</h4>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">Zustand(D1) == BELEGT</td><td>Detektor D1 ist aktuell belegt.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(K1) == GRUEN</td><td>Signalgruppe K1 hat gerade Freigabe (Grün).</td></tr>
+                    <tr><td class="mono-input help-fn">DauerSeit(K1, GRUEN) &gt; 45</td><td>K1 ist seit mehr als 45&nbsp;s ununterbrochen grün.</td></tr>
+                    <tr><td class="mono-input help-fn">Zustand(D1) == BELEGT AND Zustand(K1) == ROT</td><td>D1 ist belegt, während K1 gerade Rot zeigt (z.&nbsp;B. Anmeldung ohne Freigabe).</td></tr>
+                    <tr><td class="mono-input help-fn">NOT (Zustand(D1) == BELEGT)</td><td>D1 ist gerade frei.</td></tr>
+                  </tbody>
+                </table>
+                <p class="help-tip">Mit einer <strong>Funktion</strong> lässt sich ein wiederkehrendes Muster einmal benennen und mehrfach mit unterschiedlichen Argumenten aufrufen:</p>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">LangGenug(sg, schwelle) :=<br>DauerSeit(sg, GRUEN) &gt; schwelle</td><td>Funktions-<em>definition</em> im Abschnitt „Funktionen“ (Name „LangGenug“, Parameter „sg, schwelle“).</td></tr>
+                    <tr><td class="mono-input help-fn">LangGenug(K1, 30) OR LangGenug(K2, 30)</td><td>Aufruf in einer Formel: mindestens eine der beiden Signalgruppen ist seit über 30&nbsp;s grün.</td></tr>
+                  </tbody>
+                </table>
+                <p class="help-tip">Eine Formel kann eine <strong>andere Formel</strong> direkt bei ihrem Namen referenzieren – so lassen sich einfache Bausteine zu komplexeren Bedingungen kombinieren, ohne den Ausdruck zu wiederholen:</p>
+                <table class="help-table">
+                  <tbody>
+                    <tr><td class="mono-input help-fn">M1 := TX &gt;= 10 AND TX &lt;= 30</td><td>Formel „M1“: ein bestimmtes TX-Fenster im Umlauf.</td></tr>
+                    <tr><td class="mono-input help-fn">M1 AND Zustand(K1) == GRUEN</td><td>Formel „R1“ referenziert „M1“: K1 ist innerhalb dieses TX-Fensters grün.</td></tr>
+                  </tbody>
+                </table>
+                <p class="help-tip">Eine zyklische Referenz (eine Formel referenziert sich – direkt oder über Umwege – selbst) wird beim Berechnen erkannt und alle beteiligten Formeln werden mit klarer Meldung übersprungen statt falsch berechnet.</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" id="upTablePanel" style="display:none;">
@@ -470,12 +605,14 @@
             <span class="item"><span class="swatch" style="background:var(--sig-dark)"></span>Dunkel</span>
             <span class="item"><span class="swatch" style="background:var(--accent)"></span>Detektor belegt</span>
             <span class="item"><span class="swatch" style="background:var(--text-faint);height:2px;align-self:center;"></span>Detektor frei (Grundlinie)</span>
-            <span class="item"><span class="up-apw-pill changed" style="padding:0 5px;">APW ●</span> Wert im Umlauf geändert</span>
+            <span class="item"><span class="swatch" style="background:var(--formula-on)"></span>Formel wahr (synthetischer Detektor, siehe „Formeln“)</span>
+            <span class="item"><span class="swatch" style="background:linear-gradient(90deg,var(--apw-a) 50%,var(--apw-b) 50%);"></span>APW/ÖPNV-Wert: Rohwert je Zeitabschnitt (alternierende Farbe)</span>
             <span class="item"><span class="up-anom" style="font-family:var(--mono);">26</span> Auffälliger Umlauf (TF)</span>
             <span class="item"><span class="swatch" style="background:var(--fz-soll)"></span>tFZ: Sollfahrzeit-Anteil</span>
             <span class="item"><span class="swatch" style="background:var(--fz-verlust)"></span>tFZ: Verlustzeit-Anteil</span>
             <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#fbd9ec 0 3px,var(--fz-verlust) 3px 4px)"></span>ZwL: Zwangslöschzeit-Fenster</span>
             <span class="item"><span style="display:inline-block;width:16px;border-top:1.5px dashed var(--text);"></span>Strg+Klick: manuelle Zeitmessung (2× klicken für Differenz)</span>
+            <span class="item"><span style="display:inline-block;width:16px;border-top:1.5px solid var(--accent-strong);"></span>Maus über Spur: Fadenkreuz mit TX in Sekunden</span>
           </div>
           <div class="lane-row lane-header up-main-row" style="padding:8px 16px 0;">
             <div class="lane-name">Signalgruppe</div>
@@ -551,14 +688,17 @@
 
 <script src="js/vendor/d3.v7.min.js"></script>
 <script src="js/core/format.js"></script>
+<script src="js/core/snackbar.js"></script>
 <script src="js/core/stats.js"></script>
 <script src="js/core/parser.js"></script>
 <script src="js/core/segments.js"></script>
 <script src="js/core/wartezeitLogic.js"></script>
 <script src="js/core/oepnvLogic.js"></script>
+<script src="js/core/exprEngine.js"></script>
+<script src="js/core/exprEditor.js"></script>
+<script src="js/core/configIO.js"></script>
 <script src="js/core/xlsxWriter.js"></script>
 <script src="js/core/phases.js"></script>
-<script src="js/core/exprEngine.js"></script>
 <script src="js/core/umlaufContext.js"></script>
 <script src="js/core/sampleData.js"></script>
 <script src="js/state.js"></script>
@@ -577,6 +717,7 @@
 <script src="js/views/phasenauswertung.js"></script>
 <script src="js/views/wartezeit.js"></script>
 <script src="js/views/oepnvQa.js"></script>
+<script src="js/views/formulaBuilder.js"></script>
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/views/umlaufstatistiken.js"></script>
 <script src="js/app.js"></script>

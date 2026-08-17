@@ -26,6 +26,10 @@
   --sig-yellow:#e0a721;
   --sig-green:#1f8a4c;
   --sig-dark:#4b5563;
+  /* Umrandung der Segmentkästen im Spur-Stil "Minimal" (siehe charts.css) -
+     bewusst fast schwarz wie im gedruckten Signalzeitenplan, nicht das
+     hellere --border-strong der Flächenelemente. */
+  --lane-outline:#1a1f26;
   --req-marker:#7c4fd1;
   --req-marker-bg:#efe8fb;
 
@@ -49,6 +53,18 @@
      der Detektor-/Accent-Farbe, kein Lila der Anforderungs-Marker). */
   --fz-soll:#0089a3;
   --fz-verlust:#e6007e;
+
+  /* Umlaufprüfung: APW/ÖPNV-Rohwert-Spur - alternierend je Segment (nicht
+     semantisch wie fz-soll/-verlust, nur zur Abgrenzung benachbarter
+     Zeitabschnitte mit unterschiedlichem Rohwert, z.B. Countdown 10,9,8...). */
+  --apw-a:#7c1f84;
+  --apw-b:#eebaf3;
+
+  /* Umlaufprüfung: synthetische Formel-Spalten (Formel-Builder) - eigener
+     Jade-/Grünton zwischen --sig-green und --fz-soll, damit ein berechneter
+     "Detektor" auf einen Blick von echten Detektoren (--accent) und
+     APW-Werten (--apw-*) unterscheidbar bleibt. */
+  --formula-on:#159378;
 
   --radius-sm:4px;
   --radius-md:8px;

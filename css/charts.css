@@ -72,6 +72,12 @@
 .measure-line{ stroke:var(--text); stroke-width:1.2; stroke-dasharray:2,2; }
 .measure-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:var(--text); text-anchor:middle; paint-order:stroke; stroke:#fff; stroke-width:2.5px; }
 
+/* Hover-Fadenkreuz (alle Spuren eines Umlaufs), siehe umlaufpruefung.js
+   wireCrosshair() - durchgezogen (statt gestrichelt) und in Akzentfarbe, um
+   sich klar von der gestrichelten schwarzen Strg+Klick-Messung abzuheben. */
+.crosshair-line-halo{ stroke:#fff; stroke-width:3; }
+.crosshair-line{ stroke:var(--accent-strong); stroke-width:1.2; }
+
 /* ---------- Grünzeit-Trend / Wartezeit: Streudiagramm & CDF ---------- */
 .trend-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px 0; font-size:11.5px; color:var(--text-muted); flex-wrap:wrap; }
 .trend-sg-checks{ display:flex; flex-wrap:wrap; gap:5px 16px; padding:10px 16px 0; font-size:12px; }
@@ -104,6 +110,44 @@
 .trend-sub-desc{ font-family:var(--sans); font-weight:400; font-size:11px; color:var(--text-faint); }
 
 .seg-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; text-anchor:middle; }
+
+/* Zeitraster (renderLane gridStepMs) - dünn/hell genug, um nicht mit dem
+   Segmentinhalt (auch auf vollflächigem GRUEN) zu konkurrieren. */
+.lane-grid line{ stroke:rgba(0,0,0,.16); stroke-width:1; }
+:root[data-theme="dark"] .lane-grid line, .dark .lane-grid line{ stroke:rgba(255,255,255,.18); }
+
+/* Rand-verankerte Beschriftungen (renderLane edgeLabelsFor), z.B. An-/
+   Ab-Sekunden direkt auf der Grünzeit statt nur in der separaten Zahlen-
+   spalte links der Spur. */
+.seg-edge-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; pointer-events:none; paint-order:stroke; stroke:rgba(0,0,0,.35); stroke-width:2px; stroke-linejoin:round; }
+.seg-edge-label-left{ text-anchor:start; }
+.seg-edge-label-right{ text-anchor:end; }
+.seg-edge-overflow{ font-family:var(--mono); font-size:12px; font-weight:900; fill:#fff; text-anchor:middle; pointer-events:none; }
+
+/* Formel-Hervorhebung (renderLane highlights) - siehe formulaBuilder.js
+   getFormulaHighlights(): markiert, wann eine Formel auf der Spur eines
+   gewählten Objekts wahr war. Rein dekorativ (pointer-events:none), damit
+   Klicks/Strg-Messung weiter das darunterliegende Segment treffen. */
+.formula-hl-band{ opacity:.22; pointer-events:none; }
+.formula-hl-edge{ stroke-width:1.4; stroke-dasharray:4,2; opacity:.9; pointer-events:none; }
+
+/* ---------- Spur-Stil "Minimal" (renderLane laneStyle:'minimal') ----------
+   Angelehnt an klassische Signalzeitenpläne: umrandete Kästen auf dünner
+   roter Grundlinie statt flächiger Balken. Beide Gelbphasen (Rot-Gelb und
+   Gelb) sind voll gefüllt und tragen je einen Diagonalstrich (als eigene
+   Linie gezeichnet, siehe timelineLane.js). Konturen als echte Haarlinie
+   (stroke-width < 1), wie im gedruckten Plan. */
+.seg-minimal{ stroke:var(--lane-outline); stroke-width:.5; }
+.seg-amber-slash line{ stroke:var(--lane-outline); stroke-width:.5; }
+/* Beschriftungen im Minimal-Stil: Arial wie im gedruckten Signalzeitenplan
+   (statt der sonst app-weiten Monospace), flacher Text ohne Halo (kein
+   paint-order/stroke wie beim Standardstil - dort noetig fuer weißen Text
+   auf farbigem Grund, hier stoert der Rand nur). */
+.lane-minimal .seg-edge-label{
+  font-family:Arial, Helvetica, sans-serif; font-weight:400; font-size:10px;
+  fill:var(--text); stroke:none; paint-order:normal;
+}
+.lane-minimal .seg-edge-overflow{ font-family:Arial, Helvetica, sans-serif; fill:var(--text); }
 
 /* d3-drawn primitives shared across charts */
 .d3-axis-x .domain{ display:none; }

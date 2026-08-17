@@ -89,6 +89,7 @@
     GZ.views.phasenauswertung.onAnalyzeComplete();
     GZ.views.wartezeit.populateControls();
     GZ.views.oepnvQa.populateControls();
+    GZ.views.formulaBuilder.populateControls();
     GZ.views.umlaufpruefung.populateControls();
     GZ.views.umlaufstatistiken.populateControls();
 
@@ -110,6 +111,7 @@
     GZ.views.phasenauswertung.init(document.getElementById('tab-pa'));
     GZ.views.wartezeit.init(document.getElementById('tab-wz'));
     GZ.views.oepnvQa.init(document.getElementById('tab-oe'));
+    GZ.views.formulaBuilder.init(document.getElementById('tab-up'));
     GZ.views.umlaufpruefung.init(document.getElementById('tab-up'));
     GZ.views.umlaufstatistiken.init(document.getElementById('tab-us'));
 

@@ -180,6 +180,60 @@
     return { rotgelb, gelb };
   }
 
+  // An/Ab/TF/Rotgelb/Gelb EINER Signalgruppe für JEDEN Umlauf (Index =
+  // Umlaufindex in cycleStarts), null wenn kein Grün in diesem Umlauf -
+  // Grundlage der umlaufweisen exprEngine-Primitiven An/Ab/TF/RG/GE (siehe
+  // dortigen Kopfkommentar zu handle.cycleMetrics). greens = stats.greens
+  // der Signalgruppe (nur GRUEN-Segmente), segs = deren vollständige
+  // Segmentliste (für die Rotgelb-/Gelb-Nachbarschaft).
+  function computeCycleSgMetrics(segs, greens, cycleStarts, tMax, TU_MED) {
+    const n = cycleStarts ? cycleStarts.length : 0;
+    const out = new Array(n).fill(null);
+    if (!TU_MED || n === 0) return out;
+    const segIndexOfGreen = mapGreensToSegIndex(segs);
+    const greenSweep = makeIndexSweep(greens);
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      const gIdx = greenSweep(start, end);
+      if (gIdx === -1) continue;
+      const seg = greens[gIdx];
+      const anab = computeSegmentAnAbTf(seg, cycleStarts, TU_MED);
+      if (!anab) continue;
+      const segIdx = segIndexOfGreen[gIdx];
+      const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+      out[i] = { an: anab.an, ab: anab.ab, tf: anab.tf, rotgelb: extra.rotgelb, gelb: extra.gelb };
+    }
+    return out;
+  }
+
+  // Ausgelöst/Anzahl-steigender-Flanken EINES Detektors/Werts für JEDEN
+  // Umlauf - Grundlage der exprEngine-Primitiven Ausgeloest/
+  // AnzahlAusloesungen. occupiedFlags: boolean[] parallel zu times (welche
+  // Belegungsregel gilt, entscheidet der Aufrufer, z.B. GZ.wartezeitLogic.
+  // wzIstBelegt - diese Funktion kennt nur Zeitpunkte, keine Rohwerte).
+  function computeCycleDetMetrics(times, occupiedFlags, cycleStarts, tMax) {
+    const n = cycleStarts ? cycleStarts.length : 0;
+    const out = new Array(n);
+    const edges = [];
+    let prevBelegt = false;
+    for (let k = 0; k < times.length; k++) {
+      const belegt = occupiedFlags[k];
+      if (belegt && !prevBelegt) edges.push(times[k]);
+      prevBelegt = belegt;
+    }
+    let ptr = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptr < edges.length && edges[ptr] < start) ptr++;
+      let count = 0, p2 = ptr;
+      while (p2 < edges.length && edges[p2] < end) { count++; p2++; }
+      out[i] = { triggered: count > 0, count };
+    }
+    return out;
+  }
+
   function typicalCycleSegments(segs, stats) {
     if (stats.greens.length === 0) return [];
     const anomalies = GZ.stats.detectAnomalies(stats.greenDurations);
@@ -321,12 +375,41 @@
     };
   }
 
+  // Punkt-Sweep: welches (einzelne) Segment enthält einen bestimmten
+  // Zeitpunkt? Anders als makeIntervalSweep/-IndexSweep (Fenster-Overlap)
+  // für punktuelle Nachschlagen gedacht - Formel-Builder-Primitiven
+  // (Zustand/Dauer/DauerSeit) rufen advance(t) einmal je Zeile auf (t
+  // aufsteigend, amortisiert O(n) wie die anderen Sweeps) und lesen danach
+  // segment()/time() beliebig oft, ohne den Zeitpunkt erneut durchreichen zu
+  // müssen. Segmente müssen wie von buildSegments() geliefert lückenlos/
+  // nicht überlappend sein.
+  function makePointSegmentSweep(segs) {
+    let ptr = 0, curSeg = null, curT = null;
+    return {
+      advance(t) {
+        curT = t;
+        while (ptr < segs.length && segs[ptr].end <= t) ptr++;
+        const s = segs[ptr];
+        curSeg = (s && t >= s.start) ? s : null;
+      },
+      segment() { return curSeg; },
+      time() { return curT; },
+      // Setzt den Zeiger auf den Anfang zurück - nötig, wenn derselbe Sweep
+      // (z.B. dasselbe Objekt-Handle in formulaBuilder.js) für MEHRERE
+      // aufeinanderfolgende Durchläufe über dieselbe (aufsteigende) Zeitreihe
+      // wiederverwendet wird (eine Formel pro Durchlauf) - ohne reset() bliebe
+      // der Zeiger vom vorherigen Durchlauf am Ende stehen und jeder weitere
+      // Durchlauf würde fälschlich "kein Segment" liefern.
+      reset() { ptr = 0; curSeg = null; curT = null; }
+    };
+  }
+
   GZ.segments = {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
     findSplAt, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
-    mapGreensToSegIndex, adjacentTransitionDurations,
+    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleDetMetrics,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
-    computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep
+    computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep, makePointSegmentSweep
   };
 })(window.GZ = window.GZ || {});

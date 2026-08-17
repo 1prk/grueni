@@ -1,405 +1,606 @@
-/* GZ.exprEngine — kleine Ausdruckssprache für Umlaufstatistiken. Tokenizer,
-   rekursiver-Abstieg-Parser, Auswertung, Funktionskatalog. Reine Logik, kein
-   DOM, keine Abhängigkeit von der Analyse-Datenstruktur - Aufrufer liefern
-   einen Kontext ({index, cycle}, siehe umlaufContext.js) und einen einmal
-   geparsten AST (parse() einmal je Spaltendefinition, evaluate() einmal je
-   Umlauf - kein erneutes Tokenisieren pro Zeile).
+/* GZ.exprEngine — kleiner, abhängigkeitsfreier Formel-Interpreter für den
+   Umlaufprüfung-Formel-Builder (synthetische Detektoren aus Variablen-
+   Ausdrücken) UND für Umlaufstatistiken (umlaufweise berechnete Kennzahlen-
+   Spalten, siehe js/views/umlaufstatistiken.js). Reine Berechnungslogik,
+   kein DOM-Bezug.
 
-   Fehlende Werte (kein Grün in diesem Umlauf, Division durch 0, offener
-   IF-Zweig unbekannt) werden als JS `null` durchgereicht ("–" in der
-   Tabelle, aus der Statistik ausgeschlossen) statt als Fehler behandelt.
-   Nur strukturelle Probleme (Syntax, unbekannter Name, falscher Typ) werfen
-   einen Error mit {pos:{start,end}, suggestion}. */
+   Umlaufweise Primitiven (An/Ab/TF/RG/GE/Ausgeloest/AnzahlAusloesungen,
+   siehe PRIMITIVES weiter unten) lesen aus handle.cycleMetrics statt aus
+   handle.sweep - einem vom Aufrufer gepflegten, flachen Objekt mit den
+   Kennzahlen des jeweils "aktuellen" Umlaufs (GZ.segments.
+   computeCycleSgMetrics/computeCycleDetMetrics). compileValue() (wie
+   compile(), aber ohne die BOOL-Pflicht) ist der Einstiegspunkt für
+   Umlaufstatistiken, wo der Ausdruck selbst der gesuchte Wert ist statt
+   einer Filterbedingung.
+
+   Grammatik (Präzedenz niedrig -> hoch):
+     or   := and (OR and)*
+     and  := not (AND not)*
+     not  := NOT not | cmp
+     cmp  := add ((> | >= | < | <= | == | !=) add)?     -- nicht verkettbar
+     add  := mul ((+|-) mul)*
+     mul  := unary ((*|/) unary)*
+     unary:= '-' unary | atom
+     atom := NUMBER | KATLIT | IDENT | IDENT '(' (or (',' or)*)? ')' | '(' or ')'
+
+   Typen: NUM, BOOL, SG, DET (Objekt-Handles auf eine Signalgruppen-/
+   Detektor-Variable), KAT_SG, KAT_DET (Zustands-Konstanten, z.B. GRUEN/
+   BELEGT), ANY (Platzhalter für einen noch nicht gebundenen Funktions-
+   parameter, siehe compileFunctionDef() - erfüllt jede Typprüfung, damit
+   eine Funktionsdefinition VOR ihrer ersten Verwendung syntaktisch geprüft
+   werden kann, ohne die konkreten Argumenttypen zu kennen). Operatoren
+   erzwingen den erwarteten Typ ihrer Operanden (AND/OR/NOT nur BOOL,
+   Arithmetik nur NUM, Vergleich NUM==NUM ODER gleichartiges KAT==KAT) -
+   Typfehler werden beim Parsen erkannt, ohne dass Daten ausgewertet werden
+   müssen. Der Gesamtausdruck einer Formel (siehe compile()) muss zu BOOL
+   auswerten; der Rumpf einer benutzerdefinierten Funktion (siehe
+   compileFunctionDef()) darf einen beliebigen Typ liefern - erst der
+   tatsächliche Aufruf an einer Formel entscheidet, ob das passt.
+
+   Benutzerdefinierte Funktionen (funcs-Parameter von compile()/parse(), Form
+   { [name]: {params:string[], exprText:string} }): ein Aufruf FUNC(a,b,...)
+   wird "inline" expandiert - der Rumpftext wird mit einer neuen varTypes-
+   Bindung (Parametername -> tatsächlicher Argumenttyp DIESES Aufrufs) neu
+   geparst/typgeprüft (siehe parseCall()). Das bedeutet: derselbe Funktions-
+   rumpf wird potenziell mehrfach mit unterschiedlichen konkreten Typen
+   spezialisiert (wie C++-Templates/Java-Generics bei der Instanziierung),
+   nicht einmalig kompiliert. Ein visiting-Set (Funktionsnamen im aktuellen
+   Expansions-Stack) verhindert zyklische Aufrufe (A ruft B ruft A) mit
+   einem klaren Fehler statt eines Stapelüberlaufs.
+
+   Eingebaute Funktionen (PRIMITIVES unten) verwandeln ein Objekt-Handle in
+   einen auswertbaren Wert - Zustand(sg|det)->KAT_*, Dauer(sg|det)->NUM
+   (Sekunden im aktuellen Zustand), DauerSeit(sg|det, kategorie)->NUM
+   (Sekunden seit dem letzten Eintritt in "kategorie", 0 wenn gerade nicht
+   in diesem Zustand). Der aktuelle Auswertungszeitpunkt wird NICHT als
+   Argument übergeben, sondern läuft intern/implizit über das jeweilige
+   Objekt-Handle (siehe scope unten, handle.sweep) - TX bleibt zwar als
+   normale NUM-Variable im scope verfügbar (z.B. für eigene Bedingungen wie
+   "TX > 60" in einer Funktion), muss aber nie an eine Primitive übergeben
+   werden und ist daher nirgends ein Pflichtargument.
+
+   scope-Objekt bei run(scope): Alias -> Wert. NUM-Variablen (APW/ÖPNV) sind
+   number (NaN bei fehlendem Rohwert - jeder Vergleich mit NaN ist in JS
+   automatisch false, Division durch 0 ergibt Infinity/NaN - kein Sonderfall
+   nötig, das Verhalten ist bewusst "fehlender/undefinierter Wert ->
+   Bedingung nicht erfüllt"). SG-/DET-Variablen sind ein Handle
+   { class:'SG'|'DET', sweep }, wobei sweep ein GZ.segments.
+   makePointSegmentSweep()-Objekt ist, dessen advance(t) VOR jedem run()-
+   Aufruf einmal je Zeile vom Aufrufer (formulaBuilder.js berechnen())
+   vorgerückt wird - die Primitiven lesen nur sweep.segment()/sweep.time(). */
 (function (GZ) {
   'use strict';
 
-  const SCALAR_KEYWORDS = new Set(['TU', 'TU_MED', 'TX', 'SPL', 'START']);
-  const ARITY = {
-    AN: [1, 1], AB: [1, 1], TF: [1, 1], RG: [1, 1], GE: [1, 1],
-    DET: [1, 1], DETCOUNT: [1, 1], DETFIRST: [1, 1], DETLAST: [1, 1],
-    IF: [3, 3], AND: [2, Infinity], OR: [2, Infinity],
-    ABS: [1, 1], MOD: [2, 2], MIN: [1, Infinity], MAX: [1, Infinity], ROUND: [1, 2]
-  };
-  const FUNCTION_NAMES = Object.keys(ARITY);
-  const SG_NAME_FNS = new Set(['AN', 'AB', 'TF', 'RG', 'GE']);
-  const DET_NAME_FNS = new Set(['DET', 'DETCOUNT', 'DETFIRST', 'DETLAST']);
-  const KEYWORD_CANDIDATES = FUNCTION_NAMES.concat([...SCALAR_KEYWORDS], ['NOT', 'TRUE', 'FALSE']);
-
-  const TWO_CHAR = { '&&': 'ANDOP', '||': 'OROP', '==': 'EQ', '!=': 'NEQ', '<=': 'LTE', '>=': 'GTE' };
-  const ONE_CHAR = { '(': 'LPAREN', ')': 'RPAREN', '+': 'PLUS', '-': 'MINUS', '*': 'STAR', '/': 'SLASH', '%': 'PERCENT', ',': 'COMMA', '<': 'LT', '>': 'GT', '!': 'NOTOP' };
-
-  function isDigit(c) { return c >= '0' && c <= '9'; }
-  function isIdentStart(c) { return /[A-Za-z_]/.test(c); }
-  function isIdentPart(c) { return /[A-Za-z0-9_]/.test(c); }
-
-  function fail(message, pos, tokensSoFar, suggestion) {
-    const e = new Error(message);
-    e.pos = pos;
-    e.tokens = tokensSoFar;
-    if (suggestion) e.suggestion = suggestion;
-    throw e;
+  // incomplete: der Ausdruck ist nicht FALSCH, sondern (noch) NICHT FERTIG -
+  // z.B. "DauerSeit(K1, GRUEN) > " mitten im Tippen oder ein für sich
+  // gültiger, nur noch nicht zu WAHR/FALSCH ergänzter Ausdruck. Aufrufer
+  // können das neutral statt als roten Fehler anzeigen (siehe
+  // validateFormulaRow() in formulaBuilder.js) - sonst blinkt beim normalen
+  // Tippen dauernd eine Fehlermeldung auf, die gar keine ist.
+  class ExprError extends Error {
+    constructor(message, pos, incomplete) { super(message); this.pos = pos; this.incomplete = !!incomplete; }
   }
 
-  // Tokenisiert den kompletten Ausdruckstext. Wirft bei ungültigem Zeichen
-  // oder nicht geschlossener Zeichenkette; e.tokens enthält die bis dahin
-  // erkannten Token (für suggestAt() im Bearbeitungszustand nutzbar).
-  function tokenize(text) {
+  const CMP_OPS = { '>': (a, b) => a > b, '<': (a, b) => a < b, '>=': (a, b) => a >= b, '<=': (a, b) => a <= b, '==': (a, b) => a === b, '!=': (a, b) => a !== b };
+  const TYPE_LABEL = t => ({
+    BOOL: 'WAHR/FALSCH', NUM: 'eine Zahl', TEXT: 'einen Text',
+    SG: 'eine Signalgruppe', DET: 'einen Detektor',
+    KAT_SG: 'einen Signalgruppen-Zustand', KAT_DET: 'einen Detektor-Zustand',
+    ANY: 'einen (noch unbestimmten) Parameterwert'
+  })[t] || t;
+  const isNumCompatible = t => t === 'NUM' || t === 'ANY';
+  const isTextCompatible = t => t === 'TEXT' || t === 'ANY';
+  // KAT_* ist offen für beliebig viele konkrete Zustands-Kategorien (aktuell
+  // KAT_SG/KAT_DET aus KAT_TOKENS unten, plus was ein Aufrufer per
+  // extraKatTokens registriert, z.B. KAT_QSV in oepnvQa.js) - generisch am
+  // Namensschema erkannt statt eine feste Liste zu pflegen.
+  const isKatType = t => typeof t === 'string' && t.indexOf('KAT_') === 0;
+  const isKatCompatible = t => isKatType(t) || t === 'ANY';
+  const isObjCompatible = t => t === 'SG' || t === 'DET' || t === 'ANY';
+
+  // Zustands-Konstanten (exakte Schreibweise, siehe GZ.parser STATE_CAT/
+  // categorizeDetRaw) - UNBEKANNT/INV/LUECKE sind bewusst NICHT als
+  // schreibbare Literale exponiert (Datenqualitäts-Artefakte, keine
+  // "echten" Signalzustände).
+  const KAT_TOKENS = {
+    GRUEN: 'KAT_SG', ROT: 'KAT_SG', GELB: 'KAT_SG', ROTGELB: 'KAT_SG', DUNKEL: 'KAT_SG',
+    BELEGT: 'KAT_DET', FREI: 'KAT_DET'
+  };
+
+  const katTypeForObj = t => t === 'SG' ? 'KAT_SG' : t === 'DET' ? 'KAT_DET' : 'ANY';
+
+  // Eingebaute Funktionen: Objekt-Handle (+ optional Kategorie/TX) -> Wert.
+  // check(argNodes, pos) wirft ExprError bei Typfehlern und liefert den
+  // Ergebnistyp; run(argNodes) baut den run(scope)-Closure. Akzeptiert ANY
+  // (noch unspezialisierter Funktionsparameter) überall dort, wo sonst SG/
+  // DET/NUM/KAT_* verlangt wird - siehe Datei-Kopfkommentar zu ANY.
+  const PRIMITIVES = {
+    Zustand: {
+      arity: 1,
+      check(args, pos) {
+        const [obj] = args;
+        if (!isObjCompatible(obj.type)) throw new ExprError('"Zustand" erwartet als Argument eine Signalgruppe oder einen Detektor', pos);
+        return katTypeForObj(obj.type);
+      },
+      run(args) {
+        const [objNode] = args;
+        return scope => {
+          const seg = objNode.run(scope).sweep.segment();
+          return seg ? seg.cat : null;
+        };
+      }
+    },
+    Dauer: {
+      arity: 1,
+      check(args, pos) {
+        const [obj] = args;
+        if (!isObjCompatible(obj.type)) throw new ExprError('"Dauer" erwartet als Argument eine Signalgruppe oder einen Detektor', pos);
+        return 'NUM';
+      },
+      run(args) {
+        const [objNode] = args;
+        return scope => {
+          const handle = objNode.run(scope);
+          const seg = handle.sweep.segment();
+          return seg ? (handle.sweep.time() - seg.start) / 1000 : 0;
+        };
+      }
+    },
+    DauerSeit: {
+      arity: 2,
+      check(args, pos) {
+        const [obj, kat] = args;
+        if (!isObjCompatible(obj.type)) throw new ExprError('"DauerSeit" erwartet als 1. Argument eine Signalgruppe oder einen Detektor', pos);
+        if (obj.type === 'SG' || obj.type === 'DET') {
+          const expectedKat = katTypeForObj(obj.type);
+          if (kat.type !== expectedKat && kat.type !== 'ANY') {
+            throw new ExprError(`"DauerSeit" (2. Argument) erwartet ${TYPE_LABEL(expectedKat)} passend zum 1. Argument, bekam ${TYPE_LABEL(kat.type)}`, pos);
+          }
+        } else if (!isKatCompatible(kat.type)) {
+          throw new ExprError('"DauerSeit" (2. Argument) erwartet einen Zustand', pos);
+        }
+        return 'NUM';
+      },
+      run(args) {
+        const [objNode, katNode] = args;
+        return scope => {
+          const handle = objNode.run(scope);
+          const seg = handle.sweep.segment();
+          if (!seg || seg.cat !== katNode.run(scope)) return 0;
+          return (handle.sweep.time() - seg.start) / 1000;
+        };
+      }
+    },
+
+    // ---- Umlaufweise Primitiven (An/Ab/TF/RG/GE/Ausgeloest/AnzahlAusloesungen) ----
+    // Lesen NICHT aus handle.sweep (Zustand am aktuellen Zeitpunkt), sondern
+    // aus handle.cycleMetrics - einem vom Aufrufer gepflegten, flachen
+    // Objekt mit den Kennzahlen des jeweils "aktuellen" Umlaufs (siehe
+    // GZ.segments.computeCycleSgMetrics/computeCycleDetMetrics). Für die
+    // umlaufweise Auswertung (Umlaufstatistiken) wird cycleMetrics einmal je
+    // Umlauf gesetzt; für die zeilenweise Auswertung (Formel-Builder,
+    // umlaufpruefung.js) hält der Aufrufer cycleMetrics beim Überschreiten
+    // einer Umlaufgrenze aktuell (ändert sich sonst nicht pro Zeile). Fehlt
+    // ein Wert (kein Grün in diesem Umlauf bzw. kein cycleMetrics gesetzt),
+    // liefern die NUM-Primitiven NaN (konsistent mit dem NUM/NaN-Vertrag
+    // dieser Datei, siehe Kopfkommentar) statt eines Sonderfalls.
+    An: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"An" erwartet als Argument eine Signalgruppe', pos);
+        return 'NUM';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.an : NaN; }; }
+    },
+    Ab: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"Ab" erwartet als Argument eine Signalgruppe', pos);
+        return 'NUM';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.ab : NaN; }; }
+    },
+    TF: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"TF" erwartet als Argument eine Signalgruppe', pos);
+        return 'NUM';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.tf : NaN; }; }
+    },
+    RG: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"RG" erwartet als Argument eine Signalgruppe', pos);
+        return 'NUM';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.rotgelb : NaN; }; }
+    },
+    GE: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"GE" erwartet als Argument eine Signalgruppe', pos);
+        return 'NUM';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.gelb : NaN; }; }
+    },
+    Ausgeloest: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'DET' && args[0].type !== 'ANY') throw new ExprError('"Ausgeloest" erwartet als Argument einen Detektor', pos);
+        return 'BOOL';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.triggered : false; }; }
+    },
+    AnzahlAusloesungen: {
+      arity: 1,
+      check(args, pos) {
+        if (args[0].type !== 'DET' && args[0].type !== 'ANY') throw new ExprError('"AnzahlAusloesungen" erwartet als Argument einen Detektor', pos);
+        return 'NUM';
+      },
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.count : 0; }; }
+    },
+    MOD: {
+      arity: 2,
+      check(args, pos) {
+        const [a, b] = args;
+        if (!isNumCompatible(a.type) || !isNumCompatible(b.type)) throw new ExprError('"MOD" erwartet zwei Zahlen', pos);
+        return 'NUM';
+      },
+      run(args) {
+        const [aNode, bNode] = args;
+        return scope => { const x = aNode.run(scope), y = bNode.run(scope); return ((x % y) + y) % y; };
+      }
+    }
+  };
+
+  // Anzeige-Metadaten für Primitiven (Autovervollständigung/Funktions-Palette
+  // in formulaBuilder.js) - getrennt von PRIMITIVES.check/run oben, da rein
+  // beschreibend (keine Auswertungslogik).
+  const PRIMITIVE_INFO = [
+    { name: 'Zustand', params: ['objekt'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)' },
+    { name: 'Dauer', params: ['objekt'], desc: 'Sekunden im aktuellen Zustand' },
+    { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)' },
+    { name: 'An', params: ['sg'], desc: 'Anwurf-Offset der Signalgruppe ab Umlaufbeginn [s] (NaN ohne Grün in diesem Umlauf)' },
+    { name: 'Ab', params: ['sg'], desc: 'Abwurf-Offset der Signalgruppe ab Umlaufbeginn [s]' },
+    { name: 'TF', params: ['sg'], desc: 'Freigabezeit (Grünzeit) der Signalgruppe in diesem Umlauf [s]' },
+    { name: 'RG', params: ['sg'], desc: 'Rotgelb-Dauer unmittelbar vor dieser Freigabe [s] (0, falls keine)' },
+    { name: 'GE', params: ['sg'], desc: 'Gelb-Dauer unmittelbar nach dieser Freigabe [s] (0, falls keine)' },
+    { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst' },
+    { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf' },
+    { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division, stets ≥ 0)' }
+  ];
+
+  // extraKatTokens: wie KAT_TOKENS, aber NUR für diesen einen tokenize()-
+  // Aufruf aktiv statt global reserviert (siehe Datei-Kopfkommentar zu
+  // KAT_TOKENS) - damit z.B. oepnvQa.js eigene Zustands-Konstanten (QSV-
+  // Stufen A-F) einführen kann, ohne dass diese Buchstaben dem Formel-
+  // Builder (mit seinen frei wählbaren Variablen-Aliasen) als Bezeichner
+  // verloren gehen.
+  function tokenize(text, extraKatTokens) {
     const tokens = [];
     const n = text.length;
     let i = 0;
+    const isDigit = ch => ch >= '0' && ch <= '9';
+    const isIdentStart = ch => /[A-Za-z_]/.test(ch);
+    const isIdentPart = ch => /[A-Za-z0-9_]/.test(ch);
     while (i < n) {
-      const c = text[i];
-      if (c === ' ' || c === '\t' || c === '\n' || c === '\r') { i++; continue; }
+      const ch = text[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { i++; continue; }
       const start = i;
-      if (isDigit(c) || (c === '.' && isDigit(text[i + 1] || ''))) {
+      if (ch === '"' || ch === "'") {
+        const quote = ch;
         let j = i + 1;
+        while (j < n && text[j] !== quote) j++;
+        if (j >= n) throw new ExprError('Unbeendete Zeichenkette (schließendes Anführungszeichen fehlt)', start);
+        tokens.push({ type: 'STRING', value: text.slice(i + 1, j), pos: start, end: j + 1 });
+        i = j + 1;
+        continue;
+      }
+      if (isDigit(ch) || (ch === '.' && isDigit(text[i + 1]))) {
+        let j = i;
         while (j < n && isDigit(text[j])) j++;
         if (text[j] === '.') { j++; while (j < n && isDigit(text[j])) j++; }
-        tokens.push({ type: 'NUM', value: Number(text.slice(i, j)), start, end: j });
-        i = j; continue;
+        tokens.push({ type: 'NUMBER', value: Number(text.slice(i, j)), pos: start, end: j });
+        i = j;
+        continue;
       }
-      if (c === '"') {
-        let j = i + 1, out = '';
-        while (j < n && text[j] !== '"') {
-          if (text[j] === '\\' && j + 1 < n) { out += text[j + 1]; j += 2; }
-          else { out += text[j]; j++; }
-        }
-        if (j >= n) fail('Zeichenkette nicht geschlossen (fehlendes „"“)', { start: i, end: n }, tokens);
-        tokens.push({ type: 'STR', value: out, start, end: j + 1 });
-        i = j + 1; continue;
-      }
-      if (isIdentStart(c)) {
+      if (isIdentStart(ch)) {
         let j = i + 1;
         while (j < n && isIdentPart(text[j])) j++;
-        tokens.push({ type: 'IDENT', value: text.slice(i, j), start, end: j });
-        i = j; continue;
+        const word = text.slice(i, j);
+        const upper = word.toUpperCase();
+        const katType = KAT_TOKENS[word] || (extraKatTokens && extraKatTokens[word]);
+        if (upper === 'AND' || upper === 'OR' || upper === 'NOT') tokens.push({ type: upper, pos: start, end: j });
+        else if (katType) tokens.push({ type: 'KATLIT', value: word, katType, pos: start, end: j });
+        else tokens.push({ type: 'IDENT', value: word, pos: start, end: j });
+        i = j;
+        continue;
       }
       const two = text.slice(i, i + 2);
-      if (TWO_CHAR[two]) { tokens.push({ type: TWO_CHAR[two], value: two, start, end: i + 2 }); i += 2; continue; }
-      if (ONE_CHAR[c]) { tokens.push({ type: ONE_CHAR[c], value: c, start, end: i + 1 }); i++; continue; }
-      fail(`Unerwartetes Zeichen „${c}“`, { start: i, end: i + 1 }, tokens);
+      if (two === '>=' || two === '<=' || two === '==' || two === '!=') { tokens.push({ type: two, pos: start, end: start + 2 }); i += 2; continue; }
+      if ('+-*/(),><'.includes(ch)) { tokens.push({ type: ch, pos: start, end: start + 1 }); i++; continue; }
+      throw new ExprError(`Unerwartetes Zeichen "${ch}"`, start);
     }
-    tokens.push({ type: 'EOF', value: null, start: n, end: n });
+    tokens.push({ type: 'EOF', pos: n, end: n });
     return tokens;
   }
 
-  // Rekursiver-Abstieg-Parser. Bindungsstärke (lose -> fest): OR, AND, NOT,
-  // Vergleich (nicht verkettend), + -, * / %, unäres -. Funktionsname und
-  // Argumentzahl werden hier geprüft (rein syntaktisch, ohne Kenntnis der
-  // Aufzeichnung) - unbekannte Signalgruppen-/Detektornamen erst in evaluate().
-  function parse(text) {
-    const tokens = tokenize(text);
-    let p = 0;
-    const at = type => tokens[p].type === type;
-    const atKeyword = word => tokens[p].type === 'IDENT' && tokens[p].value.toUpperCase() === word;
-    const advance = () => tokens[p++];
-    const expect = (type, msg) => { if (!at(type)) fail(msg, { start: tokens[p].start, end: tokens[p].end }, tokens); return advance(); };
+  // varTypes: { [alias]: 'BOOL'|'NUM'|'SG'|'DET'|'ANY' }
+  // funcs: { [name]: {params:string[], exprText:string} } (benutzerdefinierte
+  // Funktionen, siehe Datei-Kopfkommentar) - optional, Default {}.
+  // visiting: Set<string> der Funktionsnamen im aktuellen Expansions-Stack
+  // (Zyklenerkennung bei Funktionsaufrufen) - optional, Default leeres Set.
+  // Liefert den geparsten/typgeprüften Wurzelknoten OHNE die BOOL-Pflicht
+  // von compile() - die gilt nur für den Formel-Text selbst, nicht für
+  // (Zwischen-)Aufrufe von Funktionsrümpfen.
+  function parse(tokens, varTypes, funcs, visiting) {
+    funcs = funcs || {};
+    visiting = visiting || new Set();
+    let pos = 0;
+    const peek = () => tokens[pos];
+    const next = () => tokens[pos++];
+    const expect = type => {
+      if (peek().type !== type) throw new ExprError(`Erwartet "${type}", gefunden "${peek().type === 'EOF' ? 'Ende' : peek().type}"`, peek().pos);
+      return next();
+    };
+    const requireType = (node, expected, atPos, opLabel) => {
+      if (node.type !== expected && node.type !== 'ANY') {
+        throw new ExprError(`"${opLabel}" erwartet ${TYPE_LABEL(expected)}, bekam ${TYPE_LABEL(node.type)}`, atPos);
+      }
+    };
 
-    function parseExpr() { return parseOr(); }
     function parseOr() {
       let left = parseAnd();
-      while (atKeyword('OR') || at('OROP')) {
-        advance();
+      while (peek().type === 'OR') {
+        const opTok = next();
+        requireType(left, 'BOOL', opTok.pos, 'OR');
         const right = parseAnd();
-        left = { type: 'call', fn: 'OR', args: [left, right], start: left.start, end: right.end };
+        requireType(right, 'BOOL', opTok.pos, 'OR');
+        const l = left, r = right;
+        left = { type: 'BOOL', run: scope => l.run(scope) || r.run(scope) };
       }
       return left;
     }
     function parseAnd() {
       let left = parseNot();
-      while (atKeyword('AND') || at('ANDOP')) {
-        advance();
+      while (peek().type === 'AND') {
+        const opTok = next();
+        requireType(left, 'BOOL', opTok.pos, 'AND');
         const right = parseNot();
-        left = { type: 'call', fn: 'AND', args: [left, right], start: left.start, end: right.end };
+        requireType(right, 'BOOL', opTok.pos, 'AND');
+        const l = left, r = right;
+        left = { type: 'BOOL', run: scope => l.run(scope) && r.run(scope) };
       }
       return left;
     }
     function parseNot() {
-      if (atKeyword('NOT') || at('NOTOP')) {
-        const t = advance();
-        const arg = parseNot();
-        return { type: 'un', op: 'NOT', arg, start: t.start, end: arg.end };
+      if (peek().type === 'NOT') {
+        const opTok = next();
+        const child = parseNot();
+        requireType(child, 'BOOL', opTok.pos, 'NOT');
+        return { type: 'BOOL', run: scope => !child.run(scope) };
       }
-      return parseCompare();
+      return parseComparison();
     }
-    function parseCompare() {
-      let left = parseAdd();
-      if (at('LT') || at('LTE') || at('GT') || at('GTE') || at('EQ') || at('NEQ')) {
-        const opTok = advance();
+    function parseComparison() {
+      const left = parseAdd();
+      if (Object.prototype.hasOwnProperty.call(CMP_OPS, peek().type)) {
+        const opTok = next();
         const right = parseAdd();
-        left = { type: 'bin', op: opTok.type, left, right, start: left.start, end: right.end };
+        const bothNum = isNumCompatible(left.type) && isNumCompatible(right.type);
+        // Konkret unterschiedliche KAT-Subtypen (z.B. KAT_SG vs. KAT_DET)
+        // sind nie vergleichbar; ist eine Seite noch ANY (unspezialisierter
+        // Funktionsparameter), lässt sich das erst am tatsächlichen Aufruf
+        // entscheiden.
+        const concreteKatMismatch = isKatType(left.type) && isKatType(right.type) && left.type !== right.type;
+        const bothSameKat = isKatCompatible(left.type) && isKatCompatible(right.type) && !concreteKatMismatch;
+        const bothText = isTextCompatible(left.type) && isTextCompatible(right.type);
+        if (!bothNum && !bothSameKat && !bothText) {
+          throw new ExprError(`"${opTok.type}" erwartet zwei Zahlen, zwei gleichartige Zustände oder zwei Texte, bekam ${TYPE_LABEL(left.type)} und ${TYPE_LABEL(right.type)}`, opTok.pos);
+        }
+        const isConcreteKat = isKatType(left.type) || isKatType(right.type);
+        const isConcreteText = left.type === 'TEXT' || right.type === 'TEXT';
+        if (((bothSameKat && isConcreteKat) || (bothText && isConcreteText)) && opTok.type !== '==' && opTok.type !== '!=') {
+          throw new ExprError(`"${opTok.type}" ist für Zustände/Texte nicht sinnvoll - nur == oder != verwenden`, opTok.pos);
+        }
+        const fn = CMP_OPS[opTok.type], l = left, r = right;
+        return { type: 'BOOL', run: scope => fn(l.run(scope), r.run(scope)) };
       }
       return left;
     }
     function parseAdd() {
       let left = parseMul();
-      while (at('PLUS') || at('MINUS')) {
-        const opTok = advance();
+      while (peek().type === '+' || peek().type === '-') {
+        const opTok = next();
+        requireType(left, 'NUM', opTok.pos, opTok.type);
         const right = parseMul();
-        left = { type: 'bin', op: opTok.type, left, right, start: left.start, end: right.end };
+        requireType(right, 'NUM', opTok.pos, opTok.type);
+        const l = left, r = right, isPlus = opTok.type === '+';
+        left = { type: 'NUM', run: scope => isPlus ? l.run(scope) + r.run(scope) : l.run(scope) - r.run(scope) };
       }
       return left;
     }
     function parseMul() {
       let left = parseUnary();
-      while (at('STAR') || at('SLASH') || at('PERCENT')) {
-        const opTok = advance();
+      while (peek().type === '*' || peek().type === '/') {
+        const opTok = next();
+        requireType(left, 'NUM', opTok.pos, opTok.type);
         const right = parseUnary();
-        left = { type: 'bin', op: opTok.type, left, right, start: left.start, end: right.end };
+        requireType(right, 'NUM', opTok.pos, opTok.type);
+        const l = left, r = right, isMul = opTok.type === '*';
+        left = { type: 'NUM', run: scope => isMul ? l.run(scope) * r.run(scope) : l.run(scope) / r.run(scope) };
       }
       return left;
     }
     function parseUnary() {
-      if (at('MINUS')) {
-        const t = advance();
-        const arg = parseUnary();
-        return { type: 'un', op: 'NEG', arg, start: t.start, end: arg.end };
+      if (peek().type === '-') {
+        const opTok = next();
+        const child = parseUnary();
+        requireType(child, 'NUM', opTok.pos, '-');
+        const c = child;
+        return { type: 'NUM', run: scope => -c.run(scope) };
       }
-      return parsePrimary();
+      return parseAtom();
     }
-    function parsePrimary() {
-      const t = tokens[p];
-      if (t.type === 'NUM' || t.type === 'STR') { advance(); return { type: 'lit', value: t.value, start: t.start, end: t.end }; }
-      if (t.type === 'LPAREN') {
-        advance();
-        const inner = parseExpr();
-        expect('RPAREN', 'schließende Klammer „)“ erwartet');
+    function parseArgs() {
+      const args = [];
+      if (peek().type !== ')') {
+        args.push(parseOr());
+        while (peek().type === ',') { next(); args.push(parseOr()); }
+      }
+      expect(')');
+      return args;
+    }
+
+    function parseCall(name, namePos) {
+      const args = parseArgs();
+      const prim = PRIMITIVES[name];
+      if (prim) {
+        if (args.length !== prim.arity) {
+          throw new ExprError(`"${name}" erwartet ${prim.arity} Argument(e), bekam ${args.length}`, namePos);
+        }
+        const returnType = prim.check(args, namePos);
+        return { type: returnType, run: prim.run(args) };
+      }
+
+      const fn = funcs[name];
+      if (!fn) throw new ExprError(`Unbekannte Funktion "${name}"`, namePos);
+      if (args.length !== fn.params.length) {
+        throw new ExprError(`"${name}" erwartet ${fn.params.length} Argument(e), bekam ${args.length}`, namePos);
+      }
+      if (visiting.has(name)) {
+        throw new ExprError(`Zyklischer Funktionsaufruf: "${name}" ruft sich (direkt oder indirekt) selbst auf`, namePos);
+      }
+      // Aufruf-Expansion: Rumpf mit den TATSÄCHLICHEN Argumenttypen DIESES
+      // Aufrufs neu parsen/typprüfen (Spezialisierung je Aufrufstelle, siehe
+      // Datei-Kopfkommentar) - kein einmalig kompilierter, generischer Rumpf.
+      const localVarTypes = { TX: 'NUM' };
+      fn.params.forEach((p, i) => { localVarTypes[p] = args[i].type; });
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(name);
+      let bodyNode;
+      try {
+        bodyNode = parse(tokenize(fn.exprText), localVarTypes, funcs, nextVisiting);
+      } catch (e) {
+        const msg = e instanceof ExprError ? e.message : (e.message || String(e));
+        throw new ExprError(`In Funktion "${name}": ${msg}`, namePos);
+      }
+      const params = fn.params, argNodes = args;
+      return {
+        type: bodyNode.type,
+        run: scope => {
+          const paramScope = { TX: scope.TX };
+          params.forEach((p, i) => { paramScope[p] = argNodes[i].run(scope); });
+          return bodyNode.run(paramScope);
+        }
+      };
+    }
+
+    function parseAtom() {
+      const tok = peek();
+      if (tok.type === 'NUMBER') { next(); const v = tok.value; return { type: 'NUM', run: () => v }; }
+      if (tok.type === 'STRING') { next(); const v = tok.value; return { type: 'TEXT', run: () => v }; }
+      if (tok.type === 'KATLIT') { next(); const v = tok.value, kt = tok.katType; return { type: kt, run: () => v }; }
+      if (tok.type === 'IDENT') {
+        next();
+        if (peek().type === '(') { next(); return parseCall(tok.value, tok.pos); }
+        const varType = varTypes[tok.value];
+        if (!varType) throw new ExprError(`Unbekannte Variable "${tok.value}"`, tok.pos);
+        const alias = tok.value;
+        return { type: varType, run: scope => scope[alias] };
+      }
+      if (tok.type === '(') {
+        next();
+        const inner = parseOr();
+        expect(')');
         return inner;
       }
-      if (t.type === 'IDENT') {
-        const upper = t.value.toUpperCase();
-        if (upper === 'TRUE' || upper === 'FALSE') { advance(); return { type: 'lit', value: upper === 'TRUE', start: t.start, end: t.end }; }
-        advance();
-        if (at('LPAREN')) {
-          advance();
-          const args = [];
-          if (!at('RPAREN')) {
-            args.push(parseExpr());
-            while (at('COMMA')) { advance(); args.push(parseExpr()); }
-          }
-          const closeTok = expect('RPAREN', 'schließende Klammer „)“ erwartet');
-          const ar = ARITY[upper];
-          if (!ar) {
-            const sug = GZ.exprEngine.nearestMatch(t.value, KEYWORD_CANDIDATES);
-            const msg = sug ? `Unbekannte Funktion „${t.value}“ — meinten Sie „${sug}“?` : `Unbekannte Funktion „${t.value}“.`;
-            fail(msg, { start: t.start, end: t.end }, tokens, sug);
-          }
-          if (args.length < ar[0] || args.length > ar[1]) {
-            const need = ar[0] === ar[1] ? `genau ${ar[0]}` : (ar[1] === Infinity ? `mindestens ${ar[0]}` : `${ar[0]}–${ar[1]}`);
-            fail(`${upper}(...) erwartet ${need} Argument(e), hat ${args.length}`, { start: t.start, end: closeTok.end }, tokens);
-          }
-          return { type: 'call', fn: upper, args, start: t.start, end: closeTok.end };
-        }
-        if (SCALAR_KEYWORDS.has(upper)) return { type: 'ref', name: upper, start: t.start, end: t.end };
-        return { type: 'word', value: t.value, start: t.start, end: t.end };
+      throw new ExprError(`Unerwarteter Ausdruck bei "${tok.type === 'EOF' ? 'Ende' : tok.type}"`, tok.pos);
+    }
+
+    const result = parseOr();
+    expect('EOF');
+    return result;
+  }
+
+  // Parst UND typprüft (aber wertet nicht aus) EINEN FORMEL-Text - für Live-
+  // Validierung sowie als Vorstufe der eigentlichen Berechnung. Muss zu BOOL
+  // auswerten (anders als ein Funktionsrumpf, siehe compileFunctionDef()).
+  // varTypes: { [alias]: 'BOOL'|'NUM'|'TEXT'|'SG'|'DET'|'KAT_*' }
+  // funcs: { [name]: {params:string[], exprText:string} }, optional.
+  // extraKatTokens: siehe tokenize()-Kopfkommentar, optional.
+  // Rückgabe: { ok:true, run(scope)->boolean } | { ok:false, message, pos }
+  function compile(text, varTypes, funcs, extraKatTokens) {
+    if (!text || !text.trim()) return { ok: false, message: 'Formel ist leer.', pos: 0, incomplete: true };
+    try {
+      const tokens = tokenize(text, extraKatTokens);
+      const node = parse(tokens, varTypes || {}, funcs || {});
+      if (node.type !== 'BOOL') {
+        throw new ExprError('Die Formel muss insgesamt zu WAHR/FALSCH auswerten (z.B. mit einem Vergleich wie "<" oder einer Verknüpfung mit AND/OR)', 0, true);
       }
-      fail('Ausdruck erwartet', { start: t.start, end: t.end }, tokens);
-    }
-
-    const ast = parseExpr();
-    if (!at('EOF')) fail('unerwartetes Zeichen nach Ausdrucksende', { start: tokens[p].start, end: tokens[p].end }, tokens);
-    return { ast, tokens };
-  }
-
-  function truthy(v) {
-    if (typeof v === 'boolean') return v;
-    if (typeof v === 'number') return v !== 0;
-    return Boolean(v);
-  }
-  function requireNum(v, node) {
-    if (typeof v !== 'number') fail(`erwartet eine Zahl, nicht „${v}“`, { start: node.start, end: node.end });
-  }
-  function mod(a, b) { return b === 0 ? null : ((a % b) + b) % b; }
-  function looseEquals(a, b) {
-    if (typeof a === typeof b) return a === b;
-    const na = Number(a), nb = Number(b);
-    if (Number.isFinite(na) && Number.isFinite(nb)) return na === nb;
-    return String(a) === String(b);
-  }
-  function resolveNameArg(node) {
-    if (node.type === 'word') return node.value;
-    if (node.type === 'lit' && typeof node.value === 'string') return node.value;
-    fail('erwartet einen Namen (z. B. S1), keinen Ausdruck', { start: node.start, end: node.end });
-  }
-  function throwUnknown(name, node, displayList, messagePrefix) {
-    const sug = nearestMatch(name, displayList);
-    const msg = sug ? `${messagePrefix} „${name}“ nicht gefunden — meinten Sie „${sug}“?` : `${messagePrefix} „${name}“ nicht gefunden.`;
-    fail(msg, { start: node.start, end: node.end }, null, sug);
-  }
-
-  function evalNode(node, ctx) {
-    switch (node.type) {
-      case 'lit': return node.value;
-      case 'word': throwUnknown(node.value, node, KEYWORD_CANDIDATES, 'Unbekannter Bezeichner'); return;
-      case 'ref': return ctx.cycle[node.name] ?? null;
-      case 'un': {
-        if (node.op === 'NEG') { const v = evalNode(node.arg, ctx); if (v == null) return null; requireNum(v, node.arg); return -v; }
-        const v = evalNode(node.arg, ctx);
-        return v == null ? null : !truthy(v);
+      return { ok: true, run: node.run };
+    } catch (e) {
+      if (e instanceof ExprError) {
+        // Fehler AM Textende = abgeschnittener, noch unfertiger Ausdruck
+        // (siehe ExprError-Kopfkommentar) - kein echter Denkfehler.
+        const incomplete = e.incomplete || (typeof e.pos === 'number' && e.pos >= text.replace(/\s+$/, '').length);
+        return { ok: false, message: e.message, pos: e.pos, incomplete };
       }
-      case 'bin': return evalBin(node, ctx);
-      case 'call': return evalCall(node, ctx);
-      default: return null;
+      return { ok: false, message: e.message || String(e), pos: 0 };
     }
   }
 
-  function evalBin(node, ctx) {
-    const l = evalNode(node.left, ctx);
-    const r = evalNode(node.right, ctx);
-    const op = node.op;
-    if (op === 'EQ') return (l == null || r == null) ? null : looseEquals(l, r);
-    if (op === 'NEQ') return (l == null || r == null) ? null : !looseEquals(l, r);
-    if (l == null || r == null) return null;
-    if (op === 'LT' || op === 'LTE' || op === 'GT' || op === 'GTE') {
-      requireNum(l, node.left); requireNum(r, node.right);
-      if (op === 'LT') return l < r; if (op === 'LTE') return l <= r; if (op === 'GT') return l > r; return l >= r;
-    }
-    requireNum(l, node.left); requireNum(r, node.right);
-    if (op === 'PLUS') return l + r;
-    if (op === 'MINUS') return l - r;
-    if (op === 'STAR') return l * r;
-    if (op === 'SLASH') return r === 0 ? null : l / r;
-    return mod(l, r); // PERCENT
-  }
-
-  function evalCall(node, ctx) {
-    const fn = node.fn;
-    if (fn === 'IF') {
-      const c = evalNode(node.args[0], ctx);
-      if (c == null) return null;
-      return truthy(c) ? evalNode(node.args[1], ctx) : evalNode(node.args[2], ctx);
-    }
-    if (fn === 'AND' || fn === 'OR') {
-      let sawNull = false;
-      for (const a of node.args) {
-        const v = evalNode(a, ctx);
-        if (v == null) { sawNull = true; continue; }
-        const b = truthy(v);
-        if (fn === 'AND' && b === false) return false;
-        if (fn === 'OR' && b === true) return true;
+  // Wie compile(), aber OHNE die BOOL-Pflicht - für Kontexte, in denen der
+  // Ausdruck selbst der gesuchte WERT ist (z.B. eine Umlaufstatistiken-
+  // Spalte: Zahl, WAHR/FALSCH oder Text), nicht eine Filterbedingung.
+  // resultType ist der statisch ermittelte Typ ('NUM'|'BOOL'|'TEXT'|'SG'|
+  // 'DET'|'KAT_*'|'ANY') - für Umlaufstatistiken bereits ausreichend, um zu
+  // entscheiden, ob eine Spalte Zahlen-Aggregatstatistik, einen Wahr/Falsch-
+  // Anteil oder nur Textanzeige bekommt, ohne die Werte selbst inspizieren
+  // zu müssen.
+  // Rückgabe: { ok:true, run(scope)->Wert, resultType } | { ok:false, message, pos }
+  function compileValue(text, varTypes, funcs, extraKatTokens) {
+    if (!text || !text.trim()) return { ok: false, message: 'Ausdruck ist leer.', pos: 0, incomplete: true };
+    try {
+      const tokens = tokenize(text, extraKatTokens);
+      const node = parse(tokens, varTypes || {}, funcs || {});
+      return { ok: true, run: node.run, resultType: node.type };
+    } catch (e) {
+      if (e instanceof ExprError) {
+        const incomplete = e.incomplete || (typeof e.pos === 'number' && e.pos >= text.replace(/\s+$/, '').length);
+        return { ok: false, message: e.message, pos: e.pos, incomplete };
       }
-      return sawNull ? null : (fn === 'AND');
+      return { ok: false, message: e.message || String(e), pos: 0 };
     }
-    if (SG_NAME_FNS.has(fn)) {
-      const name = resolveNameArg(node.args[0]);
-      const lname = name.toLowerCase();
-      if (!ctx.index.sg.has(lname)) throwUnknown(name, node.args[0], ctx.index.sgList, 'Signalgruppe');
-      const entry = ctx.cycle.sg.get(lname);
-      const key = { AN: 'an', AB: 'ab', TF: 'tf', RG: 'rotgelb', GE: 'gelb' }[fn];
-      return entry ? entry[key] : null;
-    }
-    if (DET_NAME_FNS.has(fn)) {
-      const name = resolveNameArg(node.args[0]);
-      const lname = name.toLowerCase();
-      if (!ctx.index.det.has(lname)) throwUnknown(name, node.args[0], ctx.index.detList, 'Detektor/Wert');
-      const entry = ctx.cycle.det.get(lname);
-      if (fn === 'DET') return entry ? entry.triggered : false;
-      if (fn === 'DETCOUNT') return entry ? entry.count : 0;
-      if (fn === 'DETFIRST') return entry ? entry.first : null;
-      return entry ? entry.last : null; // DETLAST
-    }
-    const vals = node.args.map(a => evalNode(a, ctx));
-    if (fn === 'ABS') { if (vals[0] == null) return null; requireNum(vals[0], node.args[0]); return Math.abs(vals[0]); }
-    if (fn === 'MOD') { if (vals[0] == null || vals[1] == null) return null; requireNum(vals[0], node.args[0]); requireNum(vals[1], node.args[1]); return mod(vals[0], vals[1]); }
-    if (fn === 'MIN' || fn === 'MAX') {
-      if (vals.some(v => v == null)) return null;
-      vals.forEach((v, i) => requireNum(v, node.args[i]));
-      return fn === 'MIN' ? Math.min(...vals) : Math.max(...vals);
-    }
-    if (fn === 'ROUND') {
-      if (vals[0] == null) return null;
-      requireNum(vals[0], node.args[0]);
-      const d = vals[1] == null ? 0 : vals[1];
-      const f = Math.pow(10, d);
-      return Math.round(vals[0] * f) / f;
-    }
-    return null;
   }
 
-  function evaluate(ast, ctx) { return evalNode(ast, ctx); }
-
-  // Klassische Editierdistanz - Grundlage für "meinten Sie …?" sowohl bei
-  // Auswertungsfehlern als auch (indirekt) für die Sortierung in suggestAt().
-  function levenshtein(a, b) {
-    const m = a.length, n = b.length;
-    if (m === 0) return n;
-    if (n === 0) return m;
-    let prev = new Array(n + 1);
-    for (let j = 0; j <= n; j++) prev[j] = j;
-    for (let i = 1; i <= m; i++) {
-      const cur = [i];
-      for (let j = 1; j <= n; j++) {
-        cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
-      }
-      prev = cur;
+  // Parst UND typprüft (aber wertet nicht aus) EINEN FUNKTIONS-Rumpf, isoliert
+  // von jeder konkreten Aufrufstelle - jeder Parameter erhält den Platzhalter-
+  // Typ ANY (siehe Datei-Kopfkommentar), da der tatsächliche Typ erst am
+  // jeweiligen Aufruf bekannt ist. Das prüft Syntax + grobe Struktur (bekannte
+  // Bezeichner/Funktionen, Argumentanzahl) VOR der ersten Verwendung, kann
+  // aber echte Typfehler (die erst mit konkreten Argumenttypen entstehen)
+  // naturgemäß nicht abschließend erkennen - die entstehen ggf. erst bei
+  // compile() eines Aufrufers (Fehlermeldung dann "In Funktion […]: …").
+  // Rückgabe: { ok:true, resultType } | { ok:false, message, pos }
+  function compileFunctionDef(params, text, funcs) {
+    if (!text || !text.trim()) return { ok: false, message: 'Ausdruck ist leer.', pos: 0 };
+    const varTypes = { TX: 'NUM' };
+    (params || []).forEach(p => { varTypes[p] = 'ANY'; });
+    try {
+      const tokens = tokenize(text);
+      const node = parse(tokens, varTypes, funcs || {});
+      return { ok: true, resultType: node.type };
+    } catch (e) {
+      if (e instanceof ExprError) return { ok: false, message: e.message, pos: e.pos };
+      return { ok: false, message: e.message || String(e), pos: 0 };
     }
-    return prev[n];
   }
 
-  // Nächstliegender Kandidat per Editierdistanz, nur wenn "nah genug" -
-  // lieber keine Vermutung als eine irreführende.
-  function nearestMatch(name, candidates) {
-    if (!candidates || candidates.length === 0) return null;
-    const lname = String(name).toLowerCase();
-    let best = null, bestD = Infinity;
-    for (const c of candidates) {
-      const d = levenshtein(lname, String(c).toLowerCase());
-      if (d < bestD) { bestD = d; best = c; }
-    }
-    const threshold = Math.max(2, Math.ceil(lname.length * 0.4));
-    return bestD <= threshold ? best : null;
-  }
-
-  // Kontextsensitive Vorschläge für die Eingabeposition cursorPos in text:
-  // innerhalb An(/Ab(/Tf(/Rg(/Ge( -> Signalgruppennamen, innerhalb Det(/
-  // DetCount(/DetFirst(/DetLast( -> Detektor-/APW-Namen, sonst Funktionen +
-  // skalare Bezeichner (TU, TU_MED, TX, SPL, START). index wie in evaluate().
-  function suggestAt(text, cursorPos, index) {
-    let tokens;
-    try { tokens = tokenize(text); }
-    catch (e) { tokens = (e.tokens || []).concat([{ type: 'EOF', start: text.length, end: text.length }]); }
-
-    let replaceStart = cursorPos, replaceEnd = cursorPos, partial = '';
-    const cur = tokens.find(t => t.type === 'IDENT' && t.start <= cursorPos && cursorPos <= t.end);
-    if (cur) { replaceStart = cur.start; replaceEnd = cur.end; partial = text.slice(cur.start, cursorPos); }
-
-    const stack = [];
-    for (let i = 0; i < tokens.length; i++) {
-      const t = tokens[i];
-      if (t.start >= replaceStart) break;
-      if (t.type === 'LPAREN') {
-        const prevTok = tokens[i - 1];
-        stack.push(prevTok && prevTok.type === 'IDENT' && prevTok.end === t.start ? prevTok.value.toUpperCase() : null);
-      } else if (t.type === 'RPAREN') {
-        stack.pop();
-      }
-    }
-    const owner = stack.length ? stack[stack.length - 1] : null;
-
-    let candidates;
-    if (owner && SG_NAME_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' }));
-    else if (owner && DET_NAME_FNS.has(owner)) candidates = index.detList.map(n => ({ value: n, label: n, kind: 'det' }));
-    else candidates = FUNCTION_NAMES.map(n => ({ value: n, label: n + '(…)', kind: 'fn' }))
-      .concat([...SCALAR_KEYWORDS].map(n => ({ value: n, label: n, kind: 'scalar' })));
-
-    const p = partial.toLowerCase();
-    const items = candidates.filter(c => c.value.toLowerCase().startsWith(p)).slice(0, 8);
-    return { replaceStart, replaceEnd, items };
-  }
-
-  // Spaltentyp aus den tatsächlich ausgewerteten Werten ableiten (statt
-  // manueller Formatwahl) - 'number'/'bool' bekommen Aggregatstatistik,
-  // 'text' nur die Tabellenanzeige, 'empty' wenn nichts auswertbar war.
-  function inferKind(values) {
-    const present = values.filter(v => v !== null && v !== undefined);
-    if (present.length === 0) return 'empty';
-    if (present.every(v => typeof v === 'boolean')) return 'bool';
-    if (present.every(v => typeof v === 'number')) return 'number';
-    return 'text';
-  }
-
-  GZ.exprEngine = {
-    FUNCTION_NAMES, SCALAR_KEYWORDS, ARITY,
-    tokenize, parse, evaluate, suggestAt, nearestMatch, levenshtein, inferKind
-  };
+  // tokenize/PRIMITIVE_INFO/KAT_TOKENS werden zusätzlich exportiert, damit
+  // formulaBuilder.js Syntax-Highlighting/Autovervollständigung/Funktions-
+  // Palette auf demselben Lexer/derselben Primitiven-Liste aufbaut statt sie
+  // in der UI-Schicht zu duplizieren (Single Source of Truth).
+  GZ.exprEngine = { compile, compileValue, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS };
 })(window.GZ = window.GZ || {});
