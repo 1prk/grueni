@@ -12,7 +12,8 @@
     wzActivePoints: null, // {colIndex, times[], unresolvedTime} - für Anforderungspunkte im Zeitdiagramm
     oepnvActivePoints: [], // [{colIndex, times[], unresolvedTime}] - Anmeldepunkte je konfigurierter Signalgruppe im ÖPNV-Tab
     window: { count: 5, startIdx: 0, showAll: false },
-    phases: [] // {id, name, kuerzel, members:Set<colIndex>} - siehe Tab „Stammdaten LSA“
+    phases: [], // {id, name, kuerzel, members:Set<colIndex>} - siehe Tab „Stammdaten LSA“
+    umlaufSpalten: [] // {id, label, expr} - Formelspalten, siehe Tab „Umlaufstatistiken“
   };
 
   function anomalyCtx() {
