@@ -107,6 +107,174 @@
     return segs;
   }
 
+  /* ---------------- Phasenübergänge (PÜ) ----------------
+     Diese Sektion gehört sowohl der Phasenspur in Umlaufprüfung (Anzeige)
+     als auch dem PÜ-Werkzeug in Stammdaten LSA (Bearbeitung) - deshalb hier
+     als gemeinsame, view-unabhängige Grundlage statt in einer der beiden
+     Ansichten. Reine Auswertungs-/Datenlogik: nimmt GZ.state.data.
+     pueOverrides (falls benötigt) immer als expliziten Parameter entgegen,
+     statt selbst auf den globalen Zustand zuzugreifen. */
+
+  // Name für eine inferierte Phasenübergang-Lücke aus den Kürzeln der beiden
+  // angrenzenden Phasen: enden beide auf eine Zahl (Standard-Kürzel "PhN"),
+  // kurz als "PÜ<n1>.<n2>" (z.B. "PÜ1.2"); sonst robust als "PÜ k1→k2", damit
+  // frei benannte Kürzel nicht zu einem unsinnigen Text zusammengequetscht
+  // werden.
+  function pueLabelFor(k1, k2) {
+    const m1 = /(\d+)\s*$/.exec(k1), m2 = /(\d+)\s*$/.exec(k2);
+    return (m1 && m2) ? `PÜ${m1[1]}.${m2[1]}` : `PÜ ${k1}→${k2}`;
+  }
+
+  // Wie buildCombinedSegments(), aber Lücken (cat 'NONE') zusätzlich mit den
+  // beiden unmittelbar angrenzenden ECHTEN Phasen annotiert (seg.pueLabel,
+  // seg.pueFromPhaseId/-ToPhaseId) statt anonym zu bleiben - Grundlage für
+  // die Phasenspur (Balken + Klick zum Aufklappen) in Umlaufprüfung. Ohne
+  // Nachbar auf einer Seite (Aufzeichnungsrand, nie erkannte Phase) bleiben
+  // alle drei Felder null.
+  function buildAnnotatedSegments(occurrenceEntries, tMin, tMax) {
+    const phaseById = new Map(occurrenceEntries.map(e => [e.phase.id, e.phase]));
+    const segs = buildCombinedSegments(occurrenceEntries, tMin, tMax);
+    segs.forEach((seg, i) => {
+      if (seg.cat !== 'NONE') return;
+      const prevPhase = i > 0 ? phaseById.get(segs[i - 1].cat) : null;
+      const nextPhase = i < segs.length - 1 ? phaseById.get(segs[i + 1].cat) : null;
+      seg.pueLabel = (prevPhase && nextPhase) ? pueLabelFor(prevPhase.kuerzel, nextPhase.kuerzel) : null;
+      seg.pueFromPhaseId = prevPhase ? prevPhase.id : null;
+      seg.pueToPhaseId = nextPhase ? nextPhase.id : null;
+    });
+    return segs;
+  }
+
+  // Alle TATSÄCHLICH in der Aufzeichnung vorkommenden Übergangstypen (je
+  // Phasen-ID-Paar genau einmal, erstes Vorkommen gemerkt) - Grundlage für
+  // die Liste im PÜ-Werkzeug (Stammdaten LSA): nur Übergänge anbieten, die
+  // es in den Rohdaten auch wirklich gibt, nicht jede denkbare Kombination
+  // aus der Phasenliste.
+  function listDistinctTransitions(occurrenceEntries, tMin, tMax) {
+    const segs = buildAnnotatedSegments(occurrenceEntries, tMin, tMax);
+    const seen = new Map();
+    segs.forEach(seg => {
+      if (seg.cat !== 'NONE' || !seg.pueFromPhaseId || !seg.pueToPhaseId) return;
+      const key = seg.pueFromPhaseId + '→' + seg.pueToPhaseId;
+      if (!seen.has(key)) {
+        seen.set(key, { fromPhaseId: seg.pueFromPhaseId, toPhaseId: seg.pueToPhaseId, label: seg.pueLabel, firstOccurrence: { start: seg.start, end: seg.end } });
+      }
+    });
+    return [...seen.values()];
+  }
+
+  // Umlaufindex, in dem der Zeitpunkt t liegt (letzter cycleStarts-Eintrag
+  // <= t) - wandelt eine absolute Zeit (z.B. listDistinctTransitions()'
+  // firstOccurrence.start) in den cycleIdx um, den autoDetectPueRows()/
+  // realCycleMetricsForSg() erwarten. -1, wenn t vor dem ersten Umlauf liegt.
+  function cycleIdxAtTime(t, cycleStarts) {
+    if (!cycleStarts || !cycleStarts.length) return -1;
+    let idx = -1;
+    for (let i = 0; i < cycleStarts.length; i++) {
+      if (cycleStarts[i] <= t) idx = i; else break;
+    }
+    return idx;
+  }
+
+  // sgIndex ist hier IMMER der rohe CSV-Spaltenindex (col.index, wie in
+  // phase.members - siehe stammdatenLsa.js data-member="${col.index}"),
+  // NICHT die Position in allStats (die zählt SG-Spalten separat durch -
+  // dieselbe Unterscheidung wie schon in computePhaseOccurrences() oben).
+  function findSgEntryByColIndex(sgIndex, a) { return a.allStats.find(s => s.col.index === sgIndex); }
+
+  // Reale An/Ab/TF/Rotgelb/Gelb-Werte EINER Signalgruppe für EINEN Umlauf -
+  // dieselbe Grundlage wie die umlaufweisen exprEngine-Primitiven/Kennzahlen
+  // (GZ.segments.computeCycleSgMetrics), hier aber für eine beliebige, ggf.
+  // gerade nicht angehakte Signalgruppe auf Abruf berechnet (Phasenmitglieder
+  // sind unabhängig von jeder Objekt-Auswahl in einer Ansicht).
+  function realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) {
+    const entry = findSgEntryByColIndex(sgIndex, a);
+    if (!entry) return null;
+    const metrics = GZ.segments.computeCycleSgMetrics(entry.segs, entry.stats.greens, a.cycleStarts, a.tMax, TU_MED);
+    return metrics[cycleIdx] || null;
+  }
+
+  // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
+  // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase (nur
+  // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ zum
+  // frühesten Ab unter den abwerfenden Mitgliedern (= die "TX=0"-Referenz
+  // dieses Übergangs). null, wenn in diesem Umlauf kein Mitglied der
+  // abwerfenden Phase einen Ab-Wert hat (z.B. Datenlücke) - dann gibt es
+  // nichts, worauf sich die Spanne beziehen könnte.
+  function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
+    const outgoing = [...fromPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    const incoming = [...toPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    const abs = outgoing.map(o => o.cm && Number.isFinite(o.cm.ab) ? o.cm.ab : null).filter(v => v != null);
+    if (!abs.length) return null;
+    const referenceSec = Math.min(...abs);
+    const rows = [];
+    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round((o.cm.ab - referenceSec) * 10) / 10 }); });
+    incoming.forEach(o => { if (o.cm && Number.isFinite(o.cm.an)) rows.push({ sgIndex: o.sgIndex, an: Math.round((o.cm.an - referenceSec) * 10) / 10, ab: null }); });
+    return { referenceSec, rows };
+  }
+
+  function pueOverrideKey(fromPhaseId, toPhaseId) { return fromPhaseId + '→' + toPhaseId; }
+
+  // Aufgelöste Zeilenliste für das PÜ-Werkzeug: eine manuelle Korrektur
+  // (siehe pueOverrides, je PHASENÜBERGANGSTYP - Bearbeitung in Stammdaten
+  // LSA) hat Vorrang vor der automatischen Erkennung, gilt dann aber für
+  // JEDES Vorkommen dieses Übergangs identisch (dieselben Zahlen,
+  // unabhängig vom Umlauf) - die Referenzzeit für eine Balken-Darstellung
+  // bleibt trotzdem live je Umlauf berechnet (siehe Aufrufer), damit ein
+  // Balken immer die ECHTEN Rohdaten des jeweils gezeigten Umlaufs nutzt,
+  // auch wenn die Tabellenwerte manuell überschrieben sind (so lässt sich
+  // eine Korrektur visuell gegen die Realität prüfen statt blind zu
+  // vertrauen).
+  function resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, pueOverrides) {
+    const auto = autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
+    const override = pueOverrides ? pueOverrides[pueOverrideKey(fromPhase.id, toPhase.id)] : null;
+    return {
+      referenceSec: auto ? auto.referenceSec : null,
+      rows: override ? override.rows : (auto ? auto.rows : []),
+      overridden: !!override
+    };
+  }
+
+  // Mutations-Helfer für pueOverrides - nehmen das Objekt (GZ.state.data.
+  // pueOverrides) immer explizit entgegen und mutieren es in place, statt
+  // selbst auf GZ.state zuzugreifen (siehe Sektions-Kopfkommentar); der
+  // Aufrufer (Stammdaten LSA) ist für das Neu-Rendern nach der Mutation
+  // zuständig. ensurePueOverride() legt bei Bedarf eine Korrektur an - mit
+  // den aktuell ANGEZEIGTEN Zeilen (seedRows) als Startpunkt, damit ein
+  // einzelnes Feld-Edit nicht die übrigen, bislang nur automatisch
+  // erkannten Zeilen verliert - idempotent, ändert eine bereits vorhandene
+  // Korrektur nicht erneut.
+  function ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows) {
+    const key = pueOverrideKey(fromPhaseId, toPhaseId);
+    if (!pueOverrides[key]) pueOverrides[key] = { rows: seedRows.map(r => ({ ...r })) };
+    return pueOverrides[key];
+  }
+  function setPueOverrideRowField(pueOverrides, fromPhaseId, toPhaseId, rowIdx, field, value, seedRows) {
+    const ov = ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows);
+    if (ov.rows[rowIdx]) ov.rows[rowIdx][field] = value;
+  }
+  function addPueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, sgIndex) {
+    ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.push({ sgIndex, an: null, ab: null });
+  }
+  function removePueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, rowIdx) {
+    ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
+  }
+  function resetPueOverride(pueOverrides, fromPhaseId, toPhaseId) {
+    delete pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
+  }
+
+  // Reale Segmentliste EINER Signalgruppe, zeitlich um die PÜ-Referenz
+  // verschoben (referenceAbsMs = Umlaufbeginn + referenceSec) - ein
+  // renderLane()-Aufruf mit wMin/wMax nahe 0 zeigt damit direkt die lokale
+  // TX-Achse dieses Übergangs, ohne dass renderLane selbst etwas von
+  // "Verschiebung" wissen müsste (dieselbe Funktion wie überall sonst, nur
+  // mit bereits vorverschobenen Segment-Zeiten als Eingabe).
+  function buildLocalShiftedSegs(sgIndex, referenceAbsMs, a) {
+    const entry = findSgEntryByColIndex(sgIndex, a);
+    if (!entry) return [];
+    return entry.segs.map(s => ({ ...s, start: s.start - referenceAbsMs, end: s.end - referenceAbsMs }));
+  }
+
   // Summiert je Umlauf (cycleStarts[i]..cycleStarts[i+1)) die Vorkommensdauer
   // einer Phase - amortisierter Sweep über die (sortierten) Vorkommen statt
   // eines Vollscans je Umlauf, damit auch bei "Alle anzeigen" auf großen
@@ -126,6 +294,10 @@
 
   GZ.phases = {
     PHASE_COLORS, colorForIndex, intersectIntervals, createPhase, createPhaseFromConfig,
-    computePhaseOccurrences, buildCombinedSegments, durationPerCycle
+    computePhaseOccurrences, buildCombinedSegments, durationPerCycle,
+    pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
+    findSgEntryByColIndex, realCycleMetricsForSg, autoDetectPueRows, pueOverrideKey, resolvePueRows,
+    ensurePueOverride, setPueOverrideRowField, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
+    buildLocalShiftedSegs
   };
 })(window.GZ = window.GZ || {});

@@ -186,109 +186,26 @@
     return [{ kuerzel: 'PHASE', index: 0, name: 'Phasen', beschreibung: 'Kombinierte Phasenspur (Stammdaten LSA) mit inferierten Phasenübergängen' }];
   }
 
-  // Name für eine inferierte Phasenübergang-Lücke aus den Kürzeln der beiden
-  // angrenzenden Phasen: enden beide auf eine Zahl (Standard-Kürzel "PhN"),
-  // kurz als "PÜ<n1>.<n2>" (z.B. "PÜ1.2"); sonst robust als "PÜ k1→k2", damit
-  // frei benannte Kürzel nicht zu einem unsinnigen Text zusammengequetscht
-  // werden.
-  function pueLabelFor(k1, k2) {
-    const m1 = /(\d+)\s*$/.exec(k1), m2 = /(\d+)\s*$/.exec(k2);
-    return (m1 && m2) ? `PÜ${m1[1]}.${m2[1]}` : `PÜ ${k1}→${k2}`;
-  }
-
   // Kombinierte Phasenspur (siehe GZ.phases, gleiche Grundlage wie
   // js/views/phasenauswertung.js): eine Liste je Phase, wann sie
   // vollständig angezeigt wurde (alle Mitglieds-Signalgruppen gleichzeitig
-  // Grün), zu EINER lückenlosen Segmentreihe zusammengeführt
-  // (buildCombinedSegments) - Lücken (cat 'NONE') sind Phasenübergänge, hier
-  // zusätzlich zum Kürzel-Paar der beiden UNMITTELBAR ANGRENZENDEN echten
-  // Phasen-Segmente benannt (seg.pueLabel) statt anonym zu bleiben; ohne
-  // Nachbar auf einer Seite (Aufzeichnungsrand, nie erkannte Phase) bleibt
-  // pueLabel null. Einmal je render()-Durchlauf gebaut (wie sgData), nicht
-  // je Zeile - die zugrundeliegenden Vorkommen sind ohnehin unabhängig vom
-  // sichtbaren Umlauf-Fenster.
+  // Grün), zu EINER lückenlosen, annotierten Segmentreihe zusammengeführt
+  // (GZ.phases.buildAnnotatedSegments - Lücken tragen dort bereits
+  // pueLabel/pueFromPhaseId/pueToPhaseId, siehe dortiger Kopfkommentar).
+  // Einmal je render()-Durchlauf gebaut (wie sgData), nicht je Zeile - die
+  // zugrundeliegenden Vorkommen sind ohnehin unabhängig vom sichtbaren
+  // Umlauf-Fenster. Das PÜ-WERKZEUG SELBST (Bearbeiten der Korrekturtabelle)
+  // lebt seit der Verlagerung im Tab „Stammdaten LSA“ (siehe dort
+  // renderPueSection()) - hier nur noch Lese-/Anzeigezugriff über
+  // GZ.phases.resolvePueRows(), siehe renderPueDetailPanel() unten.
   function buildPhaseTrack(a) {
     const phases = GZ.state.data.phases;
     if (!phases || !phases.length) return null;
     const occEntries = phases.map((phase, i) => ({ ...GZ.phases.computePhaseOccurrences(phase, a.allStats), color: GZ.phases.colorForIndex(i) }));
     const phaseById = new Map(occEntries.map(e => [e.phase.id, e.phase]));
     const colorByPhaseId = new Map(occEntries.map(e => [e.phase.id, e.color]));
-    const segs = GZ.phases.buildCombinedSegments(occEntries, a.tMin, a.tMax);
-    segs.forEach((seg, i) => {
-      if (seg.cat !== 'NONE') return;
-      const prevPhase = i > 0 ? phaseById.get(segs[i - 1].cat) : null;
-      const nextPhase = i < segs.length - 1 ? phaseById.get(segs[i + 1].cat) : null;
-      seg.pueLabel = (prevPhase && nextPhase) ? pueLabelFor(prevPhase.kuerzel, nextPhase.kuerzel) : null;
-      // Für das PÜ-Detailwerkzeug (togglePueDetail()): welche beiden Phasen
-      // dieser Übergang verbindet, direkt am Segment - erspart dem Klick-
-      // Handler eine erneute Nachbarschaftssuche.
-      seg.pueFromPhaseId = prevPhase ? prevPhase.id : null;
-      seg.pueToPhaseId = nextPhase ? nextPhase.id : null;
-    });
+    const segs = GZ.phases.buildAnnotatedSegments(occEntries, a.tMin, a.tMax);
     return { segs, phaseById, colorByPhaseId };
-  }
-
-  function pueOverrideKey(fromPhaseId, toPhaseId) { return fromPhaseId + '→' + toPhaseId; }
-
-  // Reale An/Ab/TF/Rotgelb/Gelb-Werte EINER Signalgruppe für EINEN Umlauf -
-  // dieselbe Grundlage wie die umlaufweisen exprEngine-Primitiven/Kennzahlen
-  // (GZ.segments.computeCycleSgMetrics), hier aber für eine beliebige, ggf.
-  // gerade nicht in der Objekt-Liste angehakte Signalgruppe auf Abruf
-  // berechnet (Phasenmitglieder sind unabhängig von der Objekt-Auswahl).
-  //
-  // sgIndex ist hier IMMER der rohe CSV-Spaltenindex (col.index, wie in
-  // phase.members - siehe stammdatenLsa.js data-member="${col.index}"),
-  // NICHT die Position in a.allStats (die zählt SG-Spalten separat durch,
-  // siehe allObjects()' index:i - dieselbe Unterscheidung wie schon in
-  // GZ.phases.computePhaseOccurrences()). Direktes a.allStats[sgIndex] wäre
-  // nur zufällig richtig, wenn die erste Spalte bereits eine Signalgruppe
-  // ist und keine Spalten fehlen.
-  function findSgEntryByColIndex(sgIndex, a) { return a.allStats.find(s => s.col.index === sgIndex); }
-
-  function realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) {
-    const entry = findSgEntryByColIndex(sgIndex, a);
-    if (!entry) return null;
-    const metrics = GZ.segments.computeCycleSgMetrics(entry.segs, entry.stats.greens, a.cycleStarts, a.tMax, TU_MED);
-    return metrics[cycleIdx] || null;
-  }
-
-  // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
-  // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase
-  // (nur Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ
-  // zum frühesten Ab unter den abwerfenden Mitgliedern (= die "TX=0"-Referenz
-  // dieses Übergangs, siehe Kopfkommentar der Sketch-Diskussion). null, wenn
-  // in diesem Umlauf kein Mitglied der abwerfenden Phase einen Ab-Wert hat
-  // (z.B. Datenlücke) - dann gibt es nichts, worauf sich die Spanne beziehen
-  // könnte.
-  function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
-    const outgoing = [...fromPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
-    const incoming = [...toPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
-    const abs = outgoing.map(o => o.cm && Number.isFinite(o.cm.ab) ? o.cm.ab : null).filter(v => v != null);
-    if (!abs.length) return null;
-    const referenceSec = Math.min(...abs);
-    const rows = [];
-    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round((o.cm.ab - referenceSec) * 10) / 10 }); });
-    incoming.forEach(o => { if (o.cm && Number.isFinite(o.cm.an)) rows.push({ sgIndex: o.sgIndex, an: Math.round((o.cm.an - referenceSec) * 10) / 10, ab: null }); });
-    return { referenceSec, rows };
-  }
-
-  // Aufgelöste Zeilenliste für das PÜ-Detailwerkzeug: manuelle Korrektur
-  // (siehe GZ.state.data.pueOverrides, je PHASENÜBERGANGSTYP) hat Vorrang
-  // vor der automatischen Erkennung, gilt dann aber für JEDES Vorkommen
-  // dieses Übergangs identisch (dieselben Zahlen, unabhängig vom Umlauf) -
-  // die Referenzzeit für die Balken-Darstellung bleibt trotzdem live je
-  // Umlauf berechnet (siehe renderPueDetailPanel()), damit der Balken immer
-  // die ECHTEN Rohdaten dieses konkreten Umlaufs zeigt, auch wenn die
-  // Tabellenwerte manuell überschrieben sind (so lässt sich eine Korrektur
-  // visuell gegen die Realität prüfen statt blind zu vertrauen).
-  function resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
-    const auto = autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
-    const override = GZ.state.data.pueOverrides[pueOverrideKey(fromPhase.id, toPhase.id)];
-    return {
-      referenceSec: auto ? auto.referenceSec : null,
-      rows: override ? override.rows : (auto ? auto.rows : []),
-      overridden: !!override
-    };
   }
 
   // Öffnet/schließt das PÜ-Detailpanel für EIN Vorkommen (erneuter Klick auf
@@ -300,44 +217,7 @@
     render();
   }
 
-  // Legt bei Bedarf eine Korrektur an (mit den aktuell ANGEZEIGTEN Zeilen als
-  // Startpunkt, damit ein einzelnes Feld-Edit nicht die übrigen, bislang nur
-  // automatisch erkannten Zeilen verliert) - idempotent, ändert eine bereits
-  // vorhandene Korrektur nicht erneut.
-  function ensurePueOverride(fromPhaseId, toPhaseId, seedRows) {
-    const key = pueOverrideKey(fromPhaseId, toPhaseId);
-    if (!GZ.state.data.pueOverrides[key]) GZ.state.data.pueOverrides[key] = { rows: seedRows.map(r => ({ ...r })) };
-    return GZ.state.data.pueOverrides[key];
-  }
-  function setPueOverrideRowField(fromPhaseId, toPhaseId, rowIdx, field, value, seedRows) {
-    const ov = ensurePueOverride(fromPhaseId, toPhaseId, seedRows);
-    if (ov.rows[rowIdx]) ov.rows[rowIdx][field] = value;
-    render();
-  }
-  function addPueOverrideRow(fromPhaseId, toPhaseId, seedRows, sgIndex) {
-    ensurePueOverride(fromPhaseId, toPhaseId, seedRows).rows.push({ sgIndex, an: null, ab: null });
-    render();
-  }
-  function removePueOverrideRow(fromPhaseId, toPhaseId, seedRows, rowIdx) {
-    ensurePueOverride(fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
-    render();
-  }
-  function resetPueOverride(fromPhaseId, toPhaseId) {
-    delete GZ.state.data.pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
-    render();
-  }
-
-  // Reale Segmentliste EINER Signalgruppe, zeitlich um die PÜ-Referenz
-  // verschoben (referenceAbsMs = Umlaufbeginn + referenceSec) - damit zeigt
-  // ein renderLane()-Aufruf mit wMin/wMax nahe 0 direkt die lokale TX-Achse
-  // dieses Übergangs, ohne dass renderLane selbst etwas von "Verschiebung"
-  // wissen müsste (dieselbe Funktion wie überall sonst, nur mit bereits
-  // vorverschobenen Segment-Zeiten als Eingabe).
-  function buildLocalShiftedSegs(sgIndex, referenceAbsMs, a) {
-    const entry = findSgEntryByColIndex(sgIndex, a);
-    if (!entry) return [];
-    return entry.segs.map(s => ({ ...s, start: s.start - referenceAbsMs, end: s.end - referenceAbsMs }));
-  }
+  function formatPueNum(v) { return v != null ? v : '–'; }
 
   // PÜ-Detailpanel: wird NACH dem regulären zweistufigen Render (Vorlage +
   // SVG) separat an genau EINE Umlauf-Gruppe angehängt, statt Teil des
@@ -354,49 +234,48 @@
     const toPhase = GZ.state.data.phases.find(p => p.id === toPhaseId);
     if (!fromPhase || !toPhase) { openPueDetail = null; return; }
 
-    const resolved = resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
+    const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
     const referenceSec = resolved.referenceSec != null ? resolved.referenceSec : 0;
     const cycleStart = a.cycleStarts[cycleIdx];
     const referenceAbsMs = cycleStart + referenceSec * 1000;
 
-    const label = pueLabelFor(fromPhase.kuerzel, toPhase.kuerzel);
+    const label = GZ.phases.pueLabelFor(fromPhase.kuerzel, toPhase.kuerzel);
     const fromLabel = fromPhase.name && fromPhase.name !== fromPhase.kuerzel ? `${fromPhase.kuerzel} – ${fromPhase.name}` : fromPhase.kuerzel;
     const toLabel = toPhase.name && toPhase.name !== toPhase.kuerzel ? `${toPhase.kuerzel} – ${toPhase.name}` : toPhase.kuerzel;
 
     const panel = document.createElement('div');
     panel.className = 'up-pue-panel';
     // TF wird NIE frei eingegeben, sondern immer berechnet (siehe
-    // Kopfkommentar autoDetectPueRows()): für eine Zeile mit gesetztem An
+    // Kopfkommentar GZ.phases.autoDetectPueRows()): für eine Zeile mit gesetztem An
     // die tatsächliche, reale Freigabezeit der dort beginnenden Grünphase
     // (unabhängig davon, ob An/Ab manuell korrigiert wurden - die reale
     // Dauer bleibt, was sie ist); nur wenn eine Zeile ausnahmsweise sowohl
     // An als auch Ab von Hand gesetzt hat (z.B. eine frei hinzugefügte
     // Zeile ohne eigene Grünphase hier), ersatzweise Ab-An.
-    const rowsHtml = resolved.rows.map((row, i) => {
-      const cm = row.an != null ? realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
+    const rowsHtml = resolved.rows.map(row => {
+      const cm = row.an != null ? GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
       const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
-      const sgOptions = a.allStats.map(s => `<option value="${s.col.index}"${s.col.index === row.sgIndex ? ' selected' : ''}>${esc(s.col.name)}</option>`).join('');
+      const sgEntry = GZ.phases.findSgEntryByColIndex(row.sgIndex, a);
+      const sgName = sgEntry ? sgEntry.col.name : '?';
       return `
-        <div class="up-pue-row" data-row-idx="${i}">
-          <select class="up-pue-sg">${sgOptions}</select>
-          <label class="up-pue-field">An<input type="number" class="up-pue-an" step="0.1" value="${row.an != null ? row.an : ''}" placeholder="–"></label>
-          <label class="up-pue-field">Ab<input type="number" class="up-pue-ab" step="0.1" value="${row.ab != null ? row.ab : ''}" placeholder="–"></label>
-          <span class="up-pue-tf" title="Freigabezeit – wird berechnet, nicht eingegeben">TF ${tf != null ? tf : '–'}</span>
+        <div class="up-pue-row">
+          <span class="up-pue-sg-label">${esc(sgName)}</span>
+          <span class="up-pue-field">An <b>${esc(formatPueNum(row.an))}</b></span>
+          <span class="up-pue-field">Ab <b>${esc(formatPueNum(row.ab))}</b></span>
+          <span class="up-pue-tf">TF ${esc(formatPueNum(tf))}</span>
           <div class="up-pue-track"><svg></svg></div>
-          <button type="button" class="up-pue-row-remove" title="Zeile entfernen">✕</button>
         </div>`;
     }).join('');
 
     panel.innerHTML = `
       <div class="up-pue-panel-head">
-        <span><b>${esc(label)}</b><span class="up-pue-panel-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}</span></span>
+        <span><b>${esc(label)}</b><span class="up-pue-panel-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}${resolved.overridden ? ' · manuell angepasst' : ''}</span></span>
         <div class="up-pue-panel-actions">
-          <button type="button" class="up-pue-reset"${resolved.overridden ? '' : ' disabled'}>Automatisch erkannt zurücksetzen</button>
+          <button type="button" class="up-pue-edit">Bearbeiten in Stammdaten LSA</button>
           <button type="button" class="up-pue-close" title="Schließen">✕</button>
         </div>
       </div>
       ${resolved.rows.length ? `<div class="up-pue-rows">${rowsHtml}</div>` : '<div class="up-pue-empty">Keine Daten für diesen Umlauf (z. B. Datenlücke).</div>'}
-      <button type="button" class="up-pue-addrow">+ Zeile hinzufügen</button>
     `;
 
     groupEls[rowPos].appendChild(panel);
@@ -408,7 +287,7 @@
     panel.querySelectorAll('.up-pue-row').forEach((rowEl, i) => {
       const row = resolved.rows[i];
       const svg = rowEl.querySelector('.up-pue-track svg');
-      const shiftedSegs = buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
+      const shiftedSegs = GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
         .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
       renderLane(svg, {
         wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
@@ -418,19 +297,9 @@
     });
 
     panel.querySelector('.up-pue-close').addEventListener('click', () => { openPueDetail = null; render(); });
-    const resetBtn = panel.querySelector('.up-pue-reset');
-    resetBtn.addEventListener('click', () => { if (!resetBtn.disabled) resetPueOverride(fromPhaseId, toPhaseId); });
-    panel.querySelector('.up-pue-addrow').addEventListener('click', () => {
-      const used = new Set(resolved.rows.map(r => r.sgIndex));
-      const next = a.allStats.find(s => !used.has(s.col.index));
-      addPueOverrideRow(fromPhaseId, toPhaseId, resolved.rows, next ? next.col.index : (a.allStats[0] ? a.allStats[0].col.index : 0));
-    });
-    panel.querySelectorAll('.up-pue-row').forEach(rowEl => {
-      const idx = Number(rowEl.dataset.rowIdx);
-      rowEl.querySelector('.up-pue-row-remove').addEventListener('click', () => removePueOverrideRow(fromPhaseId, toPhaseId, resolved.rows, idx));
-      rowEl.querySelector('.up-pue-sg').addEventListener('change', e => setPueOverrideRowField(fromPhaseId, toPhaseId, idx, 'sgIndex', Number(e.target.value), resolved.rows));
-      rowEl.querySelector('.up-pue-an').addEventListener('change', e => setPueOverrideRowField(fromPhaseId, toPhaseId, idx, 'an', e.target.value === '' ? null : Number(e.target.value), resolved.rows));
-      rowEl.querySelector('.up-pue-ab').addEventListener('change', e => setPueOverrideRowField(fromPhaseId, toPhaseId, idx, 'ab', e.target.value === '' ? null : Number(e.target.value), resolved.rows));
+    panel.querySelector('.up-pue-edit').addEventListener('click', () => {
+      GZ.app.switchTab('sd');
+      if (GZ.views.stammdatenLsa) GZ.views.stammdatenLsa.jumpToTransition(fromPhaseId, toPhaseId);
     });
   }
 

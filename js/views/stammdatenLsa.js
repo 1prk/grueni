@@ -8,6 +8,7 @@
   'use strict';
   const { esc } = GZ.format;
   const { createPhase } = GZ.phases;
+  const { renderLane } = GZ.charts.timelineLane;
 
   let els = null;
 
@@ -20,7 +21,9 @@
       noSgHint: root.querySelector('#sdNoSgHint'),
       configSaveBtn: root.querySelector('#sdConfigSaveBtn'),
       configLoadInput: root.querySelector('#sdConfigLoadInput'),
-      loadHint: root.querySelector('#sdLoadHint')
+      loadHint: root.querySelector('#sdLoadHint'),
+      pueSection: root.querySelector('#sdPueSection'),
+      pueBody: root.querySelector('#sdPueBody')
     };
     els.addBtn.addEventListener('click', () => {
       const a = GZ.state.data.currentAnalysis;
@@ -41,10 +44,12 @@
     GZ.state.data.phases = [];
     GZ.state.data.pueOverrides = {};
     renderTable();
+    renderPueSection();
     renderLoadHint();
   }
 
   function notifyChanged() {
+    renderPueSection();
     if (GZ.views.phasenauswertung) GZ.views.phasenauswertung.refresh();
     if (GZ.views.gruenzeitanalyse) GZ.views.gruenzeitanalyse.refresh();
     // Umlaufprüfung zeigt dieselben Phasen als eigene Spur (PHASE-Objekt,
@@ -259,6 +264,155 @@
     });
   }
 
+  /* ---------------- Phasenübergänge (PÜ) ----------------
+     Editierbare Korrektur je tatsächlich vorkommendem Übergangstyp (nicht je
+     Vorkommen, siehe GZ.phases.listDistinctTransitions()) - die eigentliche
+     Auswertungslogik lebt in js/core/phases.js (view-unabhängig), hier nur
+     Darstellung + Verdrahtung. Die Lese-Ansicht in Umlaufprüfung
+     (renderPueDetailPanel dort) nutzt dieselbe GZ.phases-Logik rein lesend
+     und verlinkt hierher zurück (siehe jumpToTransition() unten). */
+  function phaseLabelText(p) {
+    return p.name && p.name !== p.kuerzel ? `${p.kuerzel} – ${p.name}` : p.kuerzel;
+  }
+
+  function formatPueNum(v) { return v != null ? v : '–'; }
+
+  function renderPueSection() {
+    const a = GZ.state.data.currentAnalysis;
+    const phases = GZ.state.data.phases;
+    if (!els.pueSection) return;
+    if (!a || !phases.length || !a.cycleStarts || a.cycleStarts.length < 2) {
+      els.pueSection.style.display = 'none';
+      return;
+    }
+    const TU_MED = GZ.segments.computeGlobalTU(a.cycleStarts);
+    const occEntries = phases.map((phase, i) => ({
+      ...GZ.phases.computePhaseOccurrences(phase, a.allStats),
+      color: GZ.phases.colorForIndex(i)
+    }));
+    const transitions = GZ.phases.listDistinctTransitions(occEntries, a.tMin, a.tMax);
+    if (!transitions.length) {
+      els.pueSection.style.display = 'none';
+      return;
+    }
+    els.pueSection.style.display = '';
+    els.pueBody.innerHTML = transitions.map(t => renderTransitionBlockHtml(t, phases, a, TU_MED)).join('');
+    wirePueSectionEvents(a, TU_MED);
+  }
+
+  function renderTransitionBlockHtml(t, phases, a, TU_MED) {
+    const fromPhase = phases.find(p => p.id === t.fromPhaseId);
+    const toPhase = phases.find(p => p.id === t.toPhaseId);
+    if (!fromPhase || !toPhase) return '';
+    const cycleIdx = GZ.phases.cycleIdxAtTime(t.firstOccurrence.start, a.cycleStarts);
+    const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
+
+    const rowsHtml = resolved.rows.map((row, i) => {
+      const cm = row.an != null ? GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
+      const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
+      const sgOptions = a.allStats.map(s =>
+        `<option value="${s.col.index}" ${s.col.index === row.sgIndex ? 'selected' : ''}>${esc(s.col.name)}</option>`
+      ).join('');
+      return `
+        <div class="sd-pue-row" data-row="${i}">
+          <select class="sd-pue-sg">${sgOptions}</select>
+          <label class="sd-pue-field">An <input type="number" class="sd-pue-an" step="0.1" value="${row.an != null ? row.an : ''}"></label>
+          <label class="sd-pue-field">Ab <input type="number" class="sd-pue-ab" step="0.1" value="${row.ab != null ? row.ab : ''}"></label>
+          <span class="sd-pue-tf">TF ${esc(formatPueNum(tf))}</span>
+          <div class="sd-pue-track"><svg></svg></div>
+          <button type="button" class="sd-pue-row-remove" title="Zeile entfernen">✕</button>
+        </div>`;
+    }).join('');
+
+    const fromLabel = phaseLabelText(fromPhase), toLabel = phaseLabelText(toPhase);
+    return `
+      <div class="sd-pue-block" id="sd-pue-${fromPhase.id}-${toPhase.id}" data-from="${fromPhase.id}" data-to="${toPhase.id}" data-cycle-idx="${cycleIdx}">
+        <div class="sd-pue-block-head">
+          <span><b>${esc(t.label)}</b><span class="sd-pue-block-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}${resolved.overridden ? ' · manuell angepasst' : ''}</span></span>
+          <button type="button" class="sd-pue-reset" ${resolved.overridden ? '' : 'disabled'}>Automatisch erkannt zurücksetzen</button>
+        </div>
+        ${resolved.rows.length ? `<div class="sd-pue-rows">${rowsHtml}</div>` : '<div class="sd-pue-empty">Keine Daten für das erste Vorkommen (z. B. Datenlücke).</div>'}
+        <button type="button" class="sd-pue-addrow">+ Zeile hinzufügen</button>
+      </div>`;
+  }
+
+  function wirePueSectionEvents(a, TU_MED) {
+    els.pueBody.querySelectorAll('.sd-pue-block').forEach(block => {
+      const fromPhaseId = block.dataset.from, toPhaseId = block.dataset.to;
+      const fromPhase = GZ.state.data.phases.find(p => p.id === fromPhaseId);
+      const toPhase = GZ.state.data.phases.find(p => p.id === toPhaseId);
+      if (!fromPhase || !toPhase) return;
+      const cycleIdx = Number(block.dataset.cycleIdx);
+      const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
+      const seedRows = resolved.rows;
+      const referenceAbsMs = a.cycleStarts[cycleIdx] + (resolved.referenceSec != null ? resolved.referenceSec : 0) * 1000;
+
+      const allVals = resolved.rows.flatMap(r => [r.an, r.ab]).filter(v => v != null);
+      const maxVal = allVals.length ? Math.max(...allVals, 0) : 15;
+      const minVal = allVals.length ? Math.min(...allVals, 0) : 0;
+      const localWMin = (minVal - 5) * 1000, localWMax = (maxVal + 5) * 1000;
+
+      block.querySelectorAll('.sd-pue-row').forEach((rowEl, i) => {
+        const row = resolved.rows[i];
+        const svg = rowEl.querySelector('.sd-pue-track svg');
+        const shiftedSegs = GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
+          .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+        renderLane(svg, {
+          wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
+          baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+          gridStepMs: 5000, laneStyle: 'minimal'
+        });
+
+        rowEl.querySelector('.sd-pue-sg').addEventListener('change', e => {
+          GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'sgIndex', Number(e.target.value), seedRows);
+          notifyChanged();
+        });
+        rowEl.querySelector('.sd-pue-an').addEventListener('change', e => {
+          const v = e.target.value.trim();
+          GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'an', v === '' ? null : Number(v), seedRows);
+          notifyChanged();
+        });
+        rowEl.querySelector('.sd-pue-ab').addEventListener('change', e => {
+          const v = e.target.value.trim();
+          GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'ab', v === '' ? null : Number(v), seedRows);
+          notifyChanged();
+        });
+        rowEl.querySelector('.sd-pue-row-remove').addEventListener('click', () => {
+          GZ.phases.removePueOverrideRow(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, seedRows, i);
+          notifyChanged();
+        });
+      });
+
+      const addBtn = block.querySelector('.sd-pue-addrow');
+      if (addBtn) addBtn.addEventListener('click', () => {
+        const defaultSgIndex = a.allStats.length ? a.allStats[0].col.index : 0;
+        GZ.phases.addPueOverrideRow(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, seedRows, defaultSgIndex);
+        notifyChanged();
+      });
+
+      const resetBtn = block.querySelector('.sd-pue-reset');
+      if (resetBtn) resetBtn.addEventListener('click', () => {
+        if (resetBtn.disabled) return;
+        GZ.phases.resetPueOverride(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId);
+        notifyChanged();
+      });
+    });
+  }
+
+  // Vom "Bearbeiten in Stammdaten LSA"-Knopf in Umlaufprüfung aufgerufen
+  // (siehe dort renderPueDetailPanel()) - scrollt zum passenden Block und
+  // hebt ihn kurz hervor (siehe .sd-pue-highlight in css/charts.css), damit
+  // der Sprung aus der anderen Ansicht sichtbar ankommt statt nur stumm die
+  // Tabs zu wechseln.
+  function jumpToTransition(fromPhaseId, toPhaseId) {
+    const domId = 'sd-pue-' + fromPhaseId + '-' + toPhaseId;
+    const el = document.getElementById(domId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('sd-pue-highlight');
+    setTimeout(() => el.classList.remove('sd-pue-highlight'), 1500);
+  }
+
   GZ.views = GZ.views || {};
-  GZ.views.stammdatenLsa = { init, onAnalyzeComplete };
+  GZ.views.stammdatenLsa = { init, onAnalyzeComplete, jumpToTransition };
 })(window.GZ = window.GZ || {});
