@@ -644,11 +644,33 @@
           <div id="usHint" class="hint"></div>
         </div>
 
-        <div class="panel" id="usStatsPanel" style="display:none;">
+        <div class="panel" id="usTablePanel" style="display:none;">
           <div class="panel-head">
-            <span>Statistik</span>
-            <button type="button" id="usExportBtn" class="btn">Als Excel exportieren</button>
+            <span>Umläufe</span>
+            <div class="diagram-controls" id="usDiagramControls">
+              <button id="usBtnWinPrev" title="Vorheriges Fenster">◀</button>
+              <span class="win-label" id="usWinLabel"></span>
+              <button id="usBtnWinNext" title="Nächstes Fenster">▶</button>
+              <label class="win-size-label">Fenster:
+                <input type="number" id="usWinSize" min="1" max="1000" value="25" step="1">
+                Umläufe
+              </label>
+              <button id="usBtnWinAll">Alle anzeigen</button>
+            </div>
+            <div class="table-head-tools">
+              <button type="button" id="usExportBtn" class="btn">Als Excel exportieren</button>
+            </div>
           </div>
+          <div class="table-scroll">
+            <table>
+              <thead id="usTableHead"></thead>
+              <tbody id="usTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel" id="usStatsPanel" style="display:none;">
+          <div class="panel-head">Statistik</div>
           <div class="table-scroll">
             <table class="static-rows">
               <thead><tr><th>Spalte</th><th>n</th><th>Ø</th><th>Median</th><th>StdAbw</th><th>Min</th><th>Max</th><th>P85</th></tr></thead>
@@ -656,8 +678,6 @@
             </table>
           </div>
         </div>
-
-        <div class="hint">Die Werte je Umlauf finden sich als eigene Spur im Tab „Umlaufprüfung" (Objekt-Liste, Kürzel KENNZAHL).</div>
 
       </div>
     </div>

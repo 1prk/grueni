@@ -206,7 +206,14 @@
         if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"TF" erwartet als Argument eine Signalgruppe', pos);
         return 'NUM';
       },
-      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.tf : NaN; }; }
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.tf : NaN; }; },
+      span(args) {
+        const [objNode] = args;
+        return scope => {
+          const cm = objNode.run(scope).cycleMetrics;
+          return (cm && Number.isFinite(cm.an) && Number.isFinite(cm.ab)) ? { startSec: cm.an, endSec: cm.ab } : null;
+        };
+      }
     },
     RG: {
       arity: 1,
@@ -214,7 +221,14 @@
         if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"RG" erwartet als Argument eine Signalgruppe', pos);
         return 'NUM';
       },
-      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.rotgelb : NaN; }; }
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.rotgelb : NaN; }; },
+      span(args) {
+        const [objNode] = args;
+        return scope => {
+          const cm = objNode.run(scope).cycleMetrics;
+          return (cm && Number.isFinite(cm.an) && Number.isFinite(cm.rotgelb)) ? { startSec: cm.an - cm.rotgelb, endSec: cm.an } : null;
+        };
+      }
     },
     GE: {
       arity: 1,
@@ -222,7 +236,14 @@
         if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"GE" erwartet als Argument eine Signalgruppe', pos);
         return 'NUM';
       },
-      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.gelb : NaN; }; }
+      run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.gelb : NaN; }; },
+      span(args) {
+        const [objNode] = args;
+        return scope => {
+          const cm = objNode.run(scope).cycleMetrics;
+          return (cm && Number.isFinite(cm.ab) && Number.isFinite(cm.gelb)) ? { startSec: cm.ab, endSec: cm.ab + cm.gelb } : null;
+        };
+      }
     },
     Ausgeloest: {
       arity: 1,
@@ -273,6 +294,20 @@
           const tuMed = scope.TU_MED;
           return ((cmTo.an - cmFrom.ab) % tuMed + tuMed) % tuMed;
         };
+      },
+      // Objekt-bezogene Spanne für die Darstellung als Balken (siehe
+      // umlaufpruefung.js Kennzahl-Spur): NICHT modulo-normalisiert wie
+      // run() oben - reicht der Versatz über das Umlaufende hinaus
+      // (cmTo.an < cmFrom.ab, siehe Ueberschneidung), liefert das eine
+      // rückwärtslaufende Spanne (endSec < startSec); der Aufrufer erkennt
+      // das und fällt auf die volle Zeilenbreite zurück statt geometrisch
+      // falsch zu zeichnen.
+      span(args) {
+        const [fromNode, toNode] = args;
+        return scope => {
+          const cmFrom = fromNode.run(scope).cycleMetrics, cmTo = toNode.run(scope).cycleMetrics;
+          return (cmFrom && cmTo && Number.isFinite(cmFrom.ab) && Number.isFinite(cmTo.an)) ? { startSec: cmFrom.ab, endSec: cmTo.an } : null;
+        };
       }
     },
     Ueberschneidung: {
@@ -288,6 +323,13 @@
           const cmFrom = fromNode.run(scope).cycleMetrics, cmTo = toNode.run(scope).cycleMetrics;
           if (!cmFrom || !cmTo) return false;
           return cmTo.an < cmFrom.ab;
+        };
+      },
+      span(args) {
+        const [fromNode, toNode] = args;
+        return scope => {
+          const cmFrom = fromNode.run(scope).cycleMetrics, cmTo = toNode.run(scope).cycleMetrics;
+          return (cmFrom && cmTo && Number.isFinite(cmFrom.ab) && Number.isFinite(cmTo.an)) ? { startSec: cmTo.an, endSec: cmFrom.ab } : null;
         };
       }
     }
@@ -502,7 +544,16 @@
           throw new ExprError(`"${name}" erwartet ${prim.arity} Argument(e), bekam ${args.length}`, namePos);
         }
         const returnType = prim.check(args, namePos);
-        return { type: returnType, run: prim.run(args) };
+        const node = { type: returnType, run: prim.run(args) };
+        // span (nur einige Primitiven, siehe TF/RG/GE/Versatz/Ueberschneidung
+        // oben): die vom Ausdruck gemeinte Zeitspanne innerhalb des Umlaufs,
+        // für eine objekt-bezogene Balkendarstellung statt eines die ganze
+        // Zeile füllenden Balkens (siehe compileValue()/umlaufpruefung.js).
+        // Geht bei jeder weiteren Verknüpfung (+, Vergleich, eigene Funktion,
+        // ...) bewusst verloren - nur ein Ausdruck, der GENAU einer dieser
+        // Primitiven-Aufrufe IST, hat eine eindeutige Spanne.
+        if (prim.span) node.span = prim.span(args);
+        return node;
       }
 
       const fn = funcs[name];
@@ -606,7 +657,7 @@
     try {
       const tokens = tokenize(text, extraKatTokens);
       const node = parse(tokens, varTypes || {}, funcs || {});
-      return { ok: true, run: node.run, resultType: node.type };
+      return { ok: true, run: node.run, resultType: node.type, spanRun: node.span || null };
     } catch (e) {
       if (e instanceof ExprError) {
         const incomplete = e.incomplete || (typeof e.pos === 'number' && e.pos >= text.replace(/\s+$/, '').length);

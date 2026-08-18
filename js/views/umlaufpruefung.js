@@ -947,7 +947,10 @@
     const traceMeta = new Map();
     traceRefs.forEach(r => {
       if (r.kuerzel === 'KENNZAHL') {
-        traceMeta.set(objKey(r), { col: r, kind: 'kennzahl', valuesByCycleIdx: r.valuesByCycleIdx || [], valueKind: r.valueKind });
+        traceMeta.set(objKey(r), {
+          col: r, kind: 'kennzahl', valuesByCycleIdx: r.valuesByCycleIdx || [],
+          spansByCycleIdx: r.spansByCycleIdx || null, valueKind: r.valueKind
+        });
         return;
       }
       const kind = isNumericKuerzel(r.kuerzel) ? 'apw' : (r.kuerzel === 'FORMEL' ? 'formula' : 'det');
@@ -1032,7 +1035,12 @@
 
       const traceRows = traceRefs.map(r => {
         const m = traceMeta.get(objKey(r));
-        if (m.kind === 'kennzahl') return { col: m.col, kind: m.kind, value: m.valuesByCycleIdx[i], valueKind: m.valueKind };
+        if (m.kind === 'kennzahl') {
+          return {
+            col: m.col, kind: m.kind, value: m.valuesByCycleIdx[i], valueKind: m.valueKind,
+            span: m.spansByCycleIdx ? m.spansByCycleIdx[i] : null
+          };
+        }
         return { col: m.col, kind: m.kind, visSegs: m.sweep(start, end) };
       });
 
@@ -1191,16 +1199,30 @@
           wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
         } else if (tr.kind === 'kennzahl') {
           // Kennzahl (siehe umlaufstatistiken.js): kein Rohreihen-Sweep,
-          // sondern EIN vorberechneter Wert für den ganzen Umlauf - als
-          // durchgehender Balken mit zentriertem Wert dargestellt (analog zu
-          // den tFZ/ZwL-Spuren oben, nur ohne mehrere Segmente). Bei WAHR/
-          // FALSCH-Kennzahlen (kind: 'bool') wie eine Formel-Spur behandelt:
-          // nur FALSCH bleibt Grundlinie, WAHR wird eingefärbt, ohne
-          // zusätzliches Text-Label (deckt sich sonst mit der Balkenfarbe).
+          // sondern EIN vorberechneter Wert für den ganzen Umlauf. Objekt-
+          // bezogene Formeln (Versatz/Ueberschneidung/TF/RG/GE - siehe
+          // tr.span, aus exprEngine.js' compileValue().spanRun) haben eine
+          // EINDEUTIGE Zeitspanne INNERHALB des Umlaufs (z.B. Versatz(K1,K2):
+          // von Abwurf K1 bis Anwurf K2) - der Balken wird dann exakt über
+          // diese Spanne gezeichnet statt über die ganze Zeile, damit sich
+          // die Kennzahl optisch an den Signalgruppen-Spuren darüber
+          // verorten lässt. tr.span.endSec < startSec bedeutet: die Spanne
+          // reicht über das Umlaufende hinaus (siehe Versatz-Kopfkommentar in
+          // exprEngine.js) - dann (wie bei jeder Formel ohne erkennbare
+          // Spanne, z.B. TU oder eine von Hand geschriebene MOD(...)-Formel)
+          // Rückfall auf die volle Zeilenbreite statt einer geometrisch
+          // falschen (rückwärtslaufenden) Markierung. Bei WAHR/FALSCH-
+          // Kennzahlen (kind: 'bool') wie eine Formel-Spur behandelt: nur
+          // FALSCH bleibt Grundlinie, WAHR wird eingefärbt, ohne zusätzliches
+          // Text-Label (deckt sich sonst mit der Balkenfarbe).
           const v = tr.value;
           const isBool = tr.valueKind === 'bool';
           const on = isBool ? v === true : !(v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v)));
-          const segs = on ? [{ start: r.start, end: r.end, cat: 'WERT' }] : [];
+          const sp = tr.span;
+          const hasSpan = sp && Number.isFinite(sp.startSec) && Number.isFinite(sp.endSec) && sp.endSec > sp.startSec;
+          const segStart = hasSpan ? r.start + sp.startSec * 1000 : r.start;
+          const segEnd = hasSpan ? r.start + sp.endSec * 1000 : r.end;
+          const segs = on ? [{ start: segStart, end: segEnd, cat: 'WERT' }] : [];
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs,
             baselineCat: '__kennzahl_none__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
