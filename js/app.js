@@ -61,7 +61,7 @@
 
     GZ.state.data.currentAnalysis = {
       allStats, tMin, tMax, cycleStarts, otherColumns, times, seriesByCol,
-      splValues: parsed.splValues, tcValues: parsed.tcValues, splList
+      splValues: parsed.splValues, tcValues: parsed.tcValues, splList, knotenName, knotenNr
     };
 
     const durationMin = ((tMax - tMin) / 60000).toFixed(0);

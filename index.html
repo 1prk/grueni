@@ -172,13 +172,21 @@
       <div class="view">
 
         <div class="panel">
-          <div class="panel-head">Stammdaten LSA — Phaseneinteilung</div>
+          <div class="panel-head">
+            <span>Stammdaten LSA — Phaseneinteilung</span>
+            <div class="panel-head-actions">
+              <button type="button" id="sdConfigSaveBtn" class="btn" title="Phasen + PÜ-Korrekturen als JSON-Datei je Knoten speichern (ohne Rohdaten)">Phasen speichern</button>
+              <label class="btn" for="sdConfigLoadInput">Phasen laden …</label>
+              <input type="file" id="sdConfigLoadInput" accept=".json" style="display:none;">
+            </div>
+          </div>
           <div class="hint" style="padding:14px 16px 0;">
             Eine <b>Phase</b> fasst die Signalgruppen zusammen, die gleichzeitig Grün (Freigabe) zeigen
             und damit ohne Verkehrskonflikt gemeinsam abgewickelt werden (RiLSA). Ein Signalprogramm
             durchläuft je Umlauf eine feste Phasenfolge, getrennt durch Zwischenzeiten. Hier festlegen,
             welche Signalgruppen zu welcher Phase gehören – ausgewertet wird das im Tab „Phasenauswertung“.
           </div>
+          <div class="hint" id="sdLoadHint" style="display:none; padding:6px 16px 0;"></div>
           <div class="hint warn" id="sdNoSgHint" style="display:none;">Keine Signalgruppen in der aktuellen Analyse gefunden.</div>
           <div class="panel-body phase-matrix-wrap">
             <table class="phase-matrix" id="sdPhaseTable"></table>

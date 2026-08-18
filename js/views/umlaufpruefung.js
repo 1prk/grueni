@@ -73,6 +73,14 @@
   // (Unix-Zeit), b ist null solange nur eine Marke gesetzt ist.
   let measurements = new Map();
 
+  // PÜ-Detailwerkzeug (siehe togglePueDetail()/renderPueDetailPanel() unten):
+  // höchstens EIN geöffnetes Detail-Panel gleichzeitig, an ein bestimmtes
+  // Umlauf+Phasenübergang-Vorkommen gebunden (cycleIdx = Index in
+  // cycleStarts, NICHT Position im aktuell sichtbaren Fenster - bleibt so
+  // beim Blättern/Filtern gültig, auch wenn die Zeile gerade nicht sichtbar
+  // ist). null = geschlossen.
+  let openPueDetail = null; // {cycleIdx, fromPhaseId, toPhaseId} | null
+
   function init(root) {
     els = {
       root,
@@ -211,8 +219,219 @@
       const prevPhase = i > 0 ? phaseById.get(segs[i - 1].cat) : null;
       const nextPhase = i < segs.length - 1 ? phaseById.get(segs[i + 1].cat) : null;
       seg.pueLabel = (prevPhase && nextPhase) ? pueLabelFor(prevPhase.kuerzel, nextPhase.kuerzel) : null;
+      // Für das PÜ-Detailwerkzeug (togglePueDetail()): welche beiden Phasen
+      // dieser Übergang verbindet, direkt am Segment - erspart dem Klick-
+      // Handler eine erneute Nachbarschaftssuche.
+      seg.pueFromPhaseId = prevPhase ? prevPhase.id : null;
+      seg.pueToPhaseId = nextPhase ? nextPhase.id : null;
     });
     return { segs, phaseById, colorByPhaseId };
+  }
+
+  function pueOverrideKey(fromPhaseId, toPhaseId) { return fromPhaseId + '→' + toPhaseId; }
+
+  // Reale An/Ab/TF/Rotgelb/Gelb-Werte EINER Signalgruppe für EINEN Umlauf -
+  // dieselbe Grundlage wie die umlaufweisen exprEngine-Primitiven/Kennzahlen
+  // (GZ.segments.computeCycleSgMetrics), hier aber für eine beliebige, ggf.
+  // gerade nicht in der Objekt-Liste angehakte Signalgruppe auf Abruf
+  // berechnet (Phasenmitglieder sind unabhängig von der Objekt-Auswahl).
+  //
+  // sgIndex ist hier IMMER der rohe CSV-Spaltenindex (col.index, wie in
+  // phase.members - siehe stammdatenLsa.js data-member="${col.index}"),
+  // NICHT die Position in a.allStats (die zählt SG-Spalten separat durch,
+  // siehe allObjects()' index:i - dieselbe Unterscheidung wie schon in
+  // GZ.phases.computePhaseOccurrences()). Direktes a.allStats[sgIndex] wäre
+  // nur zufällig richtig, wenn die erste Spalte bereits eine Signalgruppe
+  // ist und keine Spalten fehlen.
+  function findSgEntryByColIndex(sgIndex, a) { return a.allStats.find(s => s.col.index === sgIndex); }
+
+  function realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) {
+    const entry = findSgEntryByColIndex(sgIndex, a);
+    if (!entry) return null;
+    const metrics = GZ.segments.computeCycleSgMetrics(entry.segs, entry.stats.greens, a.cycleStarts, a.tMax, TU_MED);
+    return metrics[cycleIdx] || null;
+  }
+
+  // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
+  // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase
+  // (nur Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ
+  // zum frühesten Ab unter den abwerfenden Mitgliedern (= die "TX=0"-Referenz
+  // dieses Übergangs, siehe Kopfkommentar der Sketch-Diskussion). null, wenn
+  // in diesem Umlauf kein Mitglied der abwerfenden Phase einen Ab-Wert hat
+  // (z.B. Datenlücke) - dann gibt es nichts, worauf sich die Spanne beziehen
+  // könnte.
+  function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
+    const outgoing = [...fromPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    const incoming = [...toPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    const abs = outgoing.map(o => o.cm && Number.isFinite(o.cm.ab) ? o.cm.ab : null).filter(v => v != null);
+    if (!abs.length) return null;
+    const referenceSec = Math.min(...abs);
+    const rows = [];
+    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round((o.cm.ab - referenceSec) * 10) / 10 }); });
+    incoming.forEach(o => { if (o.cm && Number.isFinite(o.cm.an)) rows.push({ sgIndex: o.sgIndex, an: Math.round((o.cm.an - referenceSec) * 10) / 10, ab: null }); });
+    return { referenceSec, rows };
+  }
+
+  // Aufgelöste Zeilenliste für das PÜ-Detailwerkzeug: manuelle Korrektur
+  // (siehe GZ.state.data.pueOverrides, je PHASENÜBERGANGSTYP) hat Vorrang
+  // vor der automatischen Erkennung, gilt dann aber für JEDES Vorkommen
+  // dieses Übergangs identisch (dieselben Zahlen, unabhängig vom Umlauf) -
+  // die Referenzzeit für die Balken-Darstellung bleibt trotzdem live je
+  // Umlauf berechnet (siehe renderPueDetailPanel()), damit der Balken immer
+  // die ECHTEN Rohdaten dieses konkreten Umlaufs zeigt, auch wenn die
+  // Tabellenwerte manuell überschrieben sind (so lässt sich eine Korrektur
+  // visuell gegen die Realität prüfen statt blind zu vertrauen).
+  function resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
+    const auto = autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
+    const override = GZ.state.data.pueOverrides[pueOverrideKey(fromPhase.id, toPhase.id)];
+    return {
+      referenceSec: auto ? auto.referenceSec : null,
+      rows: override ? override.rows : (auto ? auto.rows : []),
+      overridden: !!override
+    };
+  }
+
+  // Öffnet/schließt das PÜ-Detailpanel für EIN Vorkommen (erneuter Klick auf
+  // denselben Übergang schließt es wieder) - höchstens eines gleichzeitig.
+  function togglePueDetail(cycleIdx, fromPhaseId, toPhaseId) {
+    const same = openPueDetail && openPueDetail.cycleIdx === cycleIdx
+      && openPueDetail.fromPhaseId === fromPhaseId && openPueDetail.toPhaseId === toPhaseId;
+    openPueDetail = same ? null : { cycleIdx, fromPhaseId, toPhaseId };
+    render();
+  }
+
+  // Legt bei Bedarf eine Korrektur an (mit den aktuell ANGEZEIGTEN Zeilen als
+  // Startpunkt, damit ein einzelnes Feld-Edit nicht die übrigen, bislang nur
+  // automatisch erkannten Zeilen verliert) - idempotent, ändert eine bereits
+  // vorhandene Korrektur nicht erneut.
+  function ensurePueOverride(fromPhaseId, toPhaseId, seedRows) {
+    const key = pueOverrideKey(fromPhaseId, toPhaseId);
+    if (!GZ.state.data.pueOverrides[key]) GZ.state.data.pueOverrides[key] = { rows: seedRows.map(r => ({ ...r })) };
+    return GZ.state.data.pueOverrides[key];
+  }
+  function setPueOverrideRowField(fromPhaseId, toPhaseId, rowIdx, field, value, seedRows) {
+    const ov = ensurePueOverride(fromPhaseId, toPhaseId, seedRows);
+    if (ov.rows[rowIdx]) ov.rows[rowIdx][field] = value;
+    render();
+  }
+  function addPueOverrideRow(fromPhaseId, toPhaseId, seedRows, sgIndex) {
+    ensurePueOverride(fromPhaseId, toPhaseId, seedRows).rows.push({ sgIndex, an: null, ab: null });
+    render();
+  }
+  function removePueOverrideRow(fromPhaseId, toPhaseId, seedRows, rowIdx) {
+    ensurePueOverride(fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
+    render();
+  }
+  function resetPueOverride(fromPhaseId, toPhaseId) {
+    delete GZ.state.data.pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
+    render();
+  }
+
+  // Reale Segmentliste EINER Signalgruppe, zeitlich um die PÜ-Referenz
+  // verschoben (referenceAbsMs = Umlaufbeginn + referenceSec) - damit zeigt
+  // ein renderLane()-Aufruf mit wMin/wMax nahe 0 direkt die lokale TX-Achse
+  // dieses Übergangs, ohne dass renderLane selbst etwas von "Verschiebung"
+  // wissen müsste (dieselbe Funktion wie überall sonst, nur mit bereits
+  // vorverschobenen Segment-Zeiten als Eingabe).
+  function buildLocalShiftedSegs(sgIndex, referenceAbsMs, a) {
+    const entry = findSgEntryByColIndex(sgIndex, a);
+    if (!entry) return [];
+    return entry.segs.map(s => ({ ...s, start: s.start - referenceAbsMs, end: s.end - referenceAbsMs }));
+  }
+
+  // PÜ-Detailpanel: wird NACH dem regulären zweistufigen Render (Vorlage +
+  // SVG) separat an genau EINE Umlauf-Gruppe angehängt, statt Teil des
+  // generischen Spuren-Systems zu sein - es kann ohnehin nie mehr als eines
+  // gleichzeitig offen sein, ein eigener, unabhängiger Pfad ist hier
+  // einfacher als das bestehende objektbezogene Zeilensystem um einen
+  // "aufklappbaren" Sonderfall zu erweitern.
+  function renderPueDetailPanel(rowData, groupEls, a, TU_MED) {
+    if (!openPueDetail) return;
+    const rowPos = rowData.findIndex(r => r.i === openPueDetail.cycleIdx);
+    if (rowPos === -1) return; // Vorkommen aktuell nicht sichtbar (Fenster/Filter) - Zustand bleibt erhalten
+    const { cycleIdx, fromPhaseId, toPhaseId } = openPueDetail;
+    const fromPhase = GZ.state.data.phases.find(p => p.id === fromPhaseId);
+    const toPhase = GZ.state.data.phases.find(p => p.id === toPhaseId);
+    if (!fromPhase || !toPhase) { openPueDetail = null; return; }
+
+    const resolved = resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
+    const referenceSec = resolved.referenceSec != null ? resolved.referenceSec : 0;
+    const cycleStart = a.cycleStarts[cycleIdx];
+    const referenceAbsMs = cycleStart + referenceSec * 1000;
+
+    const label = pueLabelFor(fromPhase.kuerzel, toPhase.kuerzel);
+    const fromLabel = fromPhase.name && fromPhase.name !== fromPhase.kuerzel ? `${fromPhase.kuerzel} – ${fromPhase.name}` : fromPhase.kuerzel;
+    const toLabel = toPhase.name && toPhase.name !== toPhase.kuerzel ? `${toPhase.kuerzel} – ${toPhase.name}` : toPhase.kuerzel;
+
+    const panel = document.createElement('div');
+    panel.className = 'up-pue-panel';
+    // TF wird NIE frei eingegeben, sondern immer berechnet (siehe
+    // Kopfkommentar autoDetectPueRows()): für eine Zeile mit gesetztem An
+    // die tatsächliche, reale Freigabezeit der dort beginnenden Grünphase
+    // (unabhängig davon, ob An/Ab manuell korrigiert wurden - die reale
+    // Dauer bleibt, was sie ist); nur wenn eine Zeile ausnahmsweise sowohl
+    // An als auch Ab von Hand gesetzt hat (z.B. eine frei hinzugefügte
+    // Zeile ohne eigene Grünphase hier), ersatzweise Ab-An.
+    const rowsHtml = resolved.rows.map((row, i) => {
+      const cm = row.an != null ? realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
+      const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
+      const sgOptions = a.allStats.map(s => `<option value="${s.col.index}"${s.col.index === row.sgIndex ? ' selected' : ''}>${esc(s.col.name)}</option>`).join('');
+      return `
+        <div class="up-pue-row" data-row-idx="${i}">
+          <select class="up-pue-sg">${sgOptions}</select>
+          <label class="up-pue-field">An<input type="number" class="up-pue-an" step="0.1" value="${row.an != null ? row.an : ''}" placeholder="–"></label>
+          <label class="up-pue-field">Ab<input type="number" class="up-pue-ab" step="0.1" value="${row.ab != null ? row.ab : ''}" placeholder="–"></label>
+          <span class="up-pue-tf" title="Freigabezeit – wird berechnet, nicht eingegeben">TF ${tf != null ? tf : '–'}</span>
+          <div class="up-pue-track"><svg></svg></div>
+          <button type="button" class="up-pue-row-remove" title="Zeile entfernen">✕</button>
+        </div>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <div class="up-pue-panel-head">
+        <span><b>${esc(label)}</b><span class="up-pue-panel-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}</span></span>
+        <div class="up-pue-panel-actions">
+          <button type="button" class="up-pue-reset"${resolved.overridden ? '' : ' disabled'}>Automatisch erkannt zurücksetzen</button>
+          <button type="button" class="up-pue-close" title="Schließen">✕</button>
+        </div>
+      </div>
+      ${resolved.rows.length ? `<div class="up-pue-rows">${rowsHtml}</div>` : '<div class="up-pue-empty">Keine Daten für diesen Umlauf (z. B. Datenlücke).</div>'}
+      <button type="button" class="up-pue-addrow">+ Zeile hinzufügen</button>
+    `;
+
+    groupEls[rowPos].appendChild(panel);
+
+    const allVals = resolved.rows.flatMap(r => [r.an, r.ab]).filter(v => v != null);
+    const maxVal = allVals.length ? Math.max(...allVals, 0) : 15;
+    const minVal = allVals.length ? Math.min(...allVals, 0) : 0;
+    const localWMin = (minVal - 5) * 1000, localWMax = (maxVal + 5) * 1000;
+    panel.querySelectorAll('.up-pue-row').forEach((rowEl, i) => {
+      const row = resolved.rows[i];
+      const svg = rowEl.querySelector('.up-pue-track svg');
+      const shiftedSegs = buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
+        .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+      renderLane(svg, {
+        wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
+        baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+        gridStepMs: 5000, laneStyle: currentLaneStyle()
+      });
+    });
+
+    panel.querySelector('.up-pue-close').addEventListener('click', () => { openPueDetail = null; render(); });
+    const resetBtn = panel.querySelector('.up-pue-reset');
+    resetBtn.addEventListener('click', () => { if (!resetBtn.disabled) resetPueOverride(fromPhaseId, toPhaseId); });
+    panel.querySelector('.up-pue-addrow').addEventListener('click', () => {
+      const used = new Set(resolved.rows.map(r => r.sgIndex));
+      const next = a.allStats.find(s => !used.has(s.col.index));
+      addPueOverrideRow(fromPhaseId, toPhaseId, resolved.rows, next ? next.col.index : (a.allStats[0] ? a.allStats[0].col.index : 0));
+    });
+    panel.querySelectorAll('.up-pue-row').forEach(rowEl => {
+      const idx = Number(rowEl.dataset.rowIdx);
+      rowEl.querySelector('.up-pue-row-remove').addEventListener('click', () => removePueOverrideRow(fromPhaseId, toPhaseId, resolved.rows, idx));
+      rowEl.querySelector('.up-pue-sg').addEventListener('change', e => setPueOverrideRowField(fromPhaseId, toPhaseId, idx, 'sgIndex', Number(e.target.value), resolved.rows));
+      rowEl.querySelector('.up-pue-an').addEventListener('change', e => setPueOverrideRowField(fromPhaseId, toPhaseId, idx, 'an', e.target.value === '' ? null : Number(e.target.value), resolved.rows));
+      rowEl.querySelector('.up-pue-ab').addEventListener('change', e => setPueOverrideRowField(fromPhaseId, toPhaseId, idx, 'ab', e.target.value === '' ? null : Number(e.target.value), resolved.rows));
+    });
   }
 
   // Eindeutiger, stabiler (innerhalb einer Sitzung) Schlüssel für ein
@@ -1316,11 +1535,19 @@
             segLabelColorFor: d => d.cat === 'NONE' ? 'var(--text-muted)' : '#fff',
             segTitle: d => {
               const durS = Math.round((d.end - d.start) / 1000);
-              if (d.cat === 'NONE') return `${d.pueLabel || 'Kein Phase aktiv'}: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)} (${durS}s)`;
+              if (d.cat === 'NONE') {
+                const openHint = d.pueFromPhaseId && d.pueToPhaseId ? ' – klicken für PÜ-Werkzeug' : '';
+                return `${d.pueLabel || 'Kein Phase aktiv'}${openHint}: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)} (${durS}s)`;
+              }
               const ph = m.phaseById.get(d.cat);
               const label = ph ? (ph.name && ph.name !== ph.kuerzel ? `${ph.kuerzel} – ${ph.name}` : ph.kuerzel) : d.cat;
               return `${label}: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)} (${durS}s)`;
-            }
+            },
+            // Nur benannte Übergänge (echte Nachbarn auf beiden Seiten, siehe
+            // buildPhaseTrack()) sind klickbar - ein Rand-Segment ohne
+            // pueFromPhaseId/-ToPhaseId hätte nichts zum Öffnen.
+            segCursor: d => (d.cat === 'NONE' && d.pueFromPhaseId && d.pueToPhaseId) ? 'pointer' : 'default',
+            onSegClick: d => { if (d.cat === 'NONE' && d.pueFromPhaseId && d.pueToPhaseId) togglePueDetail(r.i, d.pueFromPhaseId, d.pueToPhaseId); }
           });
           wireMeasure(subSvg, r.start, r.end, `${r.i}|phase|${c.index}`);
         } else {
@@ -1339,6 +1566,8 @@
 
       wireCrosshair(group, r.start, r.end);
     });
+
+    renderPueDetailPanel(rowData, groupEls, a, TU);
 
     els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');
     els.info.textContent = `${n} Umlauf/Umläufe`;
