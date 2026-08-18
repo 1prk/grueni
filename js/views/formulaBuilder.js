@@ -86,7 +86,7 @@
   const RESERVED_CI = new Set(['AND', 'OR', 'NOT']);
   const RESERVED_EXACT = new Set([
     'TX', 'GRUEN', 'ROT', 'GELB', 'ROTGELB', 'DUNKEL', 'BELEGT', 'FREI', 'Zustand', 'Dauer', 'DauerSeit',
-    'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD'
+    'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD', 'Versatz', 'Ueberschneidung'
   ]);
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
@@ -642,7 +642,7 @@
           f.highlightCol = optEl.dataset.col === '' ? null : Number(optEl.dataset.col);
           closeAllHlPopovers();
           renderFormulaRows();
-          if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshFormulaColumns();
+          if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
         };
       });
       GZ.exprEditor.setup(rowEl, {
@@ -1153,7 +1153,7 @@
       });
     }
 
-    if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshFormulaColumns();
+    if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
   }
 
   // Lesezugriff für umlaufpruefung.js: zuletzt berechnete synthetische
