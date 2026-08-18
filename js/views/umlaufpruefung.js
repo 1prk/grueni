@@ -167,6 +167,54 @@
     return String(v);
   }
 
+  // Phasenspur (Stammdaten LSA/Phasenauswertung, siehe GZ.phases): anders als
+  // FORMEL/KENNZAHL keine Liste (Phasen sind per Definition nie gleichzeitig
+  // aktiv, siehe phases.js Kopfkommentar) - EIN einziges Pseudo-Objekt für
+  // die kombinierte Zeitleiste aller Phasen, nur vorhanden, wenn mindestens
+  // eine Phase definiert ist. index bleibt konstant 0 (nur ein Eintrag).
+  function phaseCols() {
+    const phases = GZ.state.data.currentAnalysis ? GZ.state.data.phases : [];
+    if (!phases || !phases.length) return [];
+    return [{ kuerzel: 'PHASE', index: 0, name: 'Phasen', beschreibung: 'Kombinierte Phasenspur (Stammdaten LSA) mit inferierten Phasenübergängen' }];
+  }
+
+  // Name für eine inferierte Phasenübergang-Lücke aus den Kürzeln der beiden
+  // angrenzenden Phasen: enden beide auf eine Zahl (Standard-Kürzel "PhN"),
+  // kurz als "PÜ<n1>.<n2>" (z.B. "PÜ1.2"); sonst robust als "PÜ k1→k2", damit
+  // frei benannte Kürzel nicht zu einem unsinnigen Text zusammengequetscht
+  // werden.
+  function pueLabelFor(k1, k2) {
+    const m1 = /(\d+)\s*$/.exec(k1), m2 = /(\d+)\s*$/.exec(k2);
+    return (m1 && m2) ? `PÜ${m1[1]}.${m2[1]}` : `PÜ ${k1}→${k2}`;
+  }
+
+  // Kombinierte Phasenspur (siehe GZ.phases, gleiche Grundlage wie
+  // js/views/phasenauswertung.js): eine Liste je Phase, wann sie
+  // vollständig angezeigt wurde (alle Mitglieds-Signalgruppen gleichzeitig
+  // Grün), zu EINER lückenlosen Segmentreihe zusammengeführt
+  // (buildCombinedSegments) - Lücken (cat 'NONE') sind Phasenübergänge, hier
+  // zusätzlich zum Kürzel-Paar der beiden UNMITTELBAR ANGRENZENDEN echten
+  // Phasen-Segmente benannt (seg.pueLabel) statt anonym zu bleiben; ohne
+  // Nachbar auf einer Seite (Aufzeichnungsrand, nie erkannte Phase) bleibt
+  // pueLabel null. Einmal je render()-Durchlauf gebaut (wie sgData), nicht
+  // je Zeile - die zugrundeliegenden Vorkommen sind ohnehin unabhängig vom
+  // sichtbaren Umlauf-Fenster.
+  function buildPhaseTrack(a) {
+    const phases = GZ.state.data.phases;
+    if (!phases || !phases.length) return null;
+    const occEntries = phases.map((phase, i) => ({ ...GZ.phases.computePhaseOccurrences(phase, a.allStats), color: GZ.phases.colorForIndex(i) }));
+    const phaseById = new Map(occEntries.map(e => [e.phase.id, e.phase]));
+    const colorByPhaseId = new Map(occEntries.map(e => [e.phase.id, e.color]));
+    const segs = GZ.phases.buildCombinedSegments(occEntries, a.tMin, a.tMax);
+    segs.forEach((seg, i) => {
+      if (seg.cat !== 'NONE') return;
+      const prevPhase = i > 0 ? phaseById.get(segs[i - 1].cat) : null;
+      const nextPhase = i < segs.length - 1 ? phaseById.get(segs[i + 1].cat) : null;
+      seg.pueLabel = (prevPhase && nextPhase) ? pueLabelFor(prevPhase.kuerzel, nextPhase.kuerzel) : null;
+    });
+    return { segs, phaseById, colorByPhaseId };
+  }
+
   // Eindeutiger, stabiler (innerhalb einer Sitzung) Schlüssel für ein
   // Objekt - SG-Spalten haben von Haus aus kein "kuerzel"-Feld, daher wie
   // schon beim bisherigen Filter synthetisch mit 'SG' getaggt; ihr "index"
@@ -190,7 +238,7 @@
     const sg = a.allStats.map(({ col }, i) => ({ kuerzel: 'SG', index: i, name: col.name, beschreibung: col.beschreibung }));
     const det = a.otherColumns.filter(c => c.kuerzel === 'DET').concat(formulaCols(), kennzahlCols());
     const apw = a.otherColumns.filter(c => c.kuerzel === 'APW' || c.kuerzel === 'OEPNV');
-    return sg.concat(det, apw);
+    return phaseCols().concat(sg, det, apw);
   }
 
   function isNumericKuerzel(kuerzel) { return kuerzel === 'APW' || kuerzel === 'OEPNV'; }
@@ -214,7 +262,16 @@
     const known = new Set(objs.map(objKey));
     const kept = objectOrder.filter(k => known.has(k));
     const keptSet = new Set(kept);
-    objs.forEach(o => { const k = objKey(o); if (!keptSet.has(k)) kept.push(k); });
+    objs.forEach(o => {
+      const k = objKey(o);
+      if (keptSet.has(k)) return;
+      // Phasenspur soll beim erstmaligen Erscheinen (egal ob beim ersten
+      // Rendern nach Datenimport oder weil erst später in Stammdaten LSA
+      // eine Phase angelegt wurde) OBEN stehen, nicht hinten angehängt wie
+      // neu berechnete Formeln/Kennzahlen - danach frei per Ziehen
+      // umsortierbar wie jedes andere Objekt auch.
+      if (o.kuerzel === 'PHASE') kept.unshift(k); else kept.push(k);
+    });
     objectOrder = kept;
     return objectOrder;
   }
@@ -940,10 +997,12 @@
       ? `Keine ÖPNV-Konfiguration für: ${missingFz.join(', ')} – bitte im Tab „ÖPNV“ anlegen.`
       : '';
 
-    // Nicht-SG-Spuren (DET/FORMEL/APW/OEPNV) - bis auf die Segmentierungs-
-    // Funktion (kind bestimmt außerdem die Darstellung beim SVG-Rendern
-    // weiter unten) identisch behandelt, damit sie sich frei mit den
-    // Signalgruppen verschachteln lassen.
+    const phaseTrack = buildPhaseTrack(a);
+
+    // Nicht-SG-Spuren (DET/FORMEL/APW/OEPNV/PHASE) - bis auf die
+    // Segmentierungs-Funktion (kind bestimmt außerdem die Darstellung beim
+    // SVG-Rendern weiter unten) identisch behandelt, damit sie sich frei mit
+    // den Signalgruppen verschachteln lassen.
     const traceMeta = new Map();
     traceRefs.forEach(r => {
       if (r.kuerzel === 'KENNZAHL') {
@@ -951,6 +1010,14 @@
           col: r, kind: 'kennzahl', valuesByCycleIdx: r.valuesByCycleIdx || [],
           spansByCycleIdx: r.spansByCycleIdx || null, valueKind: r.valueKind
         });
+        return;
+      }
+      if (r.kuerzel === 'PHASE') {
+        // phaseTrack kann bei leerer Phasenliste null sein, obwohl der
+        // Objekt-Eintrag noch angehakt in objectOrder steht (z.B. gerade
+        // die letzte Phase in Stammdaten LSA gelöscht) - dann einfach eine
+        // leere Spur statt eines Absturzes.
+        traceMeta.set(objKey(r), { col: r, kind: 'phase', sweep: makeIntervalSweep(phaseTrack ? phaseTrack.segs : []), phaseById: phaseTrack ? phaseTrack.phaseById : new Map(), colorByPhaseId: phaseTrack ? phaseTrack.colorByPhaseId : new Map() });
         return;
       }
       const kind = isNumericKuerzel(r.kuerzel) ? 'apw' : (r.kuerzel === 'FORMEL' ? 'formula' : 'det');
@@ -1232,6 +1299,30 @@
             segTitle: () => `${esc(c.name)}: ${formatKennzahlValue(v)}`
           });
           wireMeasure(subSvg, r.start, r.end, `${r.i}|kennzahl|${c.index}`);
+        } else if (tr.kind === 'phase') {
+          // Phasenspur (siehe buildPhaseTrack() oben): reale Phasen-Segmente
+          // (cat = Phasen-ID) in ihrer Kategorienfarbe wie in
+          // Phasenauswertung, inferierte Übergänge (cat 'NONE', siehe dort
+          // seg.pueLabel) mit demselben Schraffur-Muster wie Datenlücken
+          // (url(#gz-pat-gap)) - "das ist kein definierter Zustand, sondern
+          // abgeleitet" statt einer weiteren Vollfarbe.
+          const m = traceMeta.get(objKey(c));
+          renderLane(subSvg, {
+            wMin: r.start, wMax: r.end, segs: tr.visSegs,
+            baselineCat: '__phase_baseline__', baselineColor: 'var(--text-faint)', baselineHeight: 2,
+            width: subSize.width, height: subSize.height, gridStepMs: 5000,
+            fillFor: d => d.cat === 'NONE' ? 'url(#gz-pat-gap)' : (m.colorByPhaseId.get(d.cat) || '#9aa4b0'),
+            segLabelFor: d => d.cat === 'NONE' ? (d.pueLabel || '') : (m.phaseById.get(d.cat) ? m.phaseById.get(d.cat).kuerzel : ''),
+            segLabelColorFor: d => d.cat === 'NONE' ? 'var(--text-muted)' : '#fff',
+            segTitle: d => {
+              const durS = Math.round((d.end - d.start) / 1000);
+              if (d.cat === 'NONE') return `${d.pueLabel || 'Kein Phase aktiv'}: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)} (${durS}s)`;
+              const ph = m.phaseById.get(d.cat);
+              const label = ph ? (ph.name && ph.name !== ph.kuerzel ? `${ph.kuerzel} – ${ph.name}` : ph.kuerzel) : d.cat;
+              return `${label}: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)} (${durS}s)`;
+            }
+          });
+          wireMeasure(subSvg, r.start, r.end, `${r.i}|phase|${c.index}`);
         } else {
           const isFormula = tr.kind === 'formula';
           renderLane(subSvg, {

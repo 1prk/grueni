@@ -36,6 +36,13 @@
   function notifyChanged() {
     if (GZ.views.phasenauswertung) GZ.views.phasenauswertung.refresh();
     if (GZ.views.gruenzeitanalyse) GZ.views.gruenzeitanalyse.refresh();
+    // Umlaufprüfung zeigt dieselben Phasen als eigene Spur (PHASE-Objekt,
+    // siehe umlaufpruefung.js phaseCols()/buildPhaseTrack()) - deren
+    // Objekt-Liste (Checkbox erscheint/verschwindet mit der ersten/letzten
+    // Phase) UND Spuren-Rendering müssen nach jeder Änderung hier
+    // mitziehen, exakt wie schon bei Formel-Builder-/Umlaufstatistiken-
+    // Änderungen (refreshSyntheticColumns()).
+    if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
   }
 
   function renderTable() {
