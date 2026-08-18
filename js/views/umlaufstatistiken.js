@@ -2,15 +2,16 @@
    selbst definierte Spalten (Bezeichnung + Formel in der GZ.exprEngine-
    Ausdruckssprache - derselben, die auch der Formel-Builder in
    Umlaufprüfung nutzt, siehe js/core/exprEngine.js/umlaufContext.js), je
-   einmal ausgewertet über ALLE Umläufe der Aufzeichnung. Dieser Tab selbst
-   zeigt dazu nur noch die Spaltendefinition + eine Aggregatstatistik-
-   Tabelle je Spalte (Zahl -> Ø/Median/StdAbw/Min/Max/P85, Wahr/Falsch ->
-   Anteil) + Excel-Export (immer über die komplette Aufzeichnung). Die Werte
-   JE UMLAUF selbst erscheinen nicht mehr in einer eigenen Tabelle hier,
-   sondern als zusätzliche KENNZAHL-Spur in der vereinheitlichten Objekt-
-   Liste des Tabs "Umlaufprüfung" (siehe getSyntheticColumns() unten sowie
-   dortiges kennzahlCols()/traceMeta) - derselbe Umlauf-für-Umlauf-Kontext,
-   den auch die Signalgruppen-/Formel-/APW-Spuren dort verwenden.
+   einmal ausgewertet über ALLE Umläufe der Aufzeichnung. Ergebnis: eine
+   gefensterte Tabelle (Performance bei vielen Umläufen, wie
+   js/views/umlaufpruefung.js) + eine Aggregatstatistik-Tabelle je Spalte
+   (Zahl -> Ø/Median/StdAbw/Min/Max/P85, Wahr/Falsch -> Anteil) + Excel-
+   Export (beide Tabellen, IMMER über die komplette Aufzeichnung, unabhängig
+   vom sichtbaren Fenster). Dieselben Spalten erscheinen ZUSÄTZLICH als
+   eigene KENNZAHL-Spur in der vereinheitlichten Objekt-Liste des Tabs
+   "Umlaufprüfung" (siehe getSyntheticColumns() unten sowie dortiges
+   kennzahlCols()/traceMeta) - dort als Balken im zeitlichen Kontext der
+   Signalgruppen, hier als vollständige Tabelle zum genauen Ablesen/Export.
 
    Anders als der zeilenweise Formel-Builder (eine boolesche Rohreihe je
    Formel, Primitiven Zustand/Dauer/DauerSeit) wertet dieser Tab GENAU EINMAL
@@ -19,10 +20,22 @@
    Ausgeloest/AnzahlAusloesungen lesen dafür aus handle.cycleMetrics statt
    handle.sweep (siehe GZ.umlaufContext.buildAll()). Zustand/Dauer/DauerSeit
    sind hier bewusst NICHT nutzbar (kein wohldefinierter "aktueller
-   Zeitpunkt" für einen ganzen Umlauf) - siehe findPerRowOnlyUsage(). */
+   Zeitpunkt" für einen ganzen Umlauf) - siehe findPerRowOnlyUsage().
+
+   Einige Primitiven (TF/RG/GE/Versatz/Ueberschneidung) haben zusätzlich zu
+   ihrem Zahlen-/Wahrheitswert eine eindeutige ZEITSPANNE innerhalb des
+   Umlaufs (z.B. Versatz(K1,K2): von Abwurf K1 bis Anwurf K2) - exprEngine.js
+   liefert die optional über compileValue().spanRun mit, hier je Umlauf
+   ausgewertet (evaluated[].spans) und über getSyntheticColumns() weiter-
+   gereicht, damit die Kennzahl-Spur in der Umlaufprüfung den Balken exakt
+   über diese Spanne zeichnen kann statt über die ganze Zeile (siehe dortiger
+   Kommentar zu tr.span). Nur vorhanden, wenn der GESAMTE Spaltenausdruck
+   genau einer dieser Primitiven-Aufrufe ist (nicht etwa in eine Rechnung
+   eingebettet) - sonst bleibt spans null und die Spur fällt dort auf die
+   volle Zeilenbreite zurück. */
 (function (GZ) {
   'use strict';
-  const { esc, fmtTs } = GZ.format;
+  const { esc, fmtTs, fmtTimeShort } = GZ.format;
   const { mean, median, stdDev, percentile } = GZ.stats;
 
   const KENNZAHL_INDEX_BASE = 2000000; // eigener Bereich, unabhängig von formulaBuilder.js' SYNTH_INDEX_BASE
@@ -30,7 +43,8 @@
   let els = null;
   let nextColId = 1;
   let ctxAll = null; // {index, cycles} - einmal je Analyse gebaut (GZ.umlaufContext.buildAll)
-  let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, incomplete, values, kind, skip}
+  let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, incomplete, values, spans, kind, skip}
+  let windowCount = 25, windowStartIdx = 0, showAll = false;
 
   // Aktueller Autocomplete-Zustand - es ist immer höchstens ein Dropdown
   // gleichzeitig offen (das des fokussierten Ausdrucksfelds).
@@ -88,12 +102,44 @@
       colRows: root.querySelector('#usColRows'),
       legendBody: root.querySelector('#usLegendBody'),
       hint: root.querySelector('#usHint'),
+      tablePanel: root.querySelector('#usTablePanel'),
+      diagramControls: root.querySelector('#usDiagramControls'),
+      btnWinPrev: root.querySelector('#usBtnWinPrev'),
+      winLabel: root.querySelector('#usWinLabel'),
+      btnWinNext: root.querySelector('#usBtnWinNext'),
+      winSize: root.querySelector('#usWinSize'),
+      btnWinAll: root.querySelector('#usBtnWinAll'),
+      tableHead: root.querySelector('#usTableHead'),
+      tableBody: root.querySelector('#usTableBody'),
       statsPanel: root.querySelector('#usStatsPanel'),
       statsBody: root.querySelector('#usStatsBody'),
       exportBtn: root.querySelector('#usExportBtn')
     };
 
     els.addColBtn.addEventListener('click', addColumn);
+    els.btnWinPrev.addEventListener('click', () => {
+      if (showAll || !ctxAll) return;
+      windowStartIdx = Math.max(0, windowStartIdx - windowCount);
+      renderResultsTable(currentValidCols());
+    });
+    els.btnWinNext.addEventListener('click', () => {
+      if (showAll || !ctxAll) return;
+      const maxStart = Math.max(0, ctxAll.cycles.length - 1);
+      windowStartIdx = Math.min(maxStart, windowStartIdx + windowCount);
+      renderResultsTable(currentValidCols());
+    });
+    els.winSize.addEventListener('change', () => {
+      const v = parseInt(els.winSize.value, 10);
+      windowCount = Number.isFinite(v) && v > 0 ? v : 25;
+      els.winSize.value = windowCount;
+      renderResultsTable(currentValidCols());
+    });
+    els.btnWinAll.addEventListener('click', () => {
+      showAll = !showAll;
+      els.btnWinAll.textContent = showAll ? 'Fenster anzeigen' : 'Alle anzeigen';
+      els.btnWinAll.classList.toggle('primary', showAll);
+      renderResultsTable(currentValidCols());
+    });
     els.exportBtn.addEventListener('click', exportXlsx);
   }
 
@@ -105,6 +151,9 @@
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
     GZ.state.data.umlaufSpalten = [];
+    windowStartIdx = 0; showAll = false;
+    els.btnWinAll.textContent = 'Alle anzeigen';
+    els.btnWinAll.classList.remove('primary');
     ctxAll = GZ.umlaufContext.buildAll(a);
     renderLegend();
     renderColumns();
@@ -343,6 +392,7 @@
     if (!ctxAll) ctxAll = GZ.umlaufContext.buildAll(a);
 
     if (!ctxAll.cycles.length) {
+      els.tablePanel.style.display = 'none';
       els.statsPanel.style.display = 'none';
       els.exportBtn.disabled = true;
       els.hint.textContent = 'Zu wenige erkannte Umläufe (TX=0-Wechsel) für diese Auswertung.';
@@ -369,8 +419,9 @@
         return { col, incomplete: !!compiled.incomplete, values: null, kind: null, skip: false, error: { message, pos: compiled.pos } };
       }
       const values = ctxAll.cycles.map(cyc => compiled.run(cyc.scope));
+      const spans = compiled.spanRun ? ctxAll.cycles.map(cyc => compiled.spanRun(cyc.scope)) : null;
       const kind = compiled.resultType === 'NUM' ? 'number' : compiled.resultType === 'BOOL' ? 'bool' : 'text';
-      return { col, error: null, incomplete: false, values, kind, skip: false };
+      return { col, error: null, incomplete: false, values, spans, kind, skip: false };
     });
 
     els.colRows.querySelectorAll('.us-col-row').forEach(rowEl => {
@@ -380,6 +431,7 @@
     });
 
     const validCols = currentValidCols();
+    renderResultsTable(validCols);
     renderStats(validCols);
     els.statsPanel.style.display = validCols.length ? '' : 'none';
     els.exportBtn.disabled = validCols.length === 0;
@@ -404,6 +456,10 @@
   // Rohreihe je Messzeile wie FORMEL (siehe formulaBuilder.js
   // getSyntheticColumns()). index bleibt über Neuberechnungen hinweg stabil
   // (col.id), solange die Spalte nicht gelöscht/neu angelegt wird.
+  // spansByCycleIdx: parallel zu valuesByCycleIdx, {startSec,endSec}|null je
+  // Umlauf - nur gesetzt, wenn die Formel GENAU eine der Objekt-bezogenen
+  // Primitiven ist (TF/RG/GE/Versatz/Ueberschneidung, siehe exprEngine.js
+  // spanRun) - für die Balkendarstellung dort (tr.span).
   function getSyntheticColumns() {
     return currentValidCols().map(e => ({
       index: KENNZAHL_INDEX_BASE + e.col.id,
@@ -411,8 +467,55 @@
       name: e.col.label || '(ohne Bezeichnung)',
       beschreibung: e.col.expr,
       valuesByCycleIdx: e.values,
+      spansByCycleIdx: e.spans,
       valueKind: e.kind
     }));
+  }
+
+  /* ---------------- Ergebnistabelle (gefenstert) ---------------- */
+
+  function windowRange(n) {
+    if (showAll || n <= 0) return { from: 0, to: n };
+    const from = Math.max(0, Math.min(windowStartIdx, Math.max(0, n - 1)));
+    return { from, to: Math.min(from + windowCount, n) };
+  }
+
+  function fmtNum(v) { return Number.isInteger(v) ? String(v) : v.toFixed(1); }
+  function formatCellHtml(v) {
+    if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '<span class="us-empty-cell">–</span>';
+    if (typeof v === 'boolean') return v ? '<span class="us-bool-true">Wahr</span>' : '<span class="us-bool-false">Falsch</span>';
+    if (typeof v === 'number') return esc(fmtNum(v));
+    return esc(String(v));
+  }
+
+  function renderResultsTable(validCols) {
+    if (!ctxAll || !ctxAll.cycles.length || validCols.length === 0) {
+      els.tablePanel.style.display = 'none';
+      els.diagramControls.style.display = 'none';
+      return;
+    }
+    els.tablePanel.style.display = '';
+    els.diagramControls.style.display = 'flex';
+
+    const n = ctxAll.cycles.length;
+    const { from, to } = windowRange(n);
+    els.winLabel.textContent = showAll ? `Gesamte Aufzeichnung (${n} Umläufe)` : `Umlauf ${from + 1}–${to} von ${n}`;
+    els.btnWinPrev.disabled = showAll || from <= 0;
+    els.btnWinNext.disabled = showAll || to >= n;
+    els.winSize.disabled = showAll;
+
+    els.tableHead.innerHTML = `<tr><th>#</th><th>Start</th><th>SPL</th><th>TU</th>${
+      validCols.map(c => `<th>${esc(c.col.label || '(ohne Bezeichnung)')}</th>`).join('')
+    }</tr>`;
+
+    const rows = [];
+    for (let i = from; i < to; i++) {
+      const cyc = ctxAll.cycles[i];
+      const cells = [String(i + 1), fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
+        .concat(validCols.map(c => formatCellHtml(c.values[i])));
+      rows.push(`<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`);
+    }
+    els.tableBody.innerHTML = rows.join('');
   }
 
   /* ---------------- Statistik ---------------- */
