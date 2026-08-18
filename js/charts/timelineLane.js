@@ -88,8 +88,17 @@
 
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
   //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
-  //   fillFor, segLabelFor, segLabelColorFor, segOpacityFor, edgeLabelsFor,
-  //   gridStepMs, laneStyle, highlights, width, height}
+  //   onSegClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
+  //   edgeLabelsFor, gridStepMs, laneStyle, highlights, width, height}
+  // onSegClick(d, event): wie onGreenClick, aber für JEDES Segment
+  // (unabhängig von cat) und ohne die "angepinnt"-Randmarkierung - z.B. für
+  // Umlaufprüfung, um einen Klick auf einen Phasenübergang zum Öffnen des
+  // PÜ-Detailwerkzeugs zu nutzen (siehe dort togglePueDetail()).
+  // segCursor(d)->'pointer'|'default'|undefined: welche Segmente per Cursor
+  // als klickbar markiert werden - ohne diese Option nur GRUEN+onGreenClick
+  // (bisheriges Verhalten); mit onSegClick i.d.R. nur eine ECHTE Teilmenge
+  // der Segmente klickbar (z.B. nur benannte Phasenübergänge, nicht jedes
+  // Segment der Spur), daher eigene Funktion statt einer pauschalen Regel.
   // highlights: [{start, end, color, name}] - Formel-Hervorhebung (siehe
   // formulaBuilder.js getFormulaHighlights()): eine frei einfärbbare Markierung
   // "diese Formel war hier wahr", als halbtransparentes Band über die volle
@@ -141,7 +150,7 @@
     const {
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
       baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
-      segTitle = defaultTitle, onGreenClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
+      segTitle = defaultTitle, onGreenClick, onSegClick, segCursor, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
       edgeLabelsFor, gridStepMs, laneStyle = 'default', highlights = []
     } = opts;
 
@@ -171,7 +180,7 @@
       .attr('height', height - 2 * segInset)
       .style('fill', d => (fillFor && fillFor(d)) || fillMap[d.cat] || '#9aa4b0')
       .style('opacity', d => segOpacityFor ? segOpacityFor(d) : 1)
-      .style('cursor', d => (d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default');
+      .style('cursor', d => segCursor ? (segCursor(d) || 'default') : ((d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default'));
     segSel.append('title').text(segTitle);
 
     // Einzelner Diagonalstrich in BEIDEN Gelbphasen - Rot-Gelb am Anfang wie
@@ -269,11 +278,19 @@
         .text(d => segLabelFor(d) || '');
     }
 
-    if (onGreenClick) {
-      segSel.filter(d => d.cat === 'GRUEN').on('click', function (event, d) {
-        svg.selectAll('rect.seg-GRUEN').classed('pinned', false).style('stroke', null).style('stroke-width', null);
-        d3.select(this).classed('pinned', true).style('stroke', 'var(--accent)').style('stroke-width', 2);
-        onGreenClick(d);
+    // onSegClick (allgemein, JEDES Segment) und onGreenClick (nur GRUEN, mit
+    // "anpinnen"-Randmarkierung für die manuelle Messung) teilen sich denselben
+    // D3-'click'-Handler statt sich mit zwei .on('click', ...)-Aufrufen
+    // gegenseitig zu überschreiben (D3 kennt pro Ereignistyp+Selektion nur
+    // EINEN Handler ohne Namensraum).
+    if (onGreenClick || onSegClick) {
+      segSel.on('click', function (event, d) {
+        if (onGreenClick && d.cat === 'GRUEN') {
+          svg.selectAll('rect.seg-GRUEN').classed('pinned', false).style('stroke', null).style('stroke-width', null);
+          d3.select(this).classed('pinned', true).style('stroke', 'var(--accent)').style('stroke-width', 2);
+          onGreenClick(d);
+        }
+        if (onSegClick) onSegClick(d, event);
       });
     }
 

@@ -13,6 +13,13 @@
     oepnvActivePoints: [], // [{colIndex, times[], unresolvedTime}] - Anmeldepunkte je konfigurierter Signalgruppe im ÖPNV-Tab
     window: { count: 5, startIdx: 0, showAll: false },
     phases: [], // {id, name, kuerzel, members:Set<colIndex>} - siehe Tab „Stammdaten LSA“
+    // Manuelle Korrekturen einer Phasenübergang-Detailtabelle (siehe
+    // js/views/umlaufpruefung.js PÜ-Werkzeug), je PHASENÜBERGANGSTYP (nicht
+    // je Vorkommen) - Schlüssel "<fromPhase.id>→<toPhase.id>", Wert
+    // {rows:[{sgIndex, an, ab}]} (an/ab in Sekunden relativ zum PÜ-eigenen
+    // TX=0, siehe dort). Ersetzt bei Vorhandensein die automatisch erkannte
+    // Zeilenliste vollständig für JEDES Vorkommen dieses Übergangs.
+    pueOverrides: {},
     umlaufSpalten: [] // {id, label, expr} - Formelspalten, siehe Tab „Umlaufstatistiken“
   };
 

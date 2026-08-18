@@ -64,6 +64,15 @@
     return { id: 'ph' + (phaseIdSeq++), name, kuerzel, members: new Set() };
   }
 
+  // Wie createPhase(), aber mit vorgegebenem Kürzel/Name/Mitgliedern (aus
+  // einer geladenen Konfigurationsdatei, siehe stammdatenLsa.js
+  // loadConfigFile()) statt automatisch vergebenen Standardwerten - nutzt
+  // denselben phaseIdSeq-Zähler, damit die neu erzeugten IDs garantiert
+  // nicht mit während dieser Sitzung bereits vorhandenen Phasen kollidieren.
+  function createPhaseFromConfig(kuerzel, name, members) {
+    return { id: 'ph' + (phaseIdSeq++), name, kuerzel, members: members instanceof Set ? members : new Set(members) };
+  }
+
   // Zeitbereiche, in denen eine Phase tatsächlich vollständig angezeigt
   // wurde (alle Mitglieder gleichzeitig Grün).
   function computePhaseOccurrences(phase, allStats) {
@@ -116,7 +125,7 @@
   }
 
   GZ.phases = {
-    PHASE_COLORS, colorForIndex, intersectIntervals, createPhase,
+    PHASE_COLORS, colorForIndex, intersectIntervals, createPhase, createPhaseFromConfig,
     computePhaseOccurrences, buildCombinedSegments, durationPerCycle
   };
 })(window.GZ = window.GZ || {});

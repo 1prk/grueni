@@ -65,6 +65,28 @@
 .up-sub-row .lane-name{ font-size:10.5px; font-weight:600; color:var(--text-muted); }
 .up-sub-row .lane-num{ width:36px; }
 
+/* PÜ-Detailwerkzeug (siehe umlaufpruefung.js renderPueDetailPanel()) - per
+   Klick auf einen Phasenübergang geöffnete Zeilenliste mit editierbaren
+   An/Ab-Werten je Signalgruppe, lokal auf die Übergangs-Referenzzeit
+   bezogen (nicht die Umlauf-TX). */
+.up-pue-panel{ margin:8px 16px 4px; padding:10px 12px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); }
+.up-pue-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; margin-bottom:8px; }
+.up-pue-panel-sub{ font-weight:400; color:var(--text-muted); }
+.up-pue-panel-actions{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.up-pue-panel-actions button{ font-size:11px; padding:4px 9px; }
+.up-pue-rows{ display:flex; flex-direction:column; gap:6px; }
+.up-pue-row{ display:flex; align-items:center; gap:8px; }
+.up-pue-sg{ width:92px; flex-shrink:0; font-size:11.5px; padding:3px 5px; }
+.up-pue-field{ display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--text-muted); flex-shrink:0; }
+.up-pue-field input{ width:52px; font-size:11.5px; padding:3px 5px; }
+.up-pue-tf{ width:56px; flex-shrink:0; font-family:var(--mono); font-size:11px; color:var(--text-muted); }
+.up-pue-track{ flex:1; height:20px; border-radius:3px; overflow:hidden; }
+.up-pue-track svg{ display:block; width:100%; height:100%; }
+.up-pue-row-remove{ flex-shrink:0; padding:2px 7px; font-size:11px; color:var(--sig-red); border-color:var(--border); }
+.up-pue-row-remove:hover{ background:var(--crit-bg); border-color:var(--sig-red); }
+.up-pue-addrow{ margin-top:8px; font-size:11px; padding:4px 10px; }
+.up-pue-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:6px 0; }
+
 /* Manuelle Zeitmessung (Strg+Klick), siehe umlaufpruefung.js wireMeasure() */
 .lane-track svg{ cursor:default; }
 .measure-cap-halo, .measure-line-halo{ stroke:#fff; stroke-width:3; }
