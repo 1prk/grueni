@@ -53,6 +53,62 @@
     return result;
   }
 
+  // Vereinigung mehrerer sortierter, disjunkter Intervall-Listen: liefert die
+  // Zeitbereiche, in denen MINDESTENS EINE Liste ein Intervall abdeckt -
+  // gleiches Sweep-Line-Prinzip wie intersectIntervals oben, nur mit
+  // "count > 0" statt "count === n" als Aktiv-Bedingung. Wird gebraucht, um
+  // GENAU jene Zeiten zu ermitteln, in denen irgendeine NICHT zur Phase
+  // gehörende Signalgruppe grün ist (siehe computePhaseOccurrences unten).
+  function unionIntervals(intervalLists) {
+    const events = [];
+    for (const list of intervalLists) {
+      for (const iv of list) {
+        events.push([iv.start, 1]);
+        events.push([iv.end, -1]);
+      }
+    }
+    if (events.length === 0) return [];
+    events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let count = 0, activeStart = null;
+    const result = [];
+    for (const [t, delta] of events) {
+      const before = count;
+      count += delta;
+      if (before === 0 && count > 0) activeStart = t;
+      else if (before > 0 && count === 0) { result.push({ start: activeStart, end: t }); activeStart = null; }
+    }
+    return result;
+  }
+
+  // Entfernt aus einer sortierten, disjunkten Intervall-Liste (base) alle
+  // Zeitbereiche, die in einer zweiten sortierten, disjunkten Liste (remove)
+  // liegen - Zwei-Zeiger-Verfahren, O(base + remove). Wird von
+  // computePhaseOccurrences genutzt, um aus dem "Mitglieder alle grün"-
+  // Zeitraum jene Abschnitte herauszuschneiden, in denen gleichzeitig eine
+  // NICHT zur Phase gehörende Signalgruppe ebenfalls grün ist (eine Phase
+  // gilt nur dann als angezeigt, wenn wirklich NUR ihre Mitglieder grün
+  // sind - sonst wäre eine Phase, deren Mitgliederliste eine Teilmenge einer
+  // anderen Phase ist, immer auch während dieser anderen Phase "aktiv").
+  function subtractIntervals(base, remove) {
+    if (!remove.length) return base;
+    const result = [];
+    let ri = 0;
+    for (const b of base) {
+      let curStart = b.start;
+      const curEnd = b.end;
+      while (ri < remove.length && remove[ri].end <= curStart) ri++;
+      let j = ri;
+      while (curStart < curEnd && j < remove.length && remove[j].start < curEnd) {
+        const r = remove[j];
+        if (r.start > curStart) result.push({ start: curStart, end: Math.min(r.start, curEnd) });
+        curStart = Math.max(curStart, r.end);
+        j++;
+      }
+      if (curStart < curEnd) result.push({ start: curStart, end: curEnd });
+    }
+    return result;
+  }
+
   function nextDefaultLabel(existingPhases) {
     const n = existingPhases.length + 1;
     return { name: `Phase ${n}`, kuerzel: `Ph${n}` };
@@ -74,13 +130,23 @@
   }
 
   // Zeitbereiche, in denen eine Phase tatsächlich vollständig angezeigt
-  // wurde (alle Mitglieder gleichzeitig Grün).
+  // wurde: alle Mitglieder gleichzeitig Grün UND KEINE nicht zur Phase
+  // gehörende Signalgruppe gleichzeitig Grün. Der zweite Teil ist nötig,
+  // sonst wäre jede Phase, deren Mitgliederliste eine Teilmenge einer
+  // anderen Phase ist (z. B. Phase A = {K1,K2,K3,F1,F2}, Phase B =
+  // {K1,K3,F1,F2}), automatisch auch während jener anderen Phase "aktiv" -
+  // die Bedingung von B wäre ja immer schon erfüllt, wenn A erfüllt ist,
+  // ohne dass B das je von A unterscheiden könnte (K2 wird von B schlicht
+  // nicht betrachtet). Beide Phasen würden sich dann in der kombinierten
+  // Phasenspur überlappen, obwohl Phasen per Definition nie gleichzeitig
+  // aktiv sein können (siehe Kopfkommentar dieser Datei).
   function computePhaseOccurrences(phase, allStats) {
-    const memberGreens = [...phase.members]
-      .map(idx => allStats.find(a => a.col.index === idx))
-      .filter(Boolean)
-      .map(entry => entry.stats.greens);
-    const intervals = phase.members.size ? intersectIntervals(memberGreens) : [];
+    const memberGreens = [], nonMemberGreens = [];
+    allStats.forEach(entry => {
+      (phase.members.has(entry.col.index) ? memberGreens : nonMemberGreens).push(entry.stats.greens);
+    });
+    const allMembersGreen = phase.members.size ? intersectIntervals(memberGreens) : [];
+    const intervals = allMembersGreen.length ? subtractIntervals(allMembersGreen, unionIntervals(nonMemberGreens)) : [];
     return { phase, intervals };
   }
 
@@ -293,7 +359,7 @@
   }
 
   GZ.phases = {
-    PHASE_COLORS, colorForIndex, intersectIntervals, createPhase, createPhaseFromConfig,
+    PHASE_COLORS, colorForIndex, intersectIntervals, unionIntervals, subtractIntervals, createPhase, createPhaseFromConfig,
     computePhaseOccurrences, buildCombinedSegments, durationPerCycle,
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
     findSgEntryByColIndex, realCycleMetricsForSg, autoDetectPueRows, pueOverrideKey, resolvePueRows,
