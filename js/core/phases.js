@@ -212,26 +212,34 @@
   }
 
   // Alle TATSÄCHLICH in der Aufzeichnung vorkommenden Übergangstypen (je
-  // Phasen-ID-Paar genau einmal, erstes Vorkommen gemerkt) - Grundlage für
-  // die Liste im PÜ-Werkzeug (Stammdaten LSA): nur Übergänge anbieten, die
-  // es in den Rohdaten auch wirklich gibt, nicht jede denkbare Kombination
-  // aus der Phasenliste.
+  // Phasen-ID-Paar genau einmal) - Grundlage für die Liste im PÜ-Werkzeug
+  // (Stammdaten LSA): nur Übergänge anbieten, die es in den Rohdaten auch
+  // wirklich gibt, nicht jede denkbare Kombination aus der Phasenliste. Je
+  // Übergangstyp wird bewusst das Vorkommen NAHE DER MITTE der Aufzeichnung
+  // gemerkt (kleinster Abstand zu (tMin+tMax)/2), NICHT das buchstäblich
+  // erste - eine Aufzeichnung beginnt in der Praxis oft während einer
+  // Anlauf-/Dunkelphase (Signalgeber aus, Anlage noch nicht im Regelbetrieb),
+  // und genau dort läge das allererste Vorkommen jedes Übergangstyps, mit
+  // entsprechend untypischen/unbrauchbaren An/Ab-Werten im PÜ-Werkzeug.
   function listDistinctTransitions(occurrenceEntries, tMin, tMax) {
     const segs = buildAnnotatedSegments(occurrenceEntries, tMin, tMax);
+    const mid = (tMin + tMax) / 2;
     const seen = new Map();
     segs.forEach(seg => {
       if (seg.cat !== 'NONE' || !seg.pueFromPhaseId || !seg.pueToPhaseId) return;
       const key = seg.pueFromPhaseId + '→' + seg.pueToPhaseId;
-      if (!seen.has(key)) {
-        seen.set(key, { fromPhaseId: seg.pueFromPhaseId, toPhaseId: seg.pueToPhaseId, label: seg.pueLabel, firstOccurrence: { start: seg.start, end: seg.end } });
+      const dist = Math.abs(seg.start - mid);
+      const cur = seen.get(key);
+      if (!cur || dist < cur.dist) {
+        seen.set(key, { fromPhaseId: seg.pueFromPhaseId, toPhaseId: seg.pueToPhaseId, label: seg.pueLabel, sampleOccurrence: { start: seg.start, end: seg.end }, dist });
       }
     });
-    return [...seen.values()];
+    return [...seen.values()].map(({ dist, ...rest }) => rest);
   }
 
   // Umlaufindex, in dem der Zeitpunkt t liegt (letzter cycleStarts-Eintrag
   // <= t) - wandelt eine absolute Zeit (z.B. listDistinctTransitions()'
-  // firstOccurrence.start) in den cycleIdx um, den autoDetectPueRows()/
+  // sampleOccurrence.start) in den cycleIdx um, den autoDetectPueRows()/
   // realCycleMetricsForSg() erwarten. -1, wenn t vor dem ersten Umlauf liegt.
   function cycleIdxAtTime(t, cycleStarts) {
     if (!cycleStarts || !cycleStarts.length) return -1;
@@ -284,6 +292,115 @@
   // mit cm.an zusammen.
   function rotgelbStartSec(cm) { return cm.an - (cm.rotgelb || 0); }
 
+  // Sucht in den ROHEN Segmenten EINER Signalgruppe das für einen
+  // bestimmten Übergangs-Anker (referenceAbsMs, die TX=0-Referenz DIESES
+  // Übergangs) tatsächlich relevante GRUEN-Segment - bewusst NICHT über ein
+  // Umlauf-Fenster (cycleIdx, wie GZ.segments.computeCycleSgMetrics),
+  // sondern direkt über den Anker selbst: eine Signalgruppe kann innerhalb
+  // EINES Umlaufs mehrfach grün sein (z.B. verkehrsabhängige/mehrstufige
+  // Freigaben), ein Umlauf-Fenster träfe dann leicht das FALSCHE Vorkommen
+  // (führte zu unsinnigen negativen An/Ab-Werten und falschen Nachbar-
+  // segmenten im Balken). role='outgoing': das Segment, das den Anker
+  // enthält (diese Signalgruppe MUSS laut Phasendefinition zu diesem
+  // Zeitpunkt noch grün sein, siehe computePhaseOccurrences) - ohne
+  // Treffer ersatzweise das zuletzt VOR dem Anker endende. role='incoming':
+  // das mit dem frühesten Start AB dem Anker (diese Signalgruppe MUSS laut
+  // Phasendefinition bis dahin rot gewesen sein, siehe dort "alle
+  // Nicht-Mitglieder rot"). null, wenn keine passende Signalgruppe/kein
+  // passendes Segment existiert.
+  function findAnchoredGreenSegIdx(entry, anchorAbsMs, role) {
+    const segs = entry.segs;
+    if (role === 'outgoing') {
+      for (let i = 0; i < segs.length; i++) {
+        const s = segs[i];
+        if (s.cat === 'GRUEN' && s.start <= anchorAbsMs && s.end >= anchorAbsMs) return i;
+      }
+      let bestIdx = null, bestEnd = -Infinity;
+      segs.forEach((s, i) => { if (s.cat === 'GRUEN' && s.end <= anchorAbsMs && s.end > bestEnd) { bestEnd = s.end; bestIdx = i; } });
+      return bestIdx;
+    }
+    let bestIdx = null, bestStart = Infinity;
+    segs.forEach((s, i) => { if (s.cat === 'GRUEN' && s.start >= anchorAbsMs && s.start < bestStart) { bestStart = s.start; bestIdx = i; } });
+    return bestIdx;
+  }
+
+  // Kennzahlen (an/ab in echten Sekunden relativ zu referenceAbsMs statt
+  // relativ zum Umlaufbeginn, dazu tf/rotgelb/gelb/segIdx/segStart/segEnd)
+  // für EIN per findAnchoredGreenSegIdx() gefundenes GRUEN-Segment -
+  // dieselben Felder wie GZ.segments.computeCycleSgMetrics, aber ohne
+  // dessen Umlauf-Fenster-Bindung und ohne die dortige TU-Modulo-Rundung
+  // (hier unnötig, da direkt an absoluten Rohzeiten gerechnet wird).
+  function metricsForAnchoredSeg(entry, role, anchorAbsMs, referenceAbsMs) {
+    const segIdx = findAnchoredGreenSegIdx(entry, anchorAbsMs, role);
+    if (segIdx == null) return null;
+    const seg = entry.segs[segIdx];
+    const extra = GZ.segments.adjacentTransitionDurations(entry.segs, segIdx);
+    return {
+      an: (seg.start - referenceAbsMs) / 1000, ab: (seg.end - referenceAbsMs) / 1000,
+      tf: (seg.end - seg.start) / 1000, rotgelb: extra.rotgelb, gelb: extra.gelb,
+      segIdx, segStart: seg.start, segEnd: seg.end
+    };
+  }
+
+  // Wie metricsForAnchoredSeg(), aber die role (outgoing/incoming) wird aus
+  // der Zeile selbst abgeleitet (ab gesetzt -> outgoing, an gesetzt ->
+  // incoming) statt separat übergeben zu werden müssen - für die
+  // Balken-Darstellung in Stammdaten LSA/Umlaufprüfung (siehe dort
+  // buildLocalRowSegs/applyRowOverrideToLocalSegs), wo nur die Zeile
+  // bekannt ist. anchorAbsMs bleibt bewusst IMMER referenceAbsMs (die feste
+  // TX=0-Referenz DIESES Übergangs, unabhängig von einer eventuellen
+  // manuellen Korrektur der Zeilenwerte) - das reale Segment bleibt so am
+  // tatsächlichen Übergang verankert, auch wenn die angezeigte Zahl
+  // überschrieben wurde. null ohne eindeutige Rolle (z.B. eine frei
+  // hinzugefügte Zeile ohne Wert oder eine "immer an"-Zeile).
+  function cmForRow(row, referenceAbsMs, a) {
+    const entry = findSgEntryByColIndex(row.sgIndex, a);
+    if (!entry) return null;
+    const role = row.ab != null ? 'outgoing' : (row.an != null ? 'incoming' : null);
+    if (!role) return null;
+    return metricsForAnchoredSeg(entry, role, referenceAbsMs, referenceAbsMs);
+  }
+
+  // TF (Freigabezeit) RELATIV ZUM ÜBERGANG selbst: wie viel echte Grünzeit
+  // dieser Zeile innerhalb des definierten Übergangsfensters [startSec,
+  // endSec] liegt - NICHT die volle reale Dauer der zugrundeliegenden
+  // Freigabe (die erstreckt sich für eine abwerfende/anwerfende Zeile
+  // typischerweise weit VOR bzw. NACH diesem Übergang und gehört nicht zu
+  // ihm - z.B. die gesamte Grünzeit der vorherigen/nächsten Phase). Eine
+  // abwerfende Zeile (nur Ab gesetzt) "beginnt" ihr Grün unbekannt weit vor
+  // dem Fenster (auf startSec geklemmt); eine anwerfende Zeile (nur An
+  // gesetzt) "endet" ihr Grün unbekannt weit nach dem Fenster (auf endSec
+  // geklemmt) - deren realer Grünbeginn liegt bei An + Rotgelb-Dauer
+  // (cm.rotgelb), nicht bei An selbst (siehe rotgelbStartSec). Beispiel:
+  // An=5, Rotgelb=1s, Ende=8 -> Grünbeginn=6, TF=8-6=2. Ohne jeden Wert
+  // (weder An noch Ab, z.B. eine frisch hinzugefügte, noch leere Zeile) ist
+  // TF nicht definiert (null).
+  function computeRowTf(row, cm, startSec, endSec) {
+    if (row.an == null && row.ab == null) return null;
+    const endAnchor = endSec != null ? endSec : startSec;
+    const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
+    const greenStart = Math.max(row.an != null ? row.an + rotgelb : startSec, startSec);
+    const greenEnd = Math.min(row.ab != null ? row.ab : endAnchor, endAnchor);
+    return Math.round(Math.max(0, greenEnd - greenStart));
+  }
+
+  // Kanonische Sortierreihenfolge für Signalgruppennamen: K vor R vor F vor
+  // S, innerhalb einer Gruppe numerisch aufsteigend (K1, K2, ..., Kn) - für
+  // die PÜ-Zeilenreihenfolge (siehe autoDetectPueRows unten) und die
+  // SG-Auswahllisten in Stammdaten LSA. Andere/unbekannte Präfixe (z.B.
+  // Sonderbezeichnungen wie "DF1") fallen alphabetisch ans Ende, statt die
+  // Sortierung zu erraten.
+  const SG_PREFIX_ORDER = { K: 0, R: 1, F: 2, S: 3 };
+  function compareSgNames(nameA, nameB) {
+    const parse = n => { const m = /^([A-Za-z]+)(\d+)$/.exec(n || ''); return m ? [m[1].toUpperCase(), Number(m[2])] : null; };
+    const pa = parse(nameA), pb = parse(nameB);
+    const rankA = pa && SG_PREFIX_ORDER[pa[0]] != null ? SG_PREFIX_ORDER[pa[0]] : 99;
+    const rankB = pb && SG_PREFIX_ORDER[pb[0]] != null ? SG_PREFIX_ORDER[pb[0]] : 99;
+    if (rankA !== rankB) return rankA - rankB;
+    if (rankA !== 99) return pa[1] - pb[1];
+    return (nameA || '').localeCompare(nameB || '');
+  }
+
   // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
   // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase (nur
   // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt, siehe
@@ -308,17 +425,30 @@
   // endet (z.B. Datenlücke) - dann gibt es nichts, worauf sich die Spanne
   // beziehen könnte.
   function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
-    const outgoingIdx = [...fromPhase.members].filter(idx => !toPhase.members.has(idx));
-    const incomingIdx = [...toPhase.members].filter(idx => !fromPhase.members.has(idx));
-    const outgoing = outgoingIdx.map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
-    const incoming = incomingIdx.map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    // K vor R vor F vor S, je Gruppe numerisch (siehe compareSgNames oben) -
+    // Ausgangs- und Eingangs-Mitglieder getrennt sortiert (die strukturelle
+    // Gruppierung "erst alle abwerfenden, dann alle anwerfenden Zeilen"
+    // bleibt erhalten).
+    const nameOfSg = idx => { const e = findSgEntryByColIndex(idx, a); return e ? e.col.name : ''; };
+    const outgoingIdx = [...fromPhase.members].filter(idx => !toPhase.members.has(idx)).sort((x, y) => compareSgNames(nameOfSg(x), nameOfSg(y)));
+    const incomingIdx = [...toPhase.members].filter(idx => !fromPhase.members.has(idx)).sort((x, y) => compareSgNames(nameOfSg(x), nameOfSg(y)));
     const cycleStart = a.cycleStarts[cycleIdx];
     const cycleEnd = cycleIdx + 1 < a.cycleStarts.length ? a.cycleStarts[cycleIdx + 1] : a.tMax;
     const gapStartAbsMs = phaseOccurrenceEndInCycle(fromPhase, a.allStats, cycleStart, cycleEnd);
     if (gapStartAbsMs == null) return null;
     const referenceSec = (gapStartAbsMs - cycleStart) / 1000;
+    // Ab hier direkt an gapStartAbsMs (= referenceAbsMs) verankert statt an
+    // cycleIdx - siehe findAnchoredGreenSegIdx oben.
+    const outgoing = outgoingIdx.map(sgIndex => {
+      const entry = findSgEntryByColIndex(sgIndex, a);
+      return { sgIndex, cm: entry ? metricsForAnchoredSeg(entry, 'outgoing', gapStartAbsMs, gapStartAbsMs) : null };
+    });
+    const incoming = incomingIdx.map(sgIndex => {
+      const entry = findSgEntryByColIndex(sgIndex, a);
+      return { sgIndex, cm: entry ? metricsForAnchoredSeg(entry, 'incoming', gapStartAbsMs, gapStartAbsMs) : null };
+    });
     const rows = [];
-    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round(o.cm.ab - referenceSec) }); });
+    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round(o.cm.ab) }); });
     // Übergangsende = die zuletzt (spätest) ins ECHTE GRÜN kommende
     // Signalgruppe der anwerfenden Phase (cm.an, NICHT deren früherer
     // Rotgelb-Start - siehe rotgelbStartSec/"An" oben) - per Definition das
@@ -328,8 +458,8 @@
     const greenArrivalSecs = [];
     incoming.forEach(o => {
       if (o.cm && Number.isFinite(o.cm.an)) {
-        rows.push({ sgIndex: o.sgIndex, an: Math.round(rotgelbStartSec(o.cm) - referenceSec), ab: null });
-        greenArrivalSecs.push(o.cm.an - referenceSec);
+        rows.push({ sgIndex: o.sgIndex, an: Math.round(rotgelbStartSec(o.cm)), ab: null });
+        greenArrivalSecs.push(o.cm.an);
       }
     });
     const endSec = greenArrivalSecs.length ? Math.round(Math.max(...greenArrivalSecs)) : null;
@@ -544,7 +674,8 @@
     PHASE_COLORS, colorForIndex, intersectIntervals, unionIntervals, subtractIntervals, createPhase, createPhaseFromConfig,
     computePhaseOccurrences, buildCombinedSegments, durationPerCycle,
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
-    findSgEntryByColIndex, realCycleMetricsForSg, rotgelbStartSec, autoDetectPueRows, pueOverrideKey, resolvePueRows,
+    findSgEntryByColIndex, realCycleMetricsForSg, rotgelbStartSec, findAnchoredGreenSegIdx, metricsForAnchoredSeg, cmForRow,
+    computeRowTf, compareSgNames, autoDetectPueRows, pueOverrideKey, resolvePueRows,
     ensurePueOverride, setPueOverrideRowField, setPueOverrideRowAlways, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
     setPueOverrideEndSec, buildLocalShiftedSegs, buildLocalRowSegs, applyRowOverrideToLocalSegs
   };

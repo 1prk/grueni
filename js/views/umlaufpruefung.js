@@ -309,7 +309,9 @@
         return;
       }
 
-      const cm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
+      // cmForRow verankert direkt am Übergangs-Anker (referenceAbsMs), nicht
+      // am Umlauf-Fenster (cycleIdx) - siehe stammdatenLsa.js.
+      const cm = GZ.phases.cmForRow(row, referenceAbsMs, a);
       // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten statt
       // stur den unveränderten Rohdaten (applyRowOverrideToLocalSegs), und
       // zeigt nur das eine relevante Segment-Grüppchen dieser Zeile statt
@@ -332,9 +334,8 @@
           return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
         }
       });
-      // TF "relativ zum Diagramm" - siehe stammdatenLsa.js.
-      const gruenSeg = shiftedSegs.find(s => s.cat === 'GRUEN');
-      const tf = gruenSeg ? Math.round((gruenSeg.end - gruenSeg.start) / 1000) : null;
+      // TF relativ zum Übergang - siehe stammdatenLsa.js/GZ.phases.computeRowTf().
+      const tf = GZ.phases.computeRowTf(row, cm, startSec, endSec);
       tfEl.textContent = 'TF ' + formatPueNum(tf);
     });
 

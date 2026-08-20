@@ -338,11 +338,15 @@
     const fromPhase = phases.find(p => p.id === t.fromPhaseId);
     const toPhase = phases.find(p => p.id === t.toPhaseId);
     if (!fromPhase || !toPhase) return '';
-    const cycleIdx = GZ.phases.cycleIdxAtTime(t.firstOccurrence.start, a.cycleStarts);
+    const cycleIdx = GZ.phases.cycleIdxAtTime(t.sampleOccurrence.start, a.cycleStarts);
     const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
 
+    // K vor R vor F vor S, je Gruppe numerisch (GZ.phases.compareSgNames) -
+    // dieselbe Reihenfolge wie die Zeilen selbst (siehe autoDetectPueRows),
+    // damit die Auswahlliste nicht in der rohen CSV-Spaltenreihenfolge bleibt.
+    const sortedStats = [...a.allStats].sort((x, y) => GZ.phases.compareSgNames(x.col.name, y.col.name));
     const rowsHtml = resolved.rows.map((row, i) => {
-      const sgOptions = a.allStats.map(s =>
+      const sgOptions = sortedStats.map(s =>
         `<option value="${s.col.index}" ${s.col.index === row.sgIndex ? 'selected' : ''}>${esc(s.col.name)}</option>`
       ).join('');
       // TF wird NICHT hier vorausberechnet, sondern erst in
@@ -437,7 +441,12 @@
           });
           tfEl.textContent = 'TF –';
         } else {
-          const cm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
+          // cmForRow verankert direkt am Übergangs-Anker (referenceAbsMs),
+          // NICHT am Umlauf-Fenster (cycleIdx) - sonst könnte bei einer
+          // Signalgruppe mit mehreren Freigaben je Umlauf das FALSCHE
+          // Vorkommen erwischt werden (siehe dort für die ausführliche
+          // Begründung).
+          const cm = GZ.phases.cmForRow(row, referenceAbsMs, a);
           // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten
           // statt stur den unveränderten Rohdaten (applyRowOverrideToLocalSegs),
           // und zeigt NUR das eine relevante Segment-Grüppchen dieser Zeile
@@ -464,11 +473,10 @@
               return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
             }
           });
-          // TF "relativ zum Diagramm": die Dauer des tatsächlich gerenderten
-          // (ggf. an einer Kante überschriebenen) GRUEN-Segments dieser
-          // Zeile - NIE aus cm.tf (den unveränderten Rohdaten) übernommen.
-          const gruenSeg = shiftedSegs.find(s => s.cat === 'GRUEN');
-          const tf = gruenSeg ? Math.round((gruenSeg.end - gruenSeg.start) / 1000) : null;
+          // TF relativ zum ÜBERGANG (nicht die volle reale Freigabedauer,
+          // die sich weit vor/nach diesem Übergang erstreckt) - siehe
+          // GZ.phases.computeRowTf().
+          const tf = GZ.phases.computeRowTf(row, cm, startSec, endSec);
           tfEl.textContent = 'TF ' + formatPueNum(tf);
         }
 
