@@ -245,16 +245,11 @@
 
     const panel = document.createElement('div');
     panel.className = 'up-pue-panel';
-    // TF wird NIE frei eingegeben, sondern immer berechnet (siehe
-    // Kopfkommentar GZ.phases.autoDetectPueRows()): für eine Zeile mit gesetztem An
-    // die tatsächliche, reale Freigabezeit der dort beginnenden Grünphase
-    // (unabhängig davon, ob An/Ab manuell korrigiert wurden - die reale
-    // Dauer bleibt, was sie ist); nur wenn eine Zeile ausnahmsweise sowohl
-    // An als auch Ab von Hand gesetzt hat (z.B. eine frei hinzugefügte
-    // Zeile ohne eigene Grünphase hier), ersatzweise Ab-An.
+    // TF steht NICHT mehr hier fest, sondern wird erst unten aus dem
+    // tatsächlich gerenderten (ggf. überschriebenen) Segment abgelesen
+    // ("TF relativ zum Diagramm, nie aus den Rohdaten hergeleitet" - siehe
+    // stammdatenLsa.js renderTransitionBlockHtml()).
     const rowsHtml = resolved.rows.map(row => {
-      const cm = row.an != null ? GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
-      const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
       const sgEntry = GZ.phases.findSgEntryByColIndex(row.sgIndex, a);
       const sgName = sgEntry ? sgEntry.col.name : '?';
       // An/Ab-Zahlen stehen NICHT mehr separat als Text daneben, sondern
@@ -262,8 +257,8 @@
       // Muster wie die Hauptspuren in Umlaufprüfung.
       return `
         <div class="up-pue-row">
-          <span class="up-pue-sg-label">${esc(sgName)}</span>
-          <span class="up-pue-tf">TF ${esc(formatPueNum(tf))}</span>
+          <span class="up-pue-sg-label">${esc(sgName)}${row.always ? ' <span class="up-pue-always-tag">immer an</span>' : ''}</span>
+          <span class="up-pue-tf">TF –</span>
           <div class="up-pue-track"><svg></svg></div>
         </div>`;
     }).join('');
@@ -296,29 +291,51 @@
     const startSec = resolved.startSec != null ? resolved.startSec : 0;
     const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
     const localWMin = (startSec - 3) * 1000, localWMax = (endSec + 2) * 1000;
+    const endMarks = resolved.endSec != null ? [{ t: resolved.endSec * 1000, label: `Übergangsende (Ende), ${resolved.endSec}s` }] : [];
     const axisSvg = panel.querySelector('.up-pue-axis-track svg');
-    if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000);
+    if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000, resolved.endSec != null ? resolved.endSec * 1000 : null);
     panel.querySelectorAll('.up-pue-row').forEach((rowEl, i) => {
       const row = resolved.rows[i];
       const svg = rowEl.querySelector('.up-pue-track svg');
-      const rawCm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
+      const tfEl = rowEl.querySelector('.up-pue-tf');
+
+      if (row.always) {
+        renderLane(svg, {
+          wMin: localWMin, wMax: localWMax, segs: [{ cat: 'GRUEN', start: localWMin, end: localWMax }],
+          baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+          gridStepMs: 5000, laneStyle: currentLaneStyle(), endMarks
+        });
+        tfEl.textContent = 'TF –';
+        return;
+      }
+
+      const cm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
       // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten statt
-      // stur den unveränderten Rohdaten - siehe applyRowOverrideToLocalSegs.
-      const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(
-        GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a), row, rawCm, resolved.referenceSec
-      ).filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+      // stur den unveränderten Rohdaten (applyRowOverrideToLocalSegs), und
+      // zeigt nur das eine relevante Segment-Grüppchen dieser Zeile statt
+      // der gesamten Rohdaten-Zeitreihe (buildLocalRowSegs) - siehe
+      // stammdatenLsa.js für die ausführliche Begründung beider Schritte.
+      const localSegs = GZ.phases.buildLocalRowSegs(row.sgIndex, cm, referenceAbsMs, a);
+      const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(localSegs, row, cm, referenceAbsMs)
+        .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
       renderLane(svg, {
         wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
         baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
-        gridStepMs: 5000, laneStyle: currentLaneStyle(),
+        gridStepMs: 5000, laneStyle: currentLaneStyle(), endMarks,
+        // "An" markiert den Rot→Gelb-Wechsel (ROTGELB-Segment, sofern
+        // vorhanden - sonst Rückfall auf den GRUEN-Beginn), "Ab" bleibt das
+        // Ende des GRUEN-Segments (Beginn GELB) - siehe stammdatenLsa.js.
         edgeLabelsFor: d => {
-          if (d.cat !== 'GRUEN') return null;
-          const nearAn = row.an != null && Math.abs(d.start - row.an * 1000) < 500;
-          const nearAb = row.ab != null && Math.abs(d.end - row.ab * 1000) < 500;
+          const nearAn = row.an != null && (d.cat === 'ROTGELB' || d.cat === 'GRUEN') && Math.abs(d.start - row.an * 1000) < 500;
+          const nearAb = row.ab != null && d.cat === 'GRUEN' && Math.abs(d.end - row.ab * 1000) < 500;
           if (!nearAn && !nearAb) return null;
           return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
         }
       });
+      // TF "relativ zum Diagramm" - siehe stammdatenLsa.js.
+      const gruenSeg = shiftedSegs.find(s => s.cat === 'GRUEN');
+      const tf = gruenSeg ? Math.round((gruenSeg.end - gruenSeg.start) / 1000) : null;
+      tfEl.textContent = 'TF ' + formatPueNum(tf);
     });
 
     panel.querySelector('.up-pue-close').addEventListener('click', () => { openPueDetail = null; render(); });

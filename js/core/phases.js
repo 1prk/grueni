@@ -276,29 +276,37 @@
     return best;
   }
 
+  // "An" bezeichnet im PÜ-Werkzeug bewusst NICHT den Beginn des eigentlichen
+  // Grüns (cm.an - das erste sichtbare Signal wäre dann schon vorbei),
+  // sondern den Rot→Gelb-Wechsel (Beginn Rotgelb) davor - das ist der
+  // Moment, an dem sich für die anwerfende Signalgruppe überhaupt etwas
+  // ändert. Ohne erkanntes Rotgelb (cm.rotgelb=0, z.B. Datenlücke) fällt das
+  // mit cm.an zusammen.
+  function rotgelbStartSec(cm) { return cm.an - (cm.rotgelb || 0); }
+
   // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
   // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase (nur
-  // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ zu dem
-  // Zeitpunkt, an dem das Vorkommen der abwerfenden Phase selbst endet (=
-  // die "TX=0"-Referenz dieses Übergangs, siehe phaseOccurrenceEndInCycle
-  // oben) - das ist per Definition "die Signalgruppe, die als erste
-  // (innerhalb der abwerfenden Phase) endet", denn genau das lässt das
-  // Vorkommen enden. Bewusst NICHT als Math.min() über nur die individuell
-  // "abwerfenden" (nicht auch zur anwerfenden Phase gehörenden) Mitglieder
-  // neu berechnet: das würde sowohl gemeinsame Mitglieder (die laut
-  // Phasendefinition ebenso zur abwerfenden Phase zählen) als auch ein
-  // vorzeitiges Rotgelb einer anwerfenden Signalgruppe übersehen - beides
-  // kann das Vorkommen schon vor dem Ab-Wechsel jeder "echt abwerfenden"
-  // Signalgruppe beenden. Ein Mitglied, das in BEIDEN Phasen steht (bleibt
-  // über den Übergang hinweg durchgehend grün), wird als ZEILE dennoch
-  // weder als "endend" noch als "beginnend" geführt - es engagiert/
-  // disengagiert an diesem Übergang schlicht nicht (sonst würde ein und
-  // dieselbe reale Grünzeit fälschlich gleichzeitig als An- UND Ab-Ereignis
-  // dieses Übergangs erscheinen); es zählt nur (indirekt, über
-  // phaseOccurrenceEndInCycle) zur Referenzzeit-Bestimmung mit. null, wenn
-  // in diesem Umlauf kein Vorkommen der abwerfenden Phase endet (z.B.
-  // Datenlücke) - dann gibt es nichts, worauf sich die Spanne beziehen
-  // könnte.
+  // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt, siehe
+  // rotgelbStartSec oben), relativ zu dem Zeitpunkt, an dem das Vorkommen
+  // der abwerfenden Phase selbst endet (= die "TX=0"-Referenz dieses
+  // Übergangs, siehe phaseOccurrenceEndInCycle oben) - das ist per
+  // Definition "die Signalgruppe, die als erste (innerhalb der abwerfenden
+  // Phase) endet", denn genau das lässt das Vorkommen enden. Bewusst NICHT
+  // als Math.min() über nur die individuell "abwerfenden" (nicht auch zur
+  // anwerfenden Phase gehörenden) Mitglieder neu berechnet: das würde sowohl
+  // gemeinsame Mitglieder (die laut Phasendefinition ebenso zur abwerfenden
+  // Phase zählen) als auch ein vorzeitiges Rotgelb einer anwerfenden
+  // Signalgruppe übersehen - beides kann das Vorkommen schon vor dem
+  // Ab-Wechsel jeder "echt abwerfenden" Signalgruppe beenden. Ein Mitglied,
+  // das in BEIDEN Phasen steht (bleibt über den Übergang hinweg durchgehend
+  // grün), wird als ZEILE dennoch weder als "endend" noch als "beginnend"
+  // geführt - es engagiert/disengagiert an diesem Übergang schlicht nicht
+  // (sonst würde ein und dieselbe reale Grünzeit fälschlich gleichzeitig als
+  // An- UND Ab-Ereignis dieses Übergangs erscheinen); es zählt nur
+  // (indirekt, über phaseOccurrenceEndInCycle) zur Referenzzeit-Bestimmung
+  // mit. null, wenn in diesem Umlauf kein Vorkommen der abwerfenden Phase
+  // endet (z.B. Datenlücke) - dann gibt es nichts, worauf sich die Spanne
+  // beziehen könnte.
   function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
     const outgoingIdx = [...fromPhase.members].filter(idx => !toPhase.members.has(idx));
     const incomingIdx = [...toPhase.members].filter(idx => !fromPhase.members.has(idx));
@@ -310,14 +318,21 @@
     if (gapStartAbsMs == null) return null;
     const referenceSec = (gapStartAbsMs - cycleStart) / 1000;
     const rows = [];
-    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round((o.cm.ab - referenceSec) * 10) / 10 }); });
-    incoming.forEach(o => { if (o.cm && Number.isFinite(o.cm.an)) rows.push({ sgIndex: o.sgIndex, an: Math.round((o.cm.an - referenceSec) * 10) / 10, ab: null }); });
-    // Übergangsende = die zuletzt (spätest) ins Grün kommende Signalgruppe
-    // der anwerfenden Phase - per Definition das Gegenstück zum Start
-    // (früheste Signalgruppe der abwerfenden Phase auf Gelb). null, wenn
-    // keine incoming-Zeile einen An-Wert hat (z.B. Datenlücke).
-    const ans = rows.map(r => r.an).filter(v => v != null);
-    const endSec = ans.length ? Math.max(...ans) : null;
+    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round(o.cm.ab - referenceSec) }); });
+    // Übergangsende = die zuletzt (spätest) ins ECHTE GRÜN kommende
+    // Signalgruppe der anwerfenden Phase (cm.an, NICHT deren früherer
+    // Rotgelb-Start - siehe rotgelbStartSec/"An" oben) - per Definition das
+    // Gegenstück zum Start (frühestes Ende der abwerfenden Phase). Bewusst
+    // unabhängig von den Zeilenwerten gehalten (nicht aus rows[].an
+    // hergeleitet), da "An" jetzt den früheren Rotgelb-Start zeigt.
+    const greenArrivalSecs = [];
+    incoming.forEach(o => {
+      if (o.cm && Number.isFinite(o.cm.an)) {
+        rows.push({ sgIndex: o.sgIndex, an: Math.round(rotgelbStartSec(o.cm) - referenceSec), ab: null });
+        greenArrivalSecs.push(o.cm.an - referenceSec);
+      }
+    });
+    const endSec = greenArrivalSecs.length ? Math.round(Math.max(...greenArrivalSecs)) : null;
     return { referenceSec, rows, endSec };
   }
 
@@ -336,25 +351,22 @@
   // startSec/endSec begrenzen den Übergang selbst (siehe Kopfkommentar
   // autoDetectPueRows): startSec ist FEST 0 (== referenceSec, der früheste
   // Ab-Wechsel auf Gelb der abwerfenden Phase - per Definition, nie
-  // überschreibbar). endSec ist der späteste An der anwerfenden Phase,
-  // standardmäßig aus den GERADE AKTIVEN Zeilen (override, falls vorhanden,
-  // sonst automatisch erkannt) hergeleitet, so dass ein Bearbeiten einer
-  // einzelnen Zeile automatisch auch das Übergangsende mitverschiebt.
-  // pueOverrides.endSec erlaubt zusätzlich, es unabhängig von den Zeilen
-  // fest vorzugeben (siehe setPueOverrideEndSec unten) - z.B. um den
-  // Übergang bewusst weiter zu fassen, als es die aktuell erfassten Zeilen
-  // hergeben.
+  // überschreibbar). endSec ist das späteste ECHTE Grün der anwerfenden
+  // Phase (auto.endSec, siehe dort) - bewusst NICHT aus rows[].an
+  // hergeleitet (das zeigt seit der Rotgelb-Umstellung einen FRÜHEREN
+  // Zeitpunkt, siehe rotgelbStartSec), sondern immer frisch aus den echten
+  // Rohdaten dieses Umlaufs berechnet, sofern pueOverrides.endSec es nicht
+  // explizit fest vorgibt (siehe setPueOverrideEndSec unten) - z.B. um den
+  // Übergang bewusst weiter zu fassen, als es die Rohdaten hergeben.
   function resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, pueOverrides) {
     const auto = autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
     const override = pueOverrides ? pueOverrides[pueOverrideKey(fromPhase.id, toPhase.id)] : null;
     const rows = override ? override.rows : (auto ? auto.rows : []);
-    const ans = rows.map(r => r.an).filter(v => v != null);
-    const derivedEndSec = ans.length ? Math.max(...ans) : null;
     return {
       referenceSec: auto ? auto.referenceSec : null,
       rows,
       startSec: 0,
-      endSec: (override && override.endSec != null) ? override.endSec : derivedEndSec,
+      endSec: (override && override.endSec != null) ? override.endSec : (auto ? auto.endSec : null),
       overridden: !!override
     };
   }
@@ -375,10 +387,25 @@
   }
   function setPueOverrideRowField(pueOverrides, fromPhaseId, toPhaseId, rowIdx, field, value, seedRows) {
     const ov = ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows);
-    if (ov.rows[rowIdx]) ov.rows[rowIdx][field] = value;
+    const row = ov.rows[rowIdx];
+    if (!row) return;
+    row[field] = value;
+    // Ein echter An-/Ab-Wert widerspricht "durchgehend an" (siehe
+    // setPueOverrideRowAlways) - ein Feld-Edit hebt die Markierung auf.
+    if ((field === 'an' || field === 'ab') && value != null) row.always = false;
   }
   function addPueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, sgIndex) {
-    ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.push({ sgIndex, an: null, ab: null });
+    ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.push({ sgIndex, an: null, ab: null, always: false });
+  }
+  // Markiert/entmarkiert eine Zeile als "durchgehend an" (weder An- noch
+  // Ab-Ereignis - z.B. eine Signalgruppe, die laut Anlage über diesen
+  // Übergang hinweg dauerhaft grün bleiben soll, aber (anders als ein
+  // automatisch erkanntes gemeinsames Mitglied, siehe autoDetectPueRows)
+  // hier explizit zu Dokumentationszwecken aufgeführt werden soll) - setzt
+  // an/ab dabei auf null, da diese Zeile keinen realen Wechsel abbildet.
+  function setPueOverrideRowAlways(pueOverrides, fromPhaseId, toPhaseId, rowIdx, always, seedRows) {
+    const ov = ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows);
+    if (ov.rows[rowIdx]) { ov.rows[rowIdx].always = always; ov.rows[rowIdx].an = null; ov.rows[rowIdx].ab = null; }
   }
   function removePueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, rowIdx) {
     ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
@@ -400,46 +427,99 @@
   // renderLane()-Aufruf mit wMin/wMax nahe 0 zeigt damit direkt die lokale
   // TX-Achse dieses Übergangs, ohne dass renderLane selbst etwas von
   // "Verschiebung" wissen müsste (dieselbe Funktion wie überall sonst, nur
-  // mit bereits vorverschobenen Segment-Zeiten als Eingabe).
+  // mit bereits vorverschobenen Segment-Zeiten als Eingabe). Nur als
+  // Rückfallebene genutzt (siehe buildLocalRowSegs unten), wenn für eine
+  // Zeile kein cm (reale Kennzahlen) vorliegt.
   function buildLocalShiftedSegs(sgIndex, referenceAbsMs, a) {
     const entry = findSgEntryByColIndex(sgIndex, a);
     if (!entry) return [];
     return entry.segs.map(s => ({ ...s, start: s.start - referenceAbsMs, end: s.end - referenceAbsMs }));
   }
 
-  // Verschiebt in shiftedSegs (siehe buildLocalShiftedSegs()) genau die
-  // Segmentgrenze, die row.an/row.ab tatsächlich abbildet, auf den
+  // NUR die für EINE PÜ-Zeile relevanten Segmente (das eine GRUEN-Segment
+  // dieses Vorkommens plus dessen unmittelbare Rotgelb-/Gelb-Nachbarn, via
+  // cm.segIdx - siehe GZ.segments.computeCycleSgMetrics), zeitlich um die
+  // PÜ-Referenz verschoben - bewusst NICHT die komplette Rohdaten-Zeitreihe
+  // der Signalgruppe (buildLocalShiftedSegs): eine Signalgruppe mit
+  // mehreren Freigaben je Umlauf (z.B. bedarfsabhängige Fußgänger-SG) hätte
+  // sonst zusätzliche, mit DIESEM Übergang gar nicht verwandte Grün-/
+  // Gelb-Blöcke im selben Zeitfenster gezeigt ("zweites Gelb"-Artefakt).
+  // Ohne cm (kein reales Vorkommen in diesem Umlauf, z.B. eine frei
+  // hinzugefügte Zeile für eine sonst unbeteiligte Signalgruppe) fällt dies
+  // auf die volle Rohdaten-Zeitreihe zurück, damit trotzdem irgendein realer
+  // Anhaltspunkt sichtbar bleibt.
+  function buildLocalRowSegs(sgIndex, cm, referenceAbsMs, a) {
+    const entry = findSgEntryByColIndex(sgIndex, a);
+    if (!entry) return [];
+    if (!cm || cm.segIdx == null) return buildLocalShiftedSegs(sgIndex, referenceAbsMs, a);
+    const segs = entry.segs;
+    const from = Math.max(0, cm.segIdx - 1), to = Math.min(segs.length - 1, cm.segIdx + 1);
+    const out = [];
+    for (let i = from; i <= to; i++) out.push({ ...segs[i], start: segs[i].start - referenceAbsMs, end: segs[i].end - referenceAbsMs });
+    return out;
+  }
+
+  // Verschiebt in localSegs (siehe buildLocalRowSegs()) genau die
+  // Segmentgrenze(n), die row.an/row.ab tatsächlich abbilden, auf den
   // (ggf. manuell überschriebenen) Zeilenwert - sonst würde eine reine
   // Tabellenkorrektur nie im Balken selbst sichtbar, obwohl genau DAS der
   // Zweck der Zeile ist ("hier korrigiere ich, wo diese Signalgruppe
-  // wirklich auf Gelb/Grün wechselt"). rawCm liefert die ECHTEN An/Ab-Werte
-  // dieser Signalgruppe in diesem Umlauf (dieselbe Quelle, aus der die
-  // automatische Erkennung ihre Zahlen zieht, siehe autoDetectPueRows) - nur
-  // deren dazugehörige Grenze in shiftedSegs wird verschoben, alles andere
-  // (der übrige reale Verlauf drumherum) bleibt unangetastet, damit eine
-  // Korrektur weiterhin optisch gegen die Realität prüfbar bleibt. Ohne
-  // rawCm (keine reale Grenze zum Verankern, z.B. frei hinzugefügte Zeile
-  // ohne eigene Grünphase) bleiben die Segmente unverändert.
-  function applyRowOverrideToLocalSegs(shiftedSegs, row, rawCm, referenceSec) {
-    if (!rawCm || referenceSec == null) return shiftedSegs;
-    const out = shiftedSegs.map(s => ({ ...s }));
-    const moveBoundary = (rawSec, overrideSec) => {
-      if (rawSec == null || !Number.isFinite(rawSec) || overrideSec == null) return;
-      const rawLocalMs = (rawSec - referenceSec) * 1000;
-      const overrideLocalMs = overrideSec * 1000;
-      if (Math.abs(overrideLocalMs - rawLocalMs) < 1) return;
-      // rawSec kommt aus computeSegmentAnAbTf(), das auf GANZE Sekunden
-      // rundet (Math.round) - die tatsächliche Segmentgrenze in shiftedSegs
-      // (unverundete Roh-Millisekunden) kann dadurch bis zu 500ms daneben
-      // liegen, daher eine großzügigere Toleranz als ein reiner
-      // Rundungsfehler nahelegen würde.
-      for (let i = 0; i < out.length; i++) {
-        if (Math.abs(out[i].end - rawLocalMs) < 700) out[i].end = overrideLocalMs;
-        if (Math.abs(out[i].start - rawLocalMs) < 700) out[i].start = overrideLocalMs;
+  // wirklich auf Rotgelb/Gelb wechselt"). cm liefert die ECHTEN, unverundeten
+  // Segmentgrenzen dieser Signalgruppe in diesem Umlauf (segStart/segEnd,
+  // dieselbe Quelle wie die automatische Erkennung, siehe autoDetectPueRows)
+  // - alles andere (der übrige reale Verlauf drumherum) bleibt unangetastet,
+  // damit eine Korrektur weiterhin optisch gegen die Realität prüfbar
+  // bleibt. Ohne cm (keine reale Grenze zum Verankern, z.B. frei
+  // hinzugefügte Zeile ohne eigene Grünphase) bleiben die Segmente
+  // unverändert.
+  function applyRowOverrideToLocalSegs(localSegs, row, cm, referenceAbsMs) {
+    if (!cm) return localSegs;
+    const out = localSegs.map(s => ({ ...s }));
+    // Prüfungen laufen bewusst gegen localSegs (unverändertes Original),
+    // Schreibungen gegen out (die Kopie) - sonst könnte eine bereits in
+    // diesem Durchlauf verschobene Grenze (z.B. durch den An-Block) bei
+    // einer zufälligen Koinzidenz fälschlich ein zweites Mal treffen.
+    // Ab: EIN einzelner Rand (Ende GRUEN = Beginn GELB) - ein reiner Punkt,
+    // kein Abstand zu einem Nachbarn zu erhalten.
+    if (Number.isFinite(cm.segEnd) && row.ab != null) {
+      const rawLocalMs = cm.segEnd - referenceAbsMs;
+      const overrideLocalMs = row.ab * 1000;
+      if (Math.abs(overrideLocalMs - rawLocalMs) >= 1) {
+        localSegs.forEach((orig, i) => {
+          if (Math.abs(orig.end - rawLocalMs) < 50) out[i].end = overrideLocalMs;
+          if (Math.abs(orig.start - rawLocalMs) < 50) out[i].start = overrideLocalMs;
+        });
       }
-    };
-    moveBoundary(rawCm.ab, row.ab);
-    moveBoundary(rawCm.an, row.an);
+    }
+    // An: bei echtem Rotgelb wird der GESAMTE Rotgelb-Block (Beginn UND
+    // Ende) um denselben Betrag verschoben, statt nur seinen Anfang zu
+    // dehnen - sonst würde ein Verschieben von "An" implizit auch die reale
+    // Rotgelb-Dauer verändern, obwohl die Zeile nur EINEN Zeitpunkt (den
+    // Rot→Gelb-Wechsel) korrigiert, keine Dauer. Ohne Rotgelb (rotgelbMs=0,
+    // z.B. Datenlücke) fallen Start/Ende ohnehin zusammen - dann wie bei Ab
+    // ein einzelner Rand.
+    if (cm.segIdx != null && Number.isFinite(cm.segStart) && row.an != null) {
+      const rotgelbMs = (cm.rotgelb || 0) * 1000;
+      const rawStartLocalMs = cm.segStart - rotgelbMs - referenceAbsMs;
+      const overrideLocalMs = row.an * 1000;
+      if (Math.abs(overrideLocalMs - rawStartLocalMs) >= 1) {
+        if (rotgelbMs > 0) {
+          const delta = overrideLocalMs - rawStartLocalMs;
+          const rawEndLocalMs = rawStartLocalMs + rotgelbMs;
+          localSegs.forEach((orig, i) => {
+            if (Math.abs(orig.start - rawStartLocalMs) < 50) out[i].start += delta;
+            if (Math.abs(orig.end - rawStartLocalMs) < 50) out[i].end += delta;
+            if (Math.abs(orig.start - rawEndLocalMs) < 50) out[i].start += delta;
+            if (Math.abs(orig.end - rawEndLocalMs) < 50) out[i].end += delta;
+          });
+        } else {
+          localSegs.forEach((orig, i) => {
+            if (Math.abs(orig.end - rawStartLocalMs) < 50) out[i].end = overrideLocalMs;
+            if (Math.abs(orig.start - rawStartLocalMs) < 50) out[i].start = overrideLocalMs;
+          });
+        }
+      }
+    }
     return out;
   }
 
@@ -464,8 +544,8 @@
     PHASE_COLORS, colorForIndex, intersectIntervals, unionIntervals, subtractIntervals, createPhase, createPhaseFromConfig,
     computePhaseOccurrences, buildCombinedSegments, durationPerCycle,
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
-    findSgEntryByColIndex, realCycleMetricsForSg, autoDetectPueRows, pueOverrideKey, resolvePueRows,
-    ensurePueOverride, setPueOverrideRowField, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
-    setPueOverrideEndSec, buildLocalShiftedSegs, applyRowOverrideToLocalSegs
+    findSgEntryByColIndex, realCycleMetricsForSg, rotgelbStartSec, autoDetectPueRows, pueOverrideKey, resolvePueRows,
+    ensurePueOverride, setPueOverrideRowField, setPueOverrideRowAlways, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
+    setPueOverrideEndSec, buildLocalShiftedSegs, buildLocalRowSegs, applyRowOverrideToLocalSegs
   };
 })(window.GZ = window.GZ || {});

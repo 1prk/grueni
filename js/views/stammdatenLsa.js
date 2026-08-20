@@ -90,7 +90,7 @@
       const fromKuerzel = kuerzelById.get(fromId), toKuerzel = kuerzelById.get(toId);
       if (!fromKuerzel || !toKuerzel) return; // referenziert eine inzwischen gelöschte Phase
       const rows = ov.rows
-        .map(r => ({ sg: sgNameByIndex.get(r.sgIndex), an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null }))
+        .map(r => ({ sg: sgNameByIndex.get(r.sgIndex), an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null, always: !!r.always }))
         .filter(r => r.sg);
       const entry = { rows };
       if (ov.endSec != null) entry.endSec = ov.endSec;
@@ -155,7 +155,7 @@
       const rows = (ov.rows || []).map(r => {
         const sgIndex = sgIndexByName.get(r.sg);
         if (sgIndex == null) { skipped.push(`Signalgruppe „${r.sg}“ (PÜ ${key})`); return null; }
-        return { sgIndex, an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null };
+        return { sgIndex, an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null, always: !!r.always };
       }).filter(Boolean);
       const entry = { rows };
       if (ov.endSec != null) entry.endSec = ov.endSec;
@@ -318,11 +318,19 @@
     }
     els.pueSection.style.display = '';
     els.pueBody.innerHTML = transitions.map(t => renderTransitionBlockHtml(t, phases, a, TU_MED)).join('');
-    // Bis zu 3 Spalten, aber IMMER exakt so viele wie Blöcke vorhanden sind
-    // (statt einer auto-fit/minmax-Rasterbreite) - so nutzt z.B. ein
-    // einzelner Übergang die volle verfügbare Breite statt auf der
-    // Mindestbreite einer möglichen Mehrspalten-Aufteilung stehenzubleiben.
-    els.pueBody.style.gridTemplateColumns = `repeat(${Math.min(transitions.length, 3)}, 1fr)`;
+    // Bis zu 3 Spalten, so viele wie Blöcke vorhanden sind (statt einer
+    // auto-fit/minmax-Rasterbreite) - so nutzt z.B. ein einzelner Übergang
+    // die volle verfügbare Breite statt auf der Mindestbreite einer
+    // möglichen Mehrspalten-Aufteilung stehenzubleiben. Zusätzlich an der
+    // tatsächlich verfügbaren Breite gedeckelt (MIN_BLOCK_W je Spalte,
+    // inkl. Gap) - sonst könnte die Spur-Spalte (1fr) einer einzelnen Zeile
+    // bei zu vielen erzwungenen Spalten auf einem schmalen Fenster auf 0px
+    // zusammenschrumpfen (die festen Spalten - SG, "immer an", An, Ab, TF,
+    // Entfernen-Button - allein brauchen bereits ca. 480px).
+    const MIN_BLOCK_W = 560, GAP = 16;
+    const containerW = els.pueBody.clientWidth || 0;
+    const maxColsByWidth = containerW ? Math.max(1, Math.floor((containerW + GAP) / (MIN_BLOCK_W + GAP))) : 3;
+    els.pueBody.style.gridTemplateColumns = `repeat(${Math.min(transitions.length, 3, maxColsByWidth)}, 1fr)`;
     wirePueSectionEvents(a, TU_MED);
   }
 
@@ -334,17 +342,20 @@
     const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
 
     const rowsHtml = resolved.rows.map((row, i) => {
-      const cm = row.an != null ? GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
-      const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
       const sgOptions = a.allStats.map(s =>
         `<option value="${s.col.index}" ${s.col.index === row.sgIndex ? 'selected' : ''}>${esc(s.col.name)}</option>`
       ).join('');
+      // TF wird NICHT hier vorausberechnet, sondern erst in
+      // wirePueSectionEvents() aus dem tatsächlich gerenderten (ggf.
+      // überschriebenen) Segment abgelesen (siehe dort) - "TF relativ zum
+      // Diagramm, nie aus den Rohdaten hergeleitet".
       return `
         <div class="sd-pue-row" data-row="${i}">
-          <select class="sd-pue-sg">${sgOptions}</select>
-          <label class="sd-pue-field">An <input type="number" class="sd-pue-an" step="0.1" value="${row.an != null ? row.an : ''}"></label>
-          <label class="sd-pue-field">Ab <input type="number" class="sd-pue-ab" step="0.1" value="${row.ab != null ? row.ab : ''}"></label>
-          <span class="sd-pue-tf">TF ${esc(formatPueNum(tf))}</span>
+          <select class="sd-pue-sg" ${row.always ? 'disabled' : ''}>${sgOptions}</select>
+          <label class="sd-pue-always" title="Bleibt über diesen Übergang hinweg durchgehend grün (kein An-/Ab-Ereignis)"><input type="checkbox" class="sd-pue-always-cb" ${row.always ? 'checked' : ''}> immer an</label>
+          <label class="sd-pue-field">An <input type="number" class="sd-pue-an" step="1" value="${row.an != null ? row.an : ''}" ${row.always ? 'disabled' : ''}></label>
+          <label class="sd-pue-field">Ab <input type="number" class="sd-pue-ab" step="1" value="${row.ab != null ? row.ab : ''}" ${row.always ? 'disabled' : ''}></label>
+          <span class="sd-pue-tf">TF –</span>
           <div class="sd-pue-track"><svg></svg></div>
           <button type="button" class="sd-pue-row-remove" title="Zeile entfernen">✕</button>
         </div>`;
@@ -357,7 +368,7 @@
     // (renderTimeAxis mit stepMs=5000, siehe wirePueSectionEvents).
     const axisRowHtml = resolved.rows.length ? `
         <div class="sd-pue-axis-row">
-          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
           <div class="sd-pue-track sd-pue-axis-track"><svg></svg></div>
           <span></span>
         </div>` : '';
@@ -366,7 +377,7 @@
         <div class="sd-pue-block-head">
           <span><b>${esc(t.label)}</b><span class="sd-pue-block-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}${resolved.overridden ? ' · manuell angepasst' : ''}</span></span>
           <span class="sd-pue-start-label" title="Frühester Gelbbeginn der abwerfenden Phase - per Definition TX=0, nicht änderbar">Start 0s</span>
-          <label class="sd-pue-field" title="Spätester Grünbeginn der anwerfenden Phase">Ende <input type="number" class="sd-pue-end" step="0.1" value="${resolved.endSec != null ? resolved.endSec : ''}"> s</label>
+          <label class="sd-pue-field" title="Spätestes echtes Grün der anwerfenden Phase - markiert als Linie im Diagramm">Ende <input type="number" class="sd-pue-end" step="1" value="${resolved.endSec != null ? resolved.endSec : ''}"> s</label>
           <button type="button" class="sd-pue-reset" ${resolved.overridden ? '' : 'disabled'}>Automatisch erkannt zurücksetzen</button>
         </div>
         ${resolved.rows.length ? `${axisRowHtml}<div class="sd-pue-rows">${rowsHtml}</div>` : '<div class="sd-pue-empty">Keine Daten für das erste Vorkommen (z. B. Datenlücke).</div>'}
@@ -399,42 +410,74 @@
       const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
       const localWMin = (startSec - 3) * 1000, localWMax = (endSec + 2) * 1000;
 
+      // Ende-Markierung (siehe renderLane()'s endMarks) - eine durchgezogene
+      // senkrechte Linie bei Ende, sowohl je Zeile als auch auf der
+      // Achsen-Zeile, damit der definierte Übergangs-Stopp im Diagramm
+      // sichtbar bleibt, nicht nur als Zahl im Kopf.
+      const endMarks = resolved.endSec != null ? [{ t: resolved.endSec * 1000, label: `Übergangsende (Ende), ${resolved.endSec}s` }] : [];
+
       // Eine gemeinsame Achse für den ganzen Block (nicht je Zeile) - Ticks
       // alle 5s (stepMs=5000), exakt über den Balken dank identischem Grid-
       // Spaltenraster (siehe CSS .sd-pue-row/.sd-pue-axis-row).
       const axisSvg = block.querySelector('.sd-pue-axis-track svg');
-      if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000);
+      if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000, resolved.endSec != null ? resolved.endSec * 1000 : null);
 
       block.querySelectorAll('.sd-pue-row').forEach((rowEl, i) => {
         const row = resolved.rows[i];
         const svg = rowEl.querySelector('.sd-pue-track svg');
-        const rawCm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
-        // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten statt
-        // stur den unveränderten Rohdaten - siehe applyRowOverrideToLocalSegs.
-        const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(
-          GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a), row, rawCm, resolved.referenceSec
-        ).filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
-        renderLane(svg, {
-          wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
-          baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
-          gridStepMs: 5000, laneStyle: 'minimal',
-          // An/Ab-Sekunden direkt auf dem Grün-Balken (gleiches Muster wie
-          // die Hauptspuren in Umlaufprüfung, siehe dort edgeLabelsFor) statt
-          // separat daneben - das GRUEN-Segment dieser Zeile wird über seinen
-          // Rand identifiziert (nahe genug an row.an/row.ab), nicht per
-          // Objektidentität, da shiftedSegs hier bei jedem Renderdurchlauf
-          // neu gebaut wird.
-          edgeLabelsFor: d => {
-            if (d.cat !== 'GRUEN') return null;
-            const nearAn = row.an != null && Math.abs(d.start - row.an * 1000) < 500;
-            const nearAb = row.ab != null && Math.abs(d.end - row.ab * 1000) < 500;
-            if (!nearAn && !nearAb) return null;
-            return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
-          }
-        });
+        const tfEl = rowEl.querySelector('.sd-pue-tf');
+
+        if (row.always) {
+          // "Immer an" - bewusst KEINE Rohdaten (siehe setPueOverrideRowAlways),
+          // ein durchgehend voller Grün-Balken über das ganze Fenster.
+          renderLane(svg, {
+            wMin: localWMin, wMax: localWMax, segs: [{ cat: 'GRUEN', start: localWMin, end: localWMax }],
+            baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+            gridStepMs: 5000, laneStyle: 'minimal', endMarks
+          });
+          tfEl.textContent = 'TF –';
+        } else {
+          const cm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
+          // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten
+          // statt stur den unveränderten Rohdaten (applyRowOverrideToLocalSegs),
+          // und zeigt NUR das eine relevante Segment-Grüppchen dieser Zeile
+          // statt der gesamten Rohdaten-Zeitreihe der Signalgruppe
+          // (buildLocalRowSegs) - sonst könnte eine zeitlich unverwandte
+          // zweite Freigabe derselben Signalgruppe (z.B. bedarfsabhängige
+          // Fußgänger-SG) im selben Fenster als "zweites Gelb" auftauchen.
+          const localSegs = GZ.phases.buildLocalRowSegs(row.sgIndex, cm, referenceAbsMs, a);
+          const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(localSegs, row, cm, referenceAbsMs)
+            .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+          renderLane(svg, {
+            wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
+            baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+            gridStepMs: 5000, laneStyle: 'minimal', endMarks,
+            // An/Ab-Sekunden direkt auf dem Balken (gleiches Muster wie die
+            // Hauptspuren in Umlaufprüfung) statt separat daneben. "An"
+            // markiert den Rot→Gelb-Wechsel (ROTGELB-Segment, sofern
+            // vorhanden - sonst fällt es auf den GRUEN-Beginn zurück),
+            // "Ab" bleibt das Ende des GRUEN-Segments (Beginn GELB).
+            edgeLabelsFor: d => {
+              const nearAn = row.an != null && (d.cat === 'ROTGELB' || d.cat === 'GRUEN') && Math.abs(d.start - row.an * 1000) < 500;
+              const nearAb = row.ab != null && d.cat === 'GRUEN' && Math.abs(d.end - row.ab * 1000) < 500;
+              if (!nearAn && !nearAb) return null;
+              return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
+            }
+          });
+          // TF "relativ zum Diagramm": die Dauer des tatsächlich gerenderten
+          // (ggf. an einer Kante überschriebenen) GRUEN-Segments dieser
+          // Zeile - NIE aus cm.tf (den unveränderten Rohdaten) übernommen.
+          const gruenSeg = shiftedSegs.find(s => s.cat === 'GRUEN');
+          const tf = gruenSeg ? Math.round((gruenSeg.end - gruenSeg.start) / 1000) : null;
+          tfEl.textContent = 'TF ' + formatPueNum(tf);
+        }
 
         rowEl.querySelector('.sd-pue-sg').addEventListener('change', e => {
           GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'sgIndex', Number(e.target.value), seedRows);
+          notifyChanged();
+        });
+        rowEl.querySelector('.sd-pue-always-cb').addEventListener('change', e => {
+          GZ.phases.setPueOverrideRowAlways(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, e.target.checked, seedRows);
           notifyChanged();
         });
         rowEl.querySelector('.sd-pue-an').addEventListener('change', e => {
