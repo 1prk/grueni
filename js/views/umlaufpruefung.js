@@ -36,7 +36,7 @@
     makeIntervalSweep, makeIndexSweep
   } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
-  const { renderLane } = GZ.charts.timelineLane;
+  const { renderLane, renderTimeAxis } = GZ.charts.timelineLane;
   const { wzIstBelegt, computeOepnvEvents } = GZ.oepnvLogic;
 
   let els = null;
@@ -257,33 +257,47 @@
       const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
       const sgEntry = GZ.phases.findSgEntryByColIndex(row.sgIndex, a);
       const sgName = sgEntry ? sgEntry.col.name : '?';
+      // An/Ab-Zahlen stehen NICHT mehr separat als Text daneben, sondern
+      // direkt auf dem Grün-Balken selbst (edgeLabelsFor unten) - gleiches
+      // Muster wie die Hauptspuren in Umlaufprüfung.
       return `
         <div class="up-pue-row">
           <span class="up-pue-sg-label">${esc(sgName)}</span>
-          <span class="up-pue-field">An <b>${esc(formatPueNum(row.an))}</b></span>
-          <span class="up-pue-field">Ab <b>${esc(formatPueNum(row.ab))}</b></span>
           <span class="up-pue-tf">TF ${esc(formatPueNum(tf))}</span>
           <div class="up-pue-track"><svg></svg></div>
         </div>`;
     }).join('');
 
+    const startEndText = `Start ${esc(formatPueNum(resolved.startSec))}s · Ende ${esc(formatPueNum(resolved.endSec))}s`;
+    // Gemeinsame Achsen-Zeile (5s-Ticks) - gleiches Grid-Spaltenraster wie
+    // .up-pue-row (siehe CSS), damit die Ticks exakt über den Balken stehen.
+    const axisRowHtml = resolved.rows.length ? `
+        <div class="up-pue-axis-row">
+          <span></span><span></span>
+          <div class="up-pue-track up-pue-axis-track"><svg></svg></div>
+        </div>` : '';
     panel.innerHTML = `
       <div class="up-pue-panel-head">
-        <span><b>${esc(label)}</b><span class="up-pue-panel-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}${resolved.overridden ? ' · manuell angepasst' : ''}</span></span>
+        <span><b>${esc(label)}</b><span class="up-pue-panel-sub"> · ${esc(fromLabel)} → ${esc(toLabel)} · ${startEndText}${resolved.overridden ? ' · manuell angepasst' : ''}</span></span>
         <div class="up-pue-panel-actions">
           <button type="button" class="up-pue-edit">Bearbeiten in Stammdaten LSA</button>
           <button type="button" class="up-pue-close" title="Schließen">✕</button>
         </div>
       </div>
-      ${resolved.rows.length ? `<div class="up-pue-rows">${rowsHtml}</div>` : '<div class="up-pue-empty">Keine Daten für diesen Umlauf (z. B. Datenlücke).</div>'}
+      ${resolved.rows.length ? `${axisRowHtml}<div class="up-pue-rows">${rowsHtml}</div>` : '<div class="up-pue-empty">Keine Daten für diesen Umlauf (z. B. Datenlücke).</div>'}
     `;
 
     groupEls[rowPos].appendChild(panel);
 
-    const allVals = resolved.rows.flatMap(r => [r.an, r.ab]).filter(v => v != null);
-    const maxVal = allVals.length ? Math.max(...allVals, 0) : 15;
-    const minVal = allVals.length ? Math.min(...allVals, 0) : 0;
-    const localWMin = (minVal - 5) * 1000, localWMax = (maxVal + 5) * 1000;
+    // Fensterbreite wie in Stammdaten LSA fest an den Übergang gekoppelt
+    // (-3s vor Start/+2s nach Ende), nicht an eine pauschale Polsterung um
+    // die Zeilenwerte - siehe dortiger Kopfkommentar zur selben Stelle
+    // (inkl. Math.max-Klemmung gegen ein invertiertes Fenster).
+    const startSec = resolved.startSec != null ? resolved.startSec : 0;
+    const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
+    const localWMin = (startSec - 3) * 1000, localWMax = (endSec + 2) * 1000;
+    const axisSvg = panel.querySelector('.up-pue-axis-track svg');
+    if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000);
     panel.querySelectorAll('.up-pue-row').forEach((rowEl, i) => {
       const row = resolved.rows[i];
       const svg = rowEl.querySelector('.up-pue-track svg');
@@ -292,7 +306,14 @@
       renderLane(svg, {
         wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
         baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
-        gridStepMs: 5000, laneStyle: currentLaneStyle()
+        gridStepMs: 5000, laneStyle: currentLaneStyle(),
+        edgeLabelsFor: d => {
+          if (d.cat !== 'GRUEN') return null;
+          const nearAn = row.an != null && Math.abs(d.start - row.an * 1000) < 500;
+          const nearAb = row.ab != null && Math.abs(d.end - row.ab * 1000) < 500;
+          if (!nearAn && !nearAb) return null;
+          return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
+        }
       });
     });
 

@@ -351,14 +351,29 @@
   }
 
   // Zeitachse als eigene kleine D3-Achse (x-Skala identisch zu den Spuren).
-  function renderTimeAxis(svgEl, wMin, wMax) {
+  // stepMs (optional): feste Tick-Schrittweite (z.B. 5000 = alle 5s), Ticks
+  // als reine Sekundenzahl relativ zu wMin/wMax=0 statt als Uhrzeit - für
+  // kurze, lokale Zeitfenster (z.B. PÜ-Werkzeug), in denen fmtTimeShort()
+  // (Uhrzeitformat) keinen Sinn ergäbe. Ohne stepMs unverändert die
+  // bisherige, auf den sichtbaren Bereich skalierte 6-Teilung mit Uhrzeiten
+  // (Signalzeitendiagramm u.a.).
+  function renderTimeAxis(svgEl, wMin, wMax, stepMs) {
     const width = svgEl.clientWidth, height = svgEl.clientHeight;
     if (!width || !height) return false;
     const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
     const svg = d3.select(svgEl).attr('viewBox', `0 0 ${width} ${height}`).attr('preserveAspectRatio', 'none');
     svg.selectAll('*').remove();
-    const n = 6;
     const g = svg.append('g').attr('class', 'd3-axis-x');
+    if (stepMs) {
+      const first = Math.ceil(wMin / stepMs) * stepMs;
+      for (let t = first; t <= wMax; t += stepMs) {
+        const px = x(t);
+        const anchor = px < 12 ? 'start' : (px > width - 12 ? 'end' : 'middle');
+        g.append('text').attr('x', px).attr('y', height - 2).attr('text-anchor', anchor).text(String(Math.round(t / 1000)));
+      }
+      return true;
+    }
+    const n = 6;
     for (let i = 0; i <= n; i++) {
       const t = wMin + (wMax - wMin) * i / n;
       const px = x(t);

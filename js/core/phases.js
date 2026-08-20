@@ -264,19 +264,36 @@
   // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase (nur
   // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ zum
   // frühesten Ab unter den abwerfenden Mitgliedern (= die "TX=0"-Referenz
-  // dieses Übergangs). null, wenn in diesem Umlauf kein Mitglied der
-  // abwerfenden Phase einen Ab-Wert hat (z.B. Datenlücke) - dann gibt es
-  // nichts, worauf sich die Spanne beziehen könnte.
+  // dieses Übergangs, definiert als der Moment, in dem die erste Signal-
+  // gruppe der abwerfenden Phase auf Gelb wechselt - "ab" IST bereits genau
+  // dieser Moment, siehe computeSegmentAnAbTf: Ende des GRUEN-Segments =
+  // Beginn von GELB). Ein Mitglied, das in BEIDEN Phasen steht (bleibt über
+  // den Übergang hinweg durchgehend grün), wird bewusst weder als "endend"
+  // noch als "beginnend" gewertet - es engagiert/disengagiert an diesem
+  // Übergang schlicht nicht, taucht also gar nicht als Zeile auf (sonst
+  // würde ein und dieselbe reale Grünzeit fälschlich gleichzeitig als An-
+  // UND Ab-Ereignis dieses Übergangs erscheinen). null, wenn in diesem
+  // Umlauf kein Mitglied der abwerfenden Phase einen Ab-Wert hat (z.B.
+  // Datenlücke) - dann gibt es nichts, worauf sich die Spanne beziehen
+  // könnte.
   function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
-    const outgoing = [...fromPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
-    const incoming = [...toPhase.members].map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    const outgoingIdx = [...fromPhase.members].filter(idx => !toPhase.members.has(idx));
+    const incomingIdx = [...toPhase.members].filter(idx => !fromPhase.members.has(idx));
+    const outgoing = outgoingIdx.map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
+    const incoming = incomingIdx.map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
     const abs = outgoing.map(o => o.cm && Number.isFinite(o.cm.ab) ? o.cm.ab : null).filter(v => v != null);
     if (!abs.length) return null;
     const referenceSec = Math.min(...abs);
     const rows = [];
     outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round((o.cm.ab - referenceSec) * 10) / 10 }); });
     incoming.forEach(o => { if (o.cm && Number.isFinite(o.cm.an)) rows.push({ sgIndex: o.sgIndex, an: Math.round((o.cm.an - referenceSec) * 10) / 10, ab: null }); });
-    return { referenceSec, rows };
+    // Übergangsende = die zuletzt (spätest) ins Grün kommende Signalgruppe
+    // der anwerfenden Phase - per Definition das Gegenstück zum Start
+    // (früheste Signalgruppe der abwerfenden Phase auf Gelb). null, wenn
+    // keine incoming-Zeile einen An-Wert hat (z.B. Datenlücke).
+    const ans = rows.map(r => r.an).filter(v => v != null);
+    const endSec = ans.length ? Math.max(...ans) : null;
+    return { referenceSec, rows, endSec };
   }
 
   function pueOverrideKey(fromPhaseId, toPhaseId) { return fromPhaseId + '→' + toPhaseId; }
@@ -291,12 +308,28 @@
   // auch wenn die Tabellenwerte manuell überschrieben sind (so lässt sich
   // eine Korrektur visuell gegen die Realität prüfen statt blind zu
   // vertrauen).
+  // startSec/endSec begrenzen den Übergang selbst (siehe Kopfkommentar
+  // autoDetectPueRows): startSec ist FEST 0 (== referenceSec, der früheste
+  // Ab-Wechsel auf Gelb der abwerfenden Phase - per Definition, nie
+  // überschreibbar). endSec ist der späteste An der anwerfenden Phase,
+  // standardmäßig aus den GERADE AKTIVEN Zeilen (override, falls vorhanden,
+  // sonst automatisch erkannt) hergeleitet, so dass ein Bearbeiten einer
+  // einzelnen Zeile automatisch auch das Übergangsende mitverschiebt.
+  // pueOverrides.endSec erlaubt zusätzlich, es unabhängig von den Zeilen
+  // fest vorzugeben (siehe setPueOverrideEndSec unten) - z.B. um den
+  // Übergang bewusst weiter zu fassen, als es die aktuell erfassten Zeilen
+  // hergeben.
   function resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, pueOverrides) {
     const auto = autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
     const override = pueOverrides ? pueOverrides[pueOverrideKey(fromPhase.id, toPhase.id)] : null;
+    const rows = override ? override.rows : (auto ? auto.rows : []);
+    const ans = rows.map(r => r.an).filter(v => v != null);
+    const derivedEndSec = ans.length ? Math.max(...ans) : null;
     return {
       referenceSec: auto ? auto.referenceSec : null,
-      rows: override ? override.rows : (auto ? auto.rows : []),
+      rows,
+      startSec: 0,
+      endSec: (override && override.endSec != null) ? override.endSec : derivedEndSec,
       overridden: !!override
     };
   }
@@ -324,6 +357,14 @@
   }
   function removePueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, rowIdx) {
     ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
+  }
+  // value === null setzt zurück auf "automatisch" (siehe resolvePueRows) -
+  // legt bei Bedarf trotzdem eine Korrektur an (auch ein reines Ende-
+  // Override ohne Zeilenänderung zählt als "manuell angepasst"). Der Start
+  // ist bewusst NICHT überschreibbar (siehe resolvePueRows) - er ist per
+  // Definition immer 0.
+  function setPueOverrideEndSec(pueOverrides, fromPhaseId, toPhaseId, seedRows, value) {
+    ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).endSec = value;
   }
   function resetPueOverride(pueOverrides, fromPhaseId, toPhaseId) {
     delete pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
@@ -364,6 +405,6 @@
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
     findSgEntryByColIndex, realCycleMetricsForSg, autoDetectPueRows, pueOverrideKey, resolvePueRows,
     ensurePueOverride, setPueOverrideRowField, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
-    buildLocalShiftedSegs
+    setPueOverrideEndSec, buildLocalShiftedSegs
   };
 })(window.GZ = window.GZ || {});
