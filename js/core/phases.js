@@ -260,20 +260,43 @@
     return metrics[cycleIdx] || null;
   }
 
+  // Spätestes Intervallende einer Phase (computePhaseOccurrences), das noch
+  // in [cycleStart, cycleEnd] liegt - die tatsächliche, "wie von der
+  // Phasendefinition selbst bestimmte" Grenze, an der ein Phasen-Vorkommen
+  // endet (siehe dortigen Kopfkommentar: alle Mitglieder grün UND alle
+  // Nicht-Mitglieder rot). Grundlage der PÜ-Referenz unten - bewusst NICHT
+  // separat aus den Ab-Werten einzelner Signalgruppen neu hergeleitet (siehe
+  // dort), da das Vorkommen genauso gut durch eine anwerfende Signalgruppe
+  // beendet werden kann, die vorzeitig nicht mehr rot ist (Rotgelb), nicht
+  // nur durch eine abwerfende, die grün verlässt.
+  function phaseOccurrenceEndInCycle(phase, allStats, cycleStart, cycleEnd) {
+    const { intervals } = computePhaseOccurrences(phase, allStats);
+    let best = null;
+    intervals.forEach(iv => { if (iv.end > cycleStart && iv.end <= cycleEnd && (best == null || iv.end > best)) best = iv.end; });
+    return best;
+  }
+
   // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
   // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase (nur
-  // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ zum
-  // frühesten Ab unter den abwerfenden Mitgliedern (= die "TX=0"-Referenz
-  // dieses Übergangs, definiert als der Moment, in dem die erste Signal-
-  // gruppe der abwerfenden Phase auf Gelb wechselt - "ab" IST bereits genau
-  // dieser Moment, siehe computeSegmentAnAbTf: Ende des GRUEN-Segments =
-  // Beginn von GELB). Ein Mitglied, das in BEIDEN Phasen steht (bleibt über
-  // den Übergang hinweg durchgehend grün), wird bewusst weder als "endend"
-  // noch als "beginnend" gewertet - es engagiert/disengagiert an diesem
-  // Übergang schlicht nicht, taucht also gar nicht als Zeile auf (sonst
-  // würde ein und dieselbe reale Grünzeit fälschlich gleichzeitig als An-
-  // UND Ab-Ereignis dieses Übergangs erscheinen). null, wenn in diesem
-  // Umlauf kein Mitglied der abwerfenden Phase einen Ab-Wert hat (z.B.
+  // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt), relativ zu dem
+  // Zeitpunkt, an dem das Vorkommen der abwerfenden Phase selbst endet (=
+  // die "TX=0"-Referenz dieses Übergangs, siehe phaseOccurrenceEndInCycle
+  // oben) - das ist per Definition "die Signalgruppe, die als erste
+  // (innerhalb der abwerfenden Phase) endet", denn genau das lässt das
+  // Vorkommen enden. Bewusst NICHT als Math.min() über nur die individuell
+  // "abwerfenden" (nicht auch zur anwerfenden Phase gehörenden) Mitglieder
+  // neu berechnet: das würde sowohl gemeinsame Mitglieder (die laut
+  // Phasendefinition ebenso zur abwerfenden Phase zählen) als auch ein
+  // vorzeitiges Rotgelb einer anwerfenden Signalgruppe übersehen - beides
+  // kann das Vorkommen schon vor dem Ab-Wechsel jeder "echt abwerfenden"
+  // Signalgruppe beenden. Ein Mitglied, das in BEIDEN Phasen steht (bleibt
+  // über den Übergang hinweg durchgehend grün), wird als ZEILE dennoch
+  // weder als "endend" noch als "beginnend" geführt - es engagiert/
+  // disengagiert an diesem Übergang schlicht nicht (sonst würde ein und
+  // dieselbe reale Grünzeit fälschlich gleichzeitig als An- UND Ab-Ereignis
+  // dieses Übergangs erscheinen); es zählt nur (indirekt, über
+  // phaseOccurrenceEndInCycle) zur Referenzzeit-Bestimmung mit. null, wenn
+  // in diesem Umlauf kein Vorkommen der abwerfenden Phase endet (z.B.
   // Datenlücke) - dann gibt es nichts, worauf sich die Spanne beziehen
   // könnte.
   function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
@@ -281,9 +304,11 @@
     const incomingIdx = [...toPhase.members].filter(idx => !fromPhase.members.has(idx));
     const outgoing = outgoingIdx.map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
     const incoming = incomingIdx.map(sgIndex => ({ sgIndex, cm: realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) }));
-    const abs = outgoing.map(o => o.cm && Number.isFinite(o.cm.ab) ? o.cm.ab : null).filter(v => v != null);
-    if (!abs.length) return null;
-    const referenceSec = Math.min(...abs);
+    const cycleStart = a.cycleStarts[cycleIdx];
+    const cycleEnd = cycleIdx + 1 < a.cycleStarts.length ? a.cycleStarts[cycleIdx + 1] : a.tMax;
+    const gapStartAbsMs = phaseOccurrenceEndInCycle(fromPhase, a.allStats, cycleStart, cycleEnd);
+    if (gapStartAbsMs == null) return null;
+    const referenceSec = (gapStartAbsMs - cycleStart) / 1000;
     const rows = [];
     outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round((o.cm.ab - referenceSec) * 10) / 10 }); });
     incoming.forEach(o => { if (o.cm && Number.isFinite(o.cm.an)) rows.push({ sgIndex: o.sgIndex, an: Math.round((o.cm.an - referenceSec) * 10) / 10, ab: null }); });
@@ -382,6 +407,42 @@
     return entry.segs.map(s => ({ ...s, start: s.start - referenceAbsMs, end: s.end - referenceAbsMs }));
   }
 
+  // Verschiebt in shiftedSegs (siehe buildLocalShiftedSegs()) genau die
+  // Segmentgrenze, die row.an/row.ab tatsächlich abbildet, auf den
+  // (ggf. manuell überschriebenen) Zeilenwert - sonst würde eine reine
+  // Tabellenkorrektur nie im Balken selbst sichtbar, obwohl genau DAS der
+  // Zweck der Zeile ist ("hier korrigiere ich, wo diese Signalgruppe
+  // wirklich auf Gelb/Grün wechselt"). rawCm liefert die ECHTEN An/Ab-Werte
+  // dieser Signalgruppe in diesem Umlauf (dieselbe Quelle, aus der die
+  // automatische Erkennung ihre Zahlen zieht, siehe autoDetectPueRows) - nur
+  // deren dazugehörige Grenze in shiftedSegs wird verschoben, alles andere
+  // (der übrige reale Verlauf drumherum) bleibt unangetastet, damit eine
+  // Korrektur weiterhin optisch gegen die Realität prüfbar bleibt. Ohne
+  // rawCm (keine reale Grenze zum Verankern, z.B. frei hinzugefügte Zeile
+  // ohne eigene Grünphase) bleiben die Segmente unverändert.
+  function applyRowOverrideToLocalSegs(shiftedSegs, row, rawCm, referenceSec) {
+    if (!rawCm || referenceSec == null) return shiftedSegs;
+    const out = shiftedSegs.map(s => ({ ...s }));
+    const moveBoundary = (rawSec, overrideSec) => {
+      if (rawSec == null || !Number.isFinite(rawSec) || overrideSec == null) return;
+      const rawLocalMs = (rawSec - referenceSec) * 1000;
+      const overrideLocalMs = overrideSec * 1000;
+      if (Math.abs(overrideLocalMs - rawLocalMs) < 1) return;
+      // rawSec kommt aus computeSegmentAnAbTf(), das auf GANZE Sekunden
+      // rundet (Math.round) - die tatsächliche Segmentgrenze in shiftedSegs
+      // (unverundete Roh-Millisekunden) kann dadurch bis zu 500ms daneben
+      // liegen, daher eine großzügigere Toleranz als ein reiner
+      // Rundungsfehler nahelegen würde.
+      for (let i = 0; i < out.length; i++) {
+        if (Math.abs(out[i].end - rawLocalMs) < 700) out[i].end = overrideLocalMs;
+        if (Math.abs(out[i].start - rawLocalMs) < 700) out[i].start = overrideLocalMs;
+      }
+    };
+    moveBoundary(rawCm.ab, row.ab);
+    moveBoundary(rawCm.an, row.an);
+    return out;
+  }
+
   // Summiert je Umlauf (cycleStarts[i]..cycleStarts[i+1)) die Vorkommensdauer
   // einer Phase - amortisierter Sweep über die (sortierten) Vorkommen statt
   // eines Vollscans je Umlauf, damit auch bei "Alle anzeigen" auf großen
@@ -405,6 +466,6 @@
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
     findSgEntryByColIndex, realCycleMetricsForSg, autoDetectPueRows, pueOverrideKey, resolvePueRows,
     ensurePueOverride, setPueOverrideRowField, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
-    setPueOverrideEndSec, buildLocalShiftedSegs
+    setPueOverrideEndSec, buildLocalShiftedSegs, applyRowOverrideToLocalSegs
   };
 })(window.GZ = window.GZ || {});

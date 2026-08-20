@@ -95,11 +95,14 @@
    Aufzeichnung tatsächlich vorkommendem Übergangstyp (siehe stammdatenLsa.js
    renderPueSection()), sonst dieselbe Optik wie die Lese-Ansicht oben, nur
    mit echten Eingabefeldern statt reinem Text. #sdPueBody legt die Blöcke
-   selbst als Grid an (statt einer einzelnen Spalte) - bis zu 3 nebeneinander
-   (minmax + gedeckelte max-width), damit ein einzelner Übergang bei viel
-   Platz nicht sinnlos in die Breite gezogen wird, aber auch bei vielen
-   Übergängen nicht mehr als 3 pro Zeile zu schmal werden. */
-#sdPueBody{ display:grid; grid-template-columns:repeat(auto-fit, minmax(460px, 1fr)); gap:16px; max-width:1500px; align-items:start; }
+   selbst als Grid an (statt einer einzelnen Spalte) - bis zu 3 nebeneinander.
+   grid-template-columns wird von renderPueSection() dynamisch gesetzt
+   (repeat(min(Anzahl Blöcke, 3), 1fr)) statt hier fest/über auto-fit
+   vorgegeben, damit z.B. ein einzelner Übergang die volle verfügbare Breite
+   nutzt statt auf einer Mindestspaltenbreite stehenzubleiben, und 3
+   nebeneinander die volle Fensterbreite ausfüllen statt an einer gedeckelten
+   max-width stehenzubleiben. */
+#sdPueBody{ display:grid; gap:16px; align-items:start; }
 .sd-pue-block{ padding:12px 14px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); transition:box-shadow .3s, border-color .3s; }
 .sd-pue-block.sd-pue-highlight{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-bg); }
 .sd-pue-block-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 10px; font-size:12px; margin-bottom:10px; }
@@ -220,4 +223,8 @@
   .lane-row{ gap:5px; }
   .axis{ margin-left:120px; }
   .spl-bar-label-fixed{ width:120px; }
+  /* überschreibt die per JS gesetzte inline grid-template-columns (siehe
+     stammdatenLsa.js renderPueSection()) - auf schmalen Bildschirmen immer
+     eine einzelne Spalte, sonst würden 2-3 Blöcke unbrauchbar schmal. */
+  #sdPueBody{ grid-template-columns:1fr !important; }
 }

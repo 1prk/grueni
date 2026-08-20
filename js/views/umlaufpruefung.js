@@ -301,8 +301,12 @@
     panel.querySelectorAll('.up-pue-row').forEach((rowEl, i) => {
       const row = resolved.rows[i];
       const svg = rowEl.querySelector('.up-pue-track svg');
-      const shiftedSegs = GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
-        .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+      const rawCm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
+      // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten statt
+      // stur den unveränderten Rohdaten - siehe applyRowOverrideToLocalSegs.
+      const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(
+        GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a), row, rawCm, resolved.referenceSec
+      ).filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
       renderLane(svg, {
         wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
         baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,

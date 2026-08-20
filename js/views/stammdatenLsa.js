@@ -283,6 +283,21 @@
 
   function formatPueNum(v) { return v != null ? v : '–'; }
 
+  // Sortiert Übergänge nach Nomenklatur (PÜ1.2, PÜ1.3, PÜ2.1, ...) statt nach
+  // Reihenfolge des ersten Vorkommens in der Aufzeichnung (siehe
+  // listDistinctTransitions) - numerischer Vergleich der beiden Zahlen im
+  // Standard-Label (GZ.phases.pueLabelFor), damit z.B. PÜ1.10 nicht vor
+  // PÜ1.2 einsortiert wird. Frei benannte Kürzel (Fallback-Label "PÜ k1→k2")
+  // fallen danach, alphabetisch, zurück.
+  function comparePueTransitionLabels(t1, t2) {
+    const parse = t => { const m = /^PÜ(\d+)\.(\d+)$/.exec(t.label); return m ? [Number(m[1]), Number(m[2])] : null; };
+    const p1 = parse(t1), p2 = parse(t2);
+    if (p1 && p2) return p1[0] - p2[0] || p1[1] - p2[1];
+    if (p1) return -1;
+    if (p2) return 1;
+    return t1.label.localeCompare(t2.label);
+  }
+
   function renderPueSection() {
     const a = GZ.state.data.currentAnalysis;
     const phases = GZ.state.data.phases;
@@ -296,13 +311,18 @@
       ...GZ.phases.computePhaseOccurrences(phase, a.allStats),
       color: GZ.phases.colorForIndex(i)
     }));
-    const transitions = GZ.phases.listDistinctTransitions(occEntries, a.tMin, a.tMax);
+    const transitions = GZ.phases.listDistinctTransitions(occEntries, a.tMin, a.tMax).sort(comparePueTransitionLabels);
     if (!transitions.length) {
       els.pueSection.style.display = 'none';
       return;
     }
     els.pueSection.style.display = '';
     els.pueBody.innerHTML = transitions.map(t => renderTransitionBlockHtml(t, phases, a, TU_MED)).join('');
+    // Bis zu 3 Spalten, aber IMMER exakt so viele wie Blöcke vorhanden sind
+    // (statt einer auto-fit/minmax-Rasterbreite) - so nutzt z.B. ein
+    // einzelner Übergang die volle verfügbare Breite statt auf der
+    // Mindestbreite einer möglichen Mehrspalten-Aufteilung stehenzubleiben.
+    els.pueBody.style.gridTemplateColumns = `repeat(${Math.min(transitions.length, 3)}, 1fr)`;
     wirePueSectionEvents(a, TU_MED);
   }
 
@@ -388,8 +408,12 @@
       block.querySelectorAll('.sd-pue-row').forEach((rowEl, i) => {
         const row = resolved.rows[i];
         const svg = rowEl.querySelector('.sd-pue-track svg');
-        const shiftedSegs = GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
-          .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+        const rawCm = GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED);
+        // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten statt
+        // stur den unveränderten Rohdaten - siehe applyRowOverrideToLocalSegs.
+        const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(
+          GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a), row, rawCm, resolved.referenceSec
+        ).filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
         renderLane(svg, {
           wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
           baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
