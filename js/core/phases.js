@@ -150,11 +150,39 @@
     return { phase, intervals };
   }
 
+  // Verwirft je Phase anomal KURZE Vorkommen (statistischer Ausreißer nach
+  // unten gegenüber den ÜBRIGEN Vorkommen DERSELBEN Phase in der
+  // Aufzeichnung - Median-Absolute-Deviation-basiert, siehe
+  // GZ.stats.detectAnomalies, dasselbe Verfahren wie bei den Grünzeit-
+  // Auffälligkeiten in der Grünzeitanalyse). Eine Signalanlage kann eine
+  // Phase "anfahren" und dabei kurz deren strenge Bedingung erfüllen (alle
+  // Mitglieder grün, alle Nicht-Mitglieder rot), dann aber sofort einen
+  // WEITEREN Übergang einleiten, ohne die Phase je wirklich laufen zu
+  // lassen - am Ende eines Übergangs kann die Steuerung ebenso gut einen
+  // nächsten Übergang statt der Phase selbst starten. Ein solches Vorkommen
+  // zählt NICHT als echte Phase, sondern bleibt Teil der umgebenden
+  // Zwischenzeit (fällt aus den zurückgegebenen Intervallen heraus -
+  // buildCombinedSegments() unten füllt die entstehende Lücke automatisch
+  // als 'NONE'/Übergang). Nur KURZE Ausreißer fallen weg (Richtung geprüft,
+  // nicht nur Betrag) - ein ungewöhnlich LANGES Vorkommen ist keine
+  // abgebrochene Phase, sondern schlicht eine echte, verlängerte Freigabe
+  // (z.B. durch Bedarf). Weniger als 4 Vorkommen (Untergrenze von
+  // detectAnomalies) -> keine statistische Aussage möglich, alle bleiben
+  // unangetastet.
+  function filterAbortedOccurrences(intervals) {
+    if (intervals.length < 4) return intervals;
+    const durations = intervals.map(iv => iv.end - iv.start);
+    const flagged = GZ.stats.detectAnomalies(durations);
+    const med = GZ.stats.median(durations);
+    return intervals.filter((iv, i) => !(flagged[i] && durations[i] < med));
+  }
+
   // Baut aus mehreren Phasen-Vorkommenslisten EINE gemeinsame, lückenlose
   // Segment-Reihe für die kombinierte Zeitleiste (eine Spur für alle
   // Phasen): da Phasen per Definition nie gleichzeitig aktiv sind, genügt
   // Zusammenführen + Sortieren; Lücken (kein Phasen-Vorkommen, z. B.
-  // Zwischenzeiten oder nicht abgedeckte Zustände) werden als eigene
+  // Zwischenzeiten, nicht abgedeckte Zustände oder verworfene abgebrochene
+  // Vorkommen, siehe filterAbortedOccurrences oben) werden als eigene
   // Kategorie 'NONE' aufgefüllt. cat trägt die Phasen-ID (oder 'NONE').
   // Ein Wechsel von einer Phase DIREKT in eine ANDERE ohne jeden zeitlichen
   // Abstand dazwischen ist per Definition unmöglich (Zwischenzeit/Räum- und
@@ -168,7 +196,7 @@
   function buildCombinedSegments(occurrenceEntries, tMin, tMax) {
     const all = [];
     occurrenceEntries.forEach(({ phase, intervals }) => {
-      intervals.forEach(iv => all.push({ cat: phase.id, start: iv.start, end: iv.end }));
+      filterAbortedOccurrences(intervals).forEach(iv => all.push({ cat: phase.id, start: iv.start, end: iv.end }));
     });
     all.sort((a, b) => a.start - b.start);
     const segs = [];
@@ -678,7 +706,7 @@
 
   GZ.phases = {
     PHASE_COLORS, colorForIndex, intersectIntervals, unionIntervals, subtractIntervals, createPhase, createPhaseFromConfig,
-    computePhaseOccurrences, buildCombinedSegments, durationPerCycle,
+    computePhaseOccurrences, filterAbortedOccurrences, buildCombinedSegments, durationPerCycle,
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
     findSgEntryByColIndex, realCycleMetricsForSg, rotgelbStartSec, findAnchoredGreenSegIdx, metricsForAnchoredSeg, cmForRow,
     computeRowTf, compareSgNames, autoDetectPueRows, pueOverrideKey, resolvePueRows,
