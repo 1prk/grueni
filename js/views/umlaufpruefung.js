@@ -290,7 +290,20 @@
     // (inkl. Math.max-Klemmung gegen ein invertiertes Fenster).
     const startSec = resolved.startSec != null ? resolved.startSec : 0;
     const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
-    const localWMin = (startSec - 3) * 1000, localWMax = (endSec + 2) * 1000;
+    // cm je Zeile einmal vorab bestimmen - siehe stammdatenLsa.js.
+    const cmByRow = resolved.rows.map(row => row.always ? null : GZ.phases.cmForRow(row, referenceAbsMs, a));
+    // Fenster deckt zusätzlich den tatsächlichen Grün-Endpunkt jeder Zeile
+    // ab (An + reale Rotgelb-Dauer bzw. Ab + reale Gelb-Dauer), nicht nur
+    // das logische Ende - siehe stammdatenLsa.js.
+    const rowMaxSec = resolved.rows.reduce((m, r, i) => {
+      const cm = cmByRow[i];
+      const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
+      const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
+      const extent = r.an != null ? r.an + rotgelb : (r.ab != null ? r.ab + gelb : -Infinity);
+      return Math.max(m, extent);
+    }, -Infinity);
+    const windowEndSec = Number.isFinite(rowMaxSec) ? Math.max(endSec, rowMaxSec) : endSec;
+    const localWMin = (startSec - 3) * 1000, localWMax = (windowEndSec + 2) * 1000;
     const endMarks = resolved.endSec != null ? [{ t: resolved.endSec * 1000, label: `Übergangsende (Ende), ${resolved.endSec}s` }] : [];
     const axisSvg = panel.querySelector('.up-pue-axis-track svg');
     if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000, resolved.endSec != null ? resolved.endSec * 1000 : null);
@@ -309,19 +322,14 @@
         return;
       }
 
-      // cmForRow verankert direkt am Übergangs-Anker (referenceAbsMs), nicht
-      // am Umlauf-Fenster (cycleIdx) - siehe stammdatenLsa.js.
-      const cm = GZ.phases.cmForRow(row, referenceAbsMs, a);
-      // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten statt
-      // stur den unveränderten Rohdaten (applyRowOverrideToLocalSegs), und
-      // zeigt nur das eine relevante Segment-Grüppchen dieser Zeile statt
-      // der gesamten Rohdaten-Zeitreihe (buildLocalRowSegs) - siehe
-      // stammdatenLsa.js für die ausführliche Begründung beider Schritte.
-      const localSegs = GZ.phases.buildLocalRowSegs(row.sgIndex, cm, referenceAbsMs, a);
-      const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(localSegs, row, cm, referenceAbsMs)
-        .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+      const cm = cmByRow[i];
+      // Balken wird DIREKT aus den Zeilenwerten synthetisiert
+      // (buildRowDisplaySegs) - siehe stammdatenLsa.js für die ausführliche
+      // Begründung (nie ein anderer Zustand als Grün, wo die
+      // Phasendefinition zwingend Grün verlangt).
+      const rowSegs = GZ.phases.buildRowDisplaySegs(row, cm, localWMin, localWMax);
       renderLane(svg, {
-        wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
+        wMin: localWMin, wMax: localWMax, segs: rowSegs,
         baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
         gridStepMs: 5000, laneStyle: currentLaneStyle(), endMarks,
         // "An" markiert den Rot→Gelb-Wechsel (ROTGELB-Segment, sofern

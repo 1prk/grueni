@@ -412,7 +412,27 @@
       // wenigstens das -3/+2s-Basisfenster um die Referenz zu zeigen.
       const startSec = resolved.startSec != null ? resolved.startSec : 0;
       const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
-      const localWMin = (startSec - 3) * 1000, localWMax = (endSec + 2) * 1000;
+      // cm je Zeile einmal vorab bestimmen (statt später im Render-Loop
+      // erneut) - wird sowohl für die Fensterbreite unten als auch für die
+      // Balken selbst gebraucht, so bleiben beide garantiert konsistent.
+      const cmByRow = resolved.rows.map(row => row.always ? null : GZ.phases.cmForRow(row, referenceAbsMs, a));
+      // Das FENSTER (localWMax) muss zusätzlich den tatsächlichen Grün-
+      // Endpunkt jeder Zeile abdecken (An + reale Rotgelb-Dauer bzw. Ab +
+      // reale Gelb-Dauer), nicht nur das logische Ende - sonst könnte eine
+      // manuelle Korrektur, die über das (unverändert am echten Grünbeginn
+      // hängende) Ende hinausgeht, eine Zeile aus dem sichtbaren Fenster
+      // schieben und ihr synthetisierter Grün-Balken (buildRowDisplaySegs)
+      // würde als Nullbreite unsichtbar - obwohl er laut Phasendefinition da
+      // sein MUSS.
+      const rowMaxSec = resolved.rows.reduce((m, r, i) => {
+        const cm = cmByRow[i];
+        const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
+        const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
+        const extent = r.an != null ? r.an + rotgelb : (r.ab != null ? r.ab + gelb : -Infinity);
+        return Math.max(m, extent);
+      }, -Infinity);
+      const windowEndSec = Number.isFinite(rowMaxSec) ? Math.max(endSec, rowMaxSec) : endSec;
+      const localWMin = (startSec - 3) * 1000, localWMax = (windowEndSec + 2) * 1000;
 
       // Ende-Markierung (siehe renderLane()'s endMarks) - eine durchgezogene
       // senkrechte Linie bei Ende, sowohl je Zeile als auch auf der
@@ -441,24 +461,18 @@
           });
           tfEl.textContent = 'TF –';
         } else {
-          // cmForRow verankert direkt am Übergangs-Anker (referenceAbsMs),
-          // NICHT am Umlauf-Fenster (cycleIdx) - sonst könnte bei einer
-          // Signalgruppe mit mehreren Freigaben je Umlauf das FALSCHE
-          // Vorkommen erwischt werden (siehe dort für die ausführliche
-          // Begründung).
-          const cm = GZ.phases.cmForRow(row, referenceAbsMs, a);
-          // Balken folgt den (ggf. manuell überschriebenen) Zeilenwerten
-          // statt stur den unveränderten Rohdaten (applyRowOverrideToLocalSegs),
-          // und zeigt NUR das eine relevante Segment-Grüppchen dieser Zeile
-          // statt der gesamten Rohdaten-Zeitreihe der Signalgruppe
-          // (buildLocalRowSegs) - sonst könnte eine zeitlich unverwandte
-          // zweite Freigabe derselben Signalgruppe (z.B. bedarfsabhängige
-          // Fußgänger-SG) im selben Fenster als "zweites Gelb" auftauchen.
-          const localSegs = GZ.phases.buildLocalRowSegs(row.sgIndex, cm, referenceAbsMs, a);
-          const shiftedSegs = GZ.phases.applyRowOverrideToLocalSegs(localSegs, row, cm, referenceAbsMs)
-            .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
+          const cm = cmByRow[i];
+          // Balken wird DIREKT aus den (ggf. manuell überschriebenen)
+          // Zeilenwerten synthetisiert (buildRowDisplaySegs), nicht aus den
+          // Rohdaten gesucht und angepasst - eine anwerfende Zeile MUSS ab
+          // ihrem Wechsel bis mindestens Ende grün sein, eine abwerfende war
+          // bis zu ihrem Wechsel bereits durchgehend grün (Kern der
+          // Phasendefinition) - der Balken darf dort NIE einen anderen
+          // Zustand zeigen, unabhängig davon, was die Rohdaten an exakt
+          // dieser Stelle gerade hergeben.
+          const rowSegs = GZ.phases.buildRowDisplaySegs(row, cm, localWMin, localWMax);
           renderLane(svg, {
-            wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
+            wMin: localWMin, wMax: localWMax, segs: rowSegs,
             baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
             gridStepMs: 5000, laneStyle: 'minimal', endMarks,
             // An/Ab-Sekunden direkt auf dem Balken (gleiches Muster wie die

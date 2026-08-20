@@ -552,105 +552,36 @@
     delete pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
   }
 
-  // Reale Segmentliste EINER Signalgruppe, zeitlich um die PÜ-Referenz
-  // verschoben (referenceAbsMs = Umlaufbeginn + referenceSec) - ein
-  // renderLane()-Aufruf mit wMin/wMax nahe 0 zeigt damit direkt die lokale
-  // TX-Achse dieses Übergangs, ohne dass renderLane selbst etwas von
-  // "Verschiebung" wissen müsste (dieselbe Funktion wie überall sonst, nur
-  // mit bereits vorverschobenen Segment-Zeiten als Eingabe). Nur als
-  // Rückfallebene genutzt (siehe buildLocalRowSegs unten), wenn für eine
-  // Zeile kein cm (reale Kennzahlen) vorliegt.
-  function buildLocalShiftedSegs(sgIndex, referenceAbsMs, a) {
-    const entry = findSgEntryByColIndex(sgIndex, a);
-    if (!entry) return [];
-    return entry.segs.map(s => ({ ...s, start: s.start - referenceAbsMs, end: s.end - referenceAbsMs }));
-  }
-
-  // NUR die für EINE PÜ-Zeile relevanten Segmente (das eine GRUEN-Segment
-  // dieses Vorkommens plus dessen unmittelbare Rotgelb-/Gelb-Nachbarn, via
-  // cm.segIdx - siehe GZ.segments.computeCycleSgMetrics), zeitlich um die
-  // PÜ-Referenz verschoben - bewusst NICHT die komplette Rohdaten-Zeitreihe
-  // der Signalgruppe (buildLocalShiftedSegs): eine Signalgruppe mit
-  // mehreren Freigaben je Umlauf (z.B. bedarfsabhängige Fußgänger-SG) hätte
-  // sonst zusätzliche, mit DIESEM Übergang gar nicht verwandte Grün-/
-  // Gelb-Blöcke im selben Zeitfenster gezeigt ("zweites Gelb"-Artefakt).
-  // Ohne cm (kein reales Vorkommen in diesem Umlauf, z.B. eine frei
-  // hinzugefügte Zeile für eine sonst unbeteiligte Signalgruppe) fällt dies
-  // auf die volle Rohdaten-Zeitreihe zurück, damit trotzdem irgendein realer
-  // Anhaltspunkt sichtbar bleibt.
-  function buildLocalRowSegs(sgIndex, cm, referenceAbsMs, a) {
-    const entry = findSgEntryByColIndex(sgIndex, a);
-    if (!entry) return [];
-    if (!cm || cm.segIdx == null) return buildLocalShiftedSegs(sgIndex, referenceAbsMs, a);
-    const segs = entry.segs;
-    const from = Math.max(0, cm.segIdx - 1), to = Math.min(segs.length - 1, cm.segIdx + 1);
-    const out = [];
-    for (let i = from; i <= to; i++) out.push({ ...segs[i], start: segs[i].start - referenceAbsMs, end: segs[i].end - referenceAbsMs });
-    return out;
-  }
-
-  // Verschiebt in localSegs (siehe buildLocalRowSegs()) genau die
-  // Segmentgrenze(n), die row.an/row.ab tatsächlich abbilden, auf den
-  // (ggf. manuell überschriebenen) Zeilenwert - sonst würde eine reine
-  // Tabellenkorrektur nie im Balken selbst sichtbar, obwohl genau DAS der
-  // Zweck der Zeile ist ("hier korrigiere ich, wo diese Signalgruppe
-  // wirklich auf Rotgelb/Gelb wechselt"). cm liefert die ECHTEN, unverundeten
-  // Segmentgrenzen dieser Signalgruppe in diesem Umlauf (segStart/segEnd,
-  // dieselbe Quelle wie die automatische Erkennung, siehe autoDetectPueRows)
-  // - alles andere (der übrige reale Verlauf drumherum) bleibt unangetastet,
-  // damit eine Korrektur weiterhin optisch gegen die Realität prüfbar
-  // bleibt. Ohne cm (keine reale Grenze zum Verankern, z.B. frei
-  // hinzugefügte Zeile ohne eigene Grünphase) bleiben die Segmente
-  // unverändert.
-  function applyRowOverrideToLocalSegs(localSegs, row, cm, referenceAbsMs) {
-    if (!cm) return localSegs;
-    const out = localSegs.map(s => ({ ...s }));
-    // Prüfungen laufen bewusst gegen localSegs (unverändertes Original),
-    // Schreibungen gegen out (die Kopie) - sonst könnte eine bereits in
-    // diesem Durchlauf verschobene Grenze (z.B. durch den An-Block) bei
-    // einer zufälligen Koinzidenz fälschlich ein zweites Mal treffen.
-    // Ab: EIN einzelner Rand (Ende GRUEN = Beginn GELB) - ein reiner Punkt,
-    // kein Abstand zu einem Nachbarn zu erhalten.
-    if (Number.isFinite(cm.segEnd) && row.ab != null) {
-      const rawLocalMs = cm.segEnd - referenceAbsMs;
-      const overrideLocalMs = row.ab * 1000;
-      if (Math.abs(overrideLocalMs - rawLocalMs) >= 1) {
-        localSegs.forEach((orig, i) => {
-          if (Math.abs(orig.end - rawLocalMs) < 50) out[i].end = overrideLocalMs;
-          if (Math.abs(orig.start - rawLocalMs) < 50) out[i].start = overrideLocalMs;
-        });
-      }
+  // Balken-Segmente EINER PÜ-Zeile - DIREKT aus ihren logischen Werten
+  // (An/Ab, plus reale Rotgelb-/Gelb-Dauer aus cm, falls bekannt)
+  // SYNTHETISIERT, nicht aus den Rohdaten gesucht und angepasst. Kern der
+  // Phasendefinition (siehe computePhaseOccurrences): eine anwerfende
+  // Signalgruppe ist ab ihrem Wechsel bis MINDESTENS Ende durchgehend grün
+  // (sie ist ja Mitglied der jetzt aktiven Phase, deren gesamtes Vorkommen
+  // mindestens bis Ende reicht), eine abwerfende war bis zu ihrem Wechsel
+  // bereits durchgehend grün (Mitglied der bis dahin aktiven Phase). Der
+  // Balken darf an diesen Stellen NIE einen anderen Zustand zeigen - auch
+  // nicht nach einer manuellen Korrektur, die von der ursprünglich
+  // gefundenen realen Freigabe abweicht, oder wenn gar kein passendes
+  // reales Segment existiert (dann rotgelb/gelb=0, aber die Grün-Spanne
+  // bleibt trotzdem korrekt). wMinMs/wMaxMs (das sichtbare Zeitfenster,
+  // nicht nur startSec/endSec) begrenzen, wie weit die Grün-Fläche über den
+  // eigentlichen Wechsel hinaus in den -3s/+2s-Rand hineingezeichnet wird -
+  // alles außerhalb bleibt implizit die rote Grundlinie (baselineCat/-Color
+  // in renderLane).
+  function buildRowDisplaySegs(row, cm, wMinMs, wMaxMs) {
+    const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
+    const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
+    const segs = [];
+    if (row.an != null) {
+      const greenStartMs = (row.an + rotgelb) * 1000;
+      if (rotgelb > 0) segs.push({ cat: 'ROTGELB', start: row.an * 1000, end: greenStartMs });
+      segs.push({ cat: 'GRUEN', start: greenStartMs, end: Math.max(wMaxMs, greenStartMs) });
+    } else if (row.ab != null) {
+      segs.push({ cat: 'GRUEN', start: Math.min(wMinMs, row.ab * 1000), end: row.ab * 1000 });
+      if (gelb > 0) segs.push({ cat: 'GELB', start: row.ab * 1000, end: (row.ab + gelb) * 1000 });
     }
-    // An: bei echtem Rotgelb wird der GESAMTE Rotgelb-Block (Beginn UND
-    // Ende) um denselben Betrag verschoben, statt nur seinen Anfang zu
-    // dehnen - sonst würde ein Verschieben von "An" implizit auch die reale
-    // Rotgelb-Dauer verändern, obwohl die Zeile nur EINEN Zeitpunkt (den
-    // Rot→Gelb-Wechsel) korrigiert, keine Dauer. Ohne Rotgelb (rotgelbMs=0,
-    // z.B. Datenlücke) fallen Start/Ende ohnehin zusammen - dann wie bei Ab
-    // ein einzelner Rand.
-    if (cm.segIdx != null && Number.isFinite(cm.segStart) && row.an != null) {
-      const rotgelbMs = (cm.rotgelb || 0) * 1000;
-      const rawStartLocalMs = cm.segStart - rotgelbMs - referenceAbsMs;
-      const overrideLocalMs = row.an * 1000;
-      if (Math.abs(overrideLocalMs - rawStartLocalMs) >= 1) {
-        if (rotgelbMs > 0) {
-          const delta = overrideLocalMs - rawStartLocalMs;
-          const rawEndLocalMs = rawStartLocalMs + rotgelbMs;
-          localSegs.forEach((orig, i) => {
-            if (Math.abs(orig.start - rawStartLocalMs) < 50) out[i].start += delta;
-            if (Math.abs(orig.end - rawStartLocalMs) < 50) out[i].end += delta;
-            if (Math.abs(orig.start - rawEndLocalMs) < 50) out[i].start += delta;
-            if (Math.abs(orig.end - rawEndLocalMs) < 50) out[i].end += delta;
-          });
-        } else {
-          localSegs.forEach((orig, i) => {
-            if (Math.abs(orig.end - rawStartLocalMs) < 50) out[i].end = overrideLocalMs;
-            if (Math.abs(orig.start - rawStartLocalMs) < 50) out[i].start = overrideLocalMs;
-          });
-        }
-      }
-    }
-    return out;
+    return segs;
   }
 
   // Summiert je Umlauf (cycleStarts[i]..cycleStarts[i+1)) die Vorkommensdauer
@@ -677,6 +608,6 @@
     findSgEntryByColIndex, realCycleMetricsForSg, rotgelbStartSec, findAnchoredGreenSegIdx, metricsForAnchoredSeg, cmForRow,
     computeRowTf, compareSgNames, autoDetectPueRows, pueOverrideKey, resolvePueRows,
     ensurePueOverride, setPueOverrideRowField, setPueOverrideRowAlways, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
-    setPueOverrideEndSec, buildLocalShiftedSegs, buildLocalRowSegs, applyRowOverrideToLocalSegs
+    setPueOverrideEndSec, buildRowDisplaySegs
   };
 })(window.GZ = window.GZ || {});
