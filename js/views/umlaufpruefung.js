@@ -295,12 +295,14 @@
     // Fenster deckt zusätzlich den tatsächlichen Grün-Endpunkt jeder Zeile
     // ab (An + reale Rotgelb-Dauer bzw. Ab + reale Gelb-Dauer), nicht nur
     // das logische Ende - siehe stammdatenLsa.js.
+    // Beide Seiten unabhängig einrechnen - siehe stammdatenLsa.js.
     const rowMaxSec = resolved.rows.reduce((m, r, i) => {
       const cm = cmByRow[i];
       const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
       const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
-      const extent = r.an != null ? r.an + rotgelb : (r.ab != null ? r.ab + gelb : -Infinity);
-      return Math.max(m, extent);
+      const abExtent = r.ab != null ? r.ab + gelb : -Infinity;
+      const anExtent = r.an != null ? r.an + rotgelb : -Infinity;
+      return Math.max(m, abExtent, anExtent);
     }, -Infinity);
     const windowEndSec = Number.isFinite(rowMaxSec) ? Math.max(endSec, rowMaxSec) : endSec;
     const localWMin = (startSec - 3) * 1000, localWMax = (windowEndSec + 2) * 1000;

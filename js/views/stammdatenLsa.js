@@ -427,12 +427,18 @@
       // schieben und ihr synthetisierter Grün-Balken (buildRowDisplaySegs)
       // würde als Nullbreite unsichtbar - obwohl er laut Phasendefinition da
       // sein MUSS.
+      // Beide Seiten unabhängig einrechnen (nicht exklusiv An ODER Ab) -
+      // eine Zeile kann beides gleichzeitig gesetzt haben (siehe
+      // buildRowDisplaySegs: Ab<=An = zwei getrennte Grün-Abschnitte mit
+      // echter Lücke dazwischen), dann muss das Fenster auch den späteren
+      // der beiden Endpunkte abdecken.
       const rowMaxSec = resolved.rows.reduce((m, r, i) => {
         const cm = cmByRow[i];
         const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
         const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
-        const extent = r.an != null ? r.an + rotgelb : (r.ab != null ? r.ab + gelb : -Infinity);
-        return Math.max(m, extent);
+        const abExtent = r.ab != null ? r.ab + gelb : -Infinity;
+        const anExtent = r.an != null ? r.an + rotgelb : -Infinity;
+        return Math.max(m, abExtent, anExtent);
       }, -Infinity);
       const windowEndSec = Number.isFinite(rowMaxSec) ? Math.max(endSec, rowMaxSec) : endSec;
       const localWMin = (startSec - 3) * 1000, localWMax = (windowEndSec + 2) * 1000;

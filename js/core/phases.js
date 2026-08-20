@@ -156,6 +156,15 @@
   // Zusammenführen + Sortieren; Lücken (kein Phasen-Vorkommen, z. B.
   // Zwischenzeiten oder nicht abgedeckte Zustände) werden als eigene
   // Kategorie 'NONE' aufgefüllt. cat trägt die Phasen-ID (oder 'NONE').
+  // Ein Wechsel von einer Phase DIREKT in eine ANDERE ohne jeden zeitlichen
+  // Abstand dazwischen ist per Definition unmöglich (Zwischenzeit/Räum- und
+  // Einschaltverzug sind real immer > 0) - kommt er trotzdem vor (z.B. weil
+  // gerundete Rohdaten zweier Signalgruppen exakt auf denselben Zeitpunkt
+  // fallen), wird er NICHT stillschweigend als nahtloser Phase-zu-Phase-
+  // Übergang durchgereicht (der dann im PÜ-Werkzeug gar nicht erst
+  // auftauchen würde), sondern trotzdem als (nulldauer) Übergang
+  // registriert. Zwei Vorkommen DERSELBEN Phase, die sich berühren, bleiben
+  // davon unberührt (kein Übergang nötig).
   function buildCombinedSegments(occurrenceEntries, tMin, tMax) {
     const all = [];
     occurrenceEntries.forEach(({ phase, intervals }) => {
@@ -164,10 +173,16 @@
     all.sort((a, b) => a.start - b.start);
     const segs = [];
     let cursor = tMin;
+    let lastCat = null;
     all.forEach(seg => {
-      if (seg.start > cursor) segs.push({ cat: 'NONE', start: cursor, end: seg.start });
+      if (seg.start > cursor) {
+        segs.push({ cat: 'NONE', start: cursor, end: seg.start });
+      } else if (lastCat != null && seg.cat !== lastCat) {
+        segs.push({ cat: 'NONE', start: cursor, end: cursor });
+      }
       segs.push(seg);
       if (seg.end > cursor) cursor = seg.end;
+      lastCat = seg.cat;
     });
     if (cursor < tMax) segs.push({ cat: 'NONE', start: cursor, end: tMax });
     return segs;
@@ -382,13 +397,29 @@
   // An=5, Rotgelb=1s, Ende=8 -> Grünbeginn=6, TF=8-6=2. Ohne jeden Wert
   // (weder An noch Ab, z.B. eine frisch hinzugefügte, noch leere Zeile) ist
   // TF nicht definiert (null).
+  // Sind BEIDE gesetzt, gibt es zwei mögliche Fälle (siehe
+  // buildRowDisplaySegs() für dieselbe Fallunterscheidung an den Balken-
+  // Segmenten): An < Ab beschreibt EIN zusammenhängendes Grün-Fenster
+  // vollständig innerhalb des Übergangs (TF = dessen Dauer). Ab <= An
+  // beschreibt eine Signalgruppe, die VOR dem Übergang grün war (bis Ab),
+  // dann echt nicht-grün, und NACH dem Übergang erneut grün wird (ab An) -
+  // z.B. ein Mitglied beider Phasen, das entgegen der sonst üblichen
+  // Annahme NICHT durchgehend grün bleibt, sondern zwischenzeitlich
+  // tatsächlich aussetzt (TF = Summe beider getrennter Grün-Anteile).
   function computeRowTf(row, cm, startSec, endSec) {
-    if (row.an == null && row.ab == null) return null;
+    const hasAn = row.an != null, hasAb = row.ab != null;
+    if (!hasAn && !hasAb) return null;
     const endAnchor = endSec != null ? endSec : startSec;
     const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
-    const greenStart = Math.max(row.an != null ? row.an + rotgelb : startSec, startSec);
-    const greenEnd = Math.min(row.ab != null ? row.ab : endAnchor, endAnchor);
-    return Math.round(Math.max(0, greenEnd - greenStart));
+    if (hasAn && hasAb && row.an < row.ab) {
+      const greenStart = Math.max(row.an + rotgelb, startSec);
+      const greenEnd = Math.min(row.ab, endAnchor);
+      return Math.round(Math.max(0, greenEnd - greenStart));
+    }
+    let tf = 0;
+    if (hasAb) tf += Math.max(0, Math.min(row.ab, endAnchor) - startSec);
+    if (hasAn) tf += Math.max(0, endAnchor - Math.max(row.an + rotgelb, startSec));
+    return Math.round(tf);
   }
 
   // Kanonische Sortierreihenfolge für Signalgruppennamen: K vor R vor F vor
@@ -591,17 +622,39 @@
   // eigentlichen Wechsel hinaus in den -3s/+2s-Rand hineingezeichnet wird -
   // alles außerhalb bleibt implizit die rote Grundlinie (baselineCat/-Color
   // in renderLane).
+  // Sind BEIDE An und Ab gesetzt, unterscheiden sich zwei Fälle (siehe
+  // computeRowTf() für dieselbe Fallunterscheidung bei der Kennzahl): An <
+  // Ab ist EIN zusammenhängendes Grün-Fenster vollständig innerhalb des
+  // Übergangs (z.B. eine frei hinzugefügte Zeile ohne eigenen Bezug zu
+  // einer der beiden Phasengrenzen). Ab <= An ist eine Signalgruppe, die
+  // VOR dem Übergang grün war (bis Ab) und NACH dem Übergang erneut grün
+  // wird (ab An), mit einer echten (nicht nur angenommenen) Nicht-Grün-
+  // Lücke dazwischen - z.B. ein Mitglied beider Phasen, das entgegen der
+  // sonst als "immer an" angenommenen Kontinuität tatsächlich aussetzt;
+  // beide Seiten werden dann UNABHÄNGIG voneinander gezeichnet, nicht als
+  // ein (fälschlich rückwärtslaufendes) gemeinsames Fenster.
   function buildRowDisplaySegs(row, cm, wMinMs, wMaxMs) {
     const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
     const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
+    const hasAn = row.an != null, hasAb = row.ab != null;
     const segs = [];
-    if (row.an != null) {
+
+    if (hasAn && hasAb && row.an < row.ab) {
+      const greenStartMs = (row.an + rotgelb) * 1000;
+      if (rotgelb > 0) segs.push({ cat: 'ROTGELB', start: row.an * 1000, end: greenStartMs });
+      segs.push({ cat: 'GRUEN', start: greenStartMs, end: row.ab * 1000 });
+      if (gelb > 0) segs.push({ cat: 'GELB', start: row.ab * 1000, end: (row.ab + gelb) * 1000 });
+      return segs;
+    }
+
+    if (hasAb) {
+      segs.push({ cat: 'GRUEN', start: Math.min(wMinMs, row.ab * 1000), end: row.ab * 1000 });
+      if (gelb > 0) segs.push({ cat: 'GELB', start: row.ab * 1000, end: (row.ab + gelb) * 1000 });
+    }
+    if (hasAn) {
       const greenStartMs = (row.an + rotgelb) * 1000;
       if (rotgelb > 0) segs.push({ cat: 'ROTGELB', start: row.an * 1000, end: greenStartMs });
       segs.push({ cat: 'GRUEN', start: greenStartMs, end: Math.max(wMaxMs, greenStartMs) });
-    } else if (row.ab != null) {
-      segs.push({ cat: 'GRUEN', start: Math.min(wMinMs, row.ab * 1000), end: row.ab * 1000 });
-      if (gelb > 0) segs.push({ cat: 'GELB', start: row.ab * 1000, end: (row.ab + gelb) * 1000 });
     }
     return segs;
   }
