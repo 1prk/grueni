@@ -227,6 +227,13 @@
     const seen = new Map();
     segs.forEach(seg => {
       if (seg.cat !== 'NONE' || !seg.pueFromPhaseId || !seg.pueToPhaseId) return;
+      // Ein "Übergang" von einer Phase in sich selbst (z.B. eine kurze
+      // Unterbrechung/ein Flackern eines Mitglieds, das die Phasen-
+      // Vorkommensintervalle künstlich in zwei Teile schneidet - siehe
+      // computePhaseOccurrences) ist kein echter Phasenübergang und würde
+      // im PÜ-Werkzeug nur unmöglich aussehende Zeilen erzeugen (z.B.
+      // "PÜ1.1").
+      if (seg.pueFromPhaseId === seg.pueToPhaseId) return;
       const key = seg.pueFromPhaseId + '→' + seg.pueToPhaseId;
       const dist = Math.abs(seg.start - mid);
       const cur = seen.get(key);
@@ -402,66 +409,67 @@
   }
 
   // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
-  // GENAU diesem Umlauf): eine Zeile je Mitglied der abwerfenden Phase (nur
-  // Ab gesetzt) bzw. der anwerfenden Phase (nur An gesetzt, siehe
-  // rotgelbStartSec oben), relativ zu dem Zeitpunkt, an dem das Vorkommen
-  // der abwerfenden Phase selbst endet (= die "TX=0"-Referenz dieses
-  // Übergangs, siehe phaseOccurrenceEndInCycle oben) - das ist per
-  // Definition "die Signalgruppe, die als erste (innerhalb der abwerfenden
-  // Phase) endet", denn genau das lässt das Vorkommen enden. Bewusst NICHT
-  // als Math.min() über nur die individuell "abwerfenden" (nicht auch zur
-  // anwerfenden Phase gehörenden) Mitglieder neu berechnet: das würde sowohl
-  // gemeinsame Mitglieder (die laut Phasendefinition ebenso zur abwerfenden
-  // Phase zählen) als auch ein vorzeitiges Rotgelb einer anwerfenden
-  // Signalgruppe übersehen - beides kann das Vorkommen schon vor dem
-  // Ab-Wechsel jeder "echt abwerfenden" Signalgruppe beenden. Ein Mitglied,
-  // das in BEIDEN Phasen steht (bleibt über den Übergang hinweg durchgehend
-  // grün), wird als ZEILE dennoch weder als "endend" noch als "beginnend"
-  // geführt - es engagiert/disengagiert an diesem Übergang schlicht nicht
-  // (sonst würde ein und dieselbe reale Grünzeit fälschlich gleichzeitig als
-  // An- UND Ab-Ereignis dieses Übergangs erscheinen); es zählt nur
-  // (indirekt, über phaseOccurrenceEndInCycle) zur Referenzzeit-Bestimmung
-  // mit. null, wenn in diesem Umlauf kein Vorkommen der abwerfenden Phase
-  // endet (z.B. Datenlücke) - dann gibt es nichts, worauf sich die Spanne
-  // beziehen könnte.
+  // GENAU diesem Umlauf) - EINE ZEILE JE SIGNALGRUPPE DER GESAMTEN
+  // AUFZEICHNUNG (nicht nur den Mitgliedern der beiden Phasen): der Nutzer
+  // soll die vollständige Liste sehen und bei Bedarf selbst kürzen
+  // (Entfernen-Button) statt raten zu müssen, welche Signalgruppe fehlt.
+  // Je Signalgruppe:
+  //  - NUR Mitglied der abwerfenden Phase -> abwerfende Zeile (nur Ab
+  //    gesetzt), relativ zu dem Zeitpunkt, an dem das Vorkommen der
+  //    abwerfenden Phase selbst endet (= die "TX=0"-Referenz dieses
+  //    Übergangs, siehe phaseOccurrenceEndInCycle oben) - das ist per
+  //    Definition "die Signalgruppe, die als erste (innerhalb der
+  //    abwerfenden Phase) endet", denn genau das lässt das Vorkommen enden.
+  //  - NUR Mitglied der anwerfenden Phase -> anwerfende Zeile (nur An
+  //    gesetzt, siehe rotgelbStartSec oben).
+  //  - Mitglied BEIDER Phasen (bleibt über den Übergang hinweg durchgehend
+  //    grün) -> "immer an"-Zeile (weder An noch Ab, siehe
+  //    setPueOverrideRowAlways) statt komplett zu fehlen.
+  //  - Mitglied KEINER der beiden Phasen -> leere Zeile (weder An noch Ab)
+  //    als reiner Platzhalter - der Nutzer entscheidet, ob/was dafür gilt.
+  // Fehlt für eine ab-/anwerfende Signalgruppe ein reales Segment am Anker
+  // (z.B. Datenlücke), bleibt ihre Zeile ebenfalls leer statt ganz zu
+  // fehlen. null (keine Zeilen überhaupt), wenn in diesem Umlauf kein
+  // Vorkommen der abwerfenden Phase endet - dann gibt es keine Referenz,
+  // auf die sich irgendeine Zeile beziehen könnte.
   function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
-    // K vor R vor F vor S, je Gruppe numerisch (siehe compareSgNames oben) -
-    // Ausgangs- und Eingangs-Mitglieder getrennt sortiert (die strukturelle
-    // Gruppierung "erst alle abwerfenden, dann alle anwerfenden Zeilen"
-    // bleibt erhalten).
-    const nameOfSg = idx => { const e = findSgEntryByColIndex(idx, a); return e ? e.col.name : ''; };
-    const outgoingIdx = [...fromPhase.members].filter(idx => !toPhase.members.has(idx)).sort((x, y) => compareSgNames(nameOfSg(x), nameOfSg(y)));
-    const incomingIdx = [...toPhase.members].filter(idx => !fromPhase.members.has(idx)).sort((x, y) => compareSgNames(nameOfSg(x), nameOfSg(y)));
     const cycleStart = a.cycleStarts[cycleIdx];
     const cycleEnd = cycleIdx + 1 < a.cycleStarts.length ? a.cycleStarts[cycleIdx + 1] : a.tMax;
     const gapStartAbsMs = phaseOccurrenceEndInCycle(fromPhase, a.allStats, cycleStart, cycleEnd);
     if (gapStartAbsMs == null) return null;
     const referenceSec = (gapStartAbsMs - cycleStart) / 1000;
-    // Ab hier direkt an gapStartAbsMs (= referenceAbsMs) verankert statt an
-    // cycleIdx - siehe findAnchoredGreenSegIdx oben.
-    const outgoing = outgoingIdx.map(sgIndex => {
-      const entry = findSgEntryByColIndex(sgIndex, a);
-      return { sgIndex, cm: entry ? metricsForAnchoredSeg(entry, 'outgoing', gapStartAbsMs, gapStartAbsMs) : null };
-    });
-    const incoming = incomingIdx.map(sgIndex => {
-      const entry = findSgEntryByColIndex(sgIndex, a);
-      return { sgIndex, cm: entry ? metricsForAnchoredSeg(entry, 'incoming', gapStartAbsMs, gapStartAbsMs) : null };
-    });
+    // K vor R vor F vor S, je Gruppe numerisch (siehe compareSgNames oben) -
+    // permanent in dieser Reihenfolge erzeugt, unabhängig von der
+    // CSV-Spaltenreihenfolge.
+    const sortedEntries = [...a.allStats].sort((x, y) => compareSgNames(x.col.name, y.col.name));
     const rows = [];
-    outgoing.forEach(o => { if (o.cm && Number.isFinite(o.cm.ab)) rows.push({ sgIndex: o.sgIndex, an: null, ab: Math.round(o.cm.ab) }); });
+    const greenArrivalSecs = [];
+    sortedEntries.forEach(entry => {
+      const idx = entry.col.index;
+      const inFrom = fromPhase.members.has(idx), inTo = toPhase.members.has(idx);
+      if (inFrom && !inTo) {
+        const cm = metricsForAnchoredSeg(entry, 'outgoing', gapStartAbsMs, gapStartAbsMs);
+        rows.push({ sgIndex: idx, an: null, ab: cm && Number.isFinite(cm.ab) ? Math.round(cm.ab) : null, always: false });
+      } else if (inTo && !inFrom) {
+        const cm = metricsForAnchoredSeg(entry, 'incoming', gapStartAbsMs, gapStartAbsMs);
+        if (cm && Number.isFinite(cm.an)) {
+          rows.push({ sgIndex: idx, an: Math.round(rotgelbStartSec(cm)), ab: null, always: false });
+          greenArrivalSecs.push(cm.an);
+        } else {
+          rows.push({ sgIndex: idx, an: null, ab: null, always: false });
+        }
+      } else if (inFrom && inTo) {
+        rows.push({ sgIndex: idx, an: null, ab: null, always: true });
+      } else {
+        rows.push({ sgIndex: idx, an: null, ab: null, always: false });
+      }
+    });
     // Übergangsende = die zuletzt (spätest) ins ECHTE GRÜN kommende
     // Signalgruppe der anwerfenden Phase (cm.an, NICHT deren früherer
     // Rotgelb-Start - siehe rotgelbStartSec/"An" oben) - per Definition das
     // Gegenstück zum Start (frühestes Ende der abwerfenden Phase). Bewusst
     // unabhängig von den Zeilenwerten gehalten (nicht aus rows[].an
     // hergeleitet), da "An" jetzt den früheren Rotgelb-Start zeigt.
-    const greenArrivalSecs = [];
-    incoming.forEach(o => {
-      if (o.cm && Number.isFinite(o.cm.an)) {
-        rows.push({ sgIndex: o.sgIndex, an: Math.round(rotgelbStartSec(o.cm)), ab: null });
-        greenArrivalSecs.push(o.cm.an);
-      }
-    });
     const endSec = greenArrivalSecs.length ? Math.round(Math.max(...greenArrivalSecs)) : null;
     return { referenceSec, rows, endSec };
   }
@@ -540,6 +548,20 @@
   function removePueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, rowIdx) {
     ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
   }
+  // Sortiert die Zeilen einer Korrektur PERMANENT in der kanonischen
+  // Reihenfolge (compareSgNames) - vom Aufrufer explizit angestoßen, direkt
+  // nach jeder Änderung, die die Zeilenreihenfolge beeinflussen könnte
+  // (neue Zeile, geänderte Signalgruppe einer Zeile, aus einer JSON-Datei
+  // geladene Konfiguration, deren gespeicherte Reihenfolge beliebig sein
+  // kann) - so bleibt rowIdx (der Index in ov.rows, den die übrigen
+  // Mutations-Helfer erwarten) stets deckungsgleich mit der angezeigten
+  // Reihenfolge.
+  function sortPueOverrideRows(pueOverrides, fromPhaseId, toPhaseId, a) {
+    const ov = pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
+    if (!ov) return;
+    const nameOfSg = idx => { const e = findSgEntryByColIndex(idx, a); return e ? e.col.name : ''; };
+    ov.rows.sort((x, y) => compareSgNames(nameOfSg(x.sgIndex), nameOfSg(y.sgIndex)));
+  }
   // value === null setzt zurück auf "automatisch" (siehe resolvePueRows) -
   // legt bei Bedarf trotzdem eine Korrektur an (auch ein reines Ende-
   // Override ohne Zeilenänderung zählt als "manuell angepasst"). Der Start
@@ -607,7 +629,7 @@
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
     findSgEntryByColIndex, realCycleMetricsForSg, rotgelbStartSec, findAnchoredGreenSegIdx, metricsForAnchoredSeg, cmForRow,
     computeRowTf, compareSgNames, autoDetectPueRows, pueOverrideKey, resolvePueRows,
-    ensurePueOverride, setPueOverrideRowField, setPueOverrideRowAlways, addPueOverrideRow, removePueOverrideRow, resetPueOverride,
+    ensurePueOverride, setPueOverrideRowField, setPueOverrideRowAlways, addPueOverrideRow, removePueOverrideRow, sortPueOverrideRows, resetPueOverride,
     setPueOverrideEndSec, buildRowDisplaySegs
   };
 })(window.GZ = window.GZ || {});

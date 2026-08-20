@@ -152,7 +152,10 @@
       const [fromKuerzel, toKuerzel] = key.split('→');
       const fromId = idByKuerzel.get(fromKuerzel), toId = idByKuerzel.get(toKuerzel);
       if (!fromId || !toId) { skipped.push(`PÜ-Korrektur „${key}“ (Phase fehlt)`); return; }
-      const rows = (ov.rows || []).map(r => {
+      // Permanent in kanonischer Reihenfolge (K vor R vor F vor S, je Gruppe
+      // numerisch) unabhängig davon, in welcher Reihenfolge die Datei sie
+      // gespeichert hat.
+      const rows = (ov.rows || []).slice().sort((r1, r2) => GZ.phases.compareSgNames(r1.sg, r2.sg)).map(r => {
         const sgIndex = sgIndexByName.get(r.sg);
         if (sgIndex == null) { skipped.push(`Signalgruppe „${r.sg}“ (PÜ ${key})`); return null; }
         return { sgIndex, an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null, always: !!r.always };
@@ -496,6 +499,11 @@
 
         rowEl.querySelector('.sd-pue-sg').addEventListener('change', e => {
           GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'sgIndex', Number(e.target.value), seedRows);
+          // Andere Signalgruppe kann die kanonische Sortierposition der
+          // Zeile ändern (siehe sortPueOverrideRows) - im Gegensatz zu
+          // An/Ab/immer-an bleibt die Reihenfolge hier nicht automatisch
+          // stimmig.
+          GZ.phases.sortPueOverrideRows(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, a);
           notifyChanged();
         });
         rowEl.querySelector('.sd-pue-always-cb').addEventListener('change', e => {
@@ -529,6 +537,7 @@
       if (addBtn) addBtn.addEventListener('click', () => {
         const defaultSgIndex = a.allStats.length ? a.allStats[0].col.index : 0;
         GZ.phases.addPueOverrideRow(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, seedRows, defaultSgIndex);
+        GZ.phases.sortPueOverrideRows(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, a);
         notifyChanged();
       });
 
