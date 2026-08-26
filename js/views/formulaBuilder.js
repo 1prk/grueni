@@ -943,7 +943,12 @@
       const greens = sgEntry ? sgEntry.stats.greens : [];
       return {
         class: 'SG', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
-        cycleMetricsByIdx: computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED)
+        cycleMetricsByIdx: computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED),
+        // rawSample: für die WertBei()-Primitive (siehe exprEngine.js), z.B.
+        // WertBei(K2, Ab(K1)) - das rohe Signalbild von K2 im Moment des
+        // Abwurfs von K1, statt dessen kategorisierten Zustand() zum jeweils
+        // AKTUELLEN Zeitpunkt.
+        rawSample: makeRawValueSampler(a.times, a.seriesByCol.get(col.index))
       };
     }
     const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);

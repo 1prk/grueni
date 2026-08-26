@@ -18,10 +18,11 @@
    JE UMLAUF aus und lässt beliebige Ergebnistypen zu (GZ.exprEngine.
    compileValue() statt compile()) - die Primitiven An/Ab/TF/RG/GE/
    Ausgeloest/AnzahlAusloesungen lesen dafür aus handle.cycleMetrics statt
-   handle.sweep (siehe GZ.umlaufContext.buildAll()). WertBei(det, zeitpunkt)
+   handle.sweep (siehe GZ.umlaufContext.buildAll()). WertBei(objekt, zeitpunkt)
    liest stattdessen über handle.rawSample() den tatsächlichen Rohwert (z.B.
-   einen APW-Countdown) zu einem beliebigen Zeitpunkt im Umlauf - meist
-   selbst wieder ein An/Ab/TF/RG/GE-Aufruf, z.B. WertBei(APW_01, Ab(K1)).
+   einen APW-Countdown ODER das Signalbild einer Signalgruppe) zu einem
+   beliebigen Zeitpunkt im Umlauf - meist selbst wieder ein An/Ab/TF/RG/GE-
+   Aufruf, z.B. WertBei(APW_01, Ab(K1)) oder WertBei(K2, Ab(K1)).
    Zustand/Dauer/DauerSeit sind hier bewusst NICHT nutzbar (kein
    wohldefinierter "aktueller Zeitpunkt" für einen ganzen Umlauf) - siehe
    findPerRowOnlyUsage().
@@ -63,6 +64,9 @@
   const PRIMITIVE_INFO = GZ.exprEngine.PRIMITIVE_INFO;
   const SG_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'SG').map(p => p.name));
   const DET_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'DET').map(p => p.name));
+  // objArgType 'OBJ' (z.B. WertBei): SG ODER DET gültig - Vorschlagsliste
+  // kombiniert beide statt nur eine (siehe suggestAt() unten).
+  const OBJ_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'OBJ').map(p => p.name));
   // Zeilenweise Primitiven des Formel-Builders (perRowOnly) - hier
   // syntaktisch zwar bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne
   // handle.sweep würde ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu
@@ -287,6 +291,7 @@
     let candidates;
     if (owner && SG_ARG_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' }));
     else if (owner && DET_ARG_FNS.has(owner)) candidates = index.detList.map(n => ({ value: n, label: n, kind: 'det' }));
+    else if (owner && OBJ_ARG_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' })).concat(index.detList.map(n => ({ value: n, label: n, kind: 'det' })));
     else candidates = US_FUNCTIONS.map(n => ({ value: n, label: n + '(…)', kind: 'fn' }))
       .concat(US_SCALARS.map(n => ({ value: n, label: n, kind: 'scalar' })));
 

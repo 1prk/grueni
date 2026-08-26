@@ -44,8 +44,10 @@
     const n = cycleStarts.length;
 
     const sgMetricsByName = new Map();
+    const sgRawSamplerByName = new Map();
     allStats.forEach(({ col, segs, stats }) => {
       sgMetricsByName.set(col.name, computeCycleSgMetrics(segs, stats.greens, cycleStarts, tMax, TU_MED));
+      sgRawSamplerByName.set(col.name, makeRawValueSampler(times, seriesByCol.get(col.index)));
     });
     const detMetricsByName = new Map();
     const rawSamplerByName = new Map();
@@ -70,7 +72,7 @@
       // handle.rawSample() umzurechnen.
       const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, __cycleStart: start };
       index.sgList.forEach(name => {
-        scope[name] = { class: 'SG', cycleMetrics: sgMetricsByName.get(name)[i] || null };
+        scope[name] = { class: 'SG', cycleMetrics: sgMetricsByName.get(name)[i] || null, rawSample: sgRawSamplerByName.get(name) };
       });
       index.detList.forEach(name => {
         scope[name] = { class: 'DET', cycleMetrics: detMetricsByName.get(name)[i] || null, rawSample: rawSamplerByName.get(name) };

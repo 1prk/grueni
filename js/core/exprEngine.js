@@ -274,19 +274,23 @@
       }
     },
 
-    // WertBei: der Rohwert eines Detektors/APW-/ÖPNV-Werts zu einem
-    // beliebigen Zeitpunkt innerhalb des aktuellen Umlaufs [s ab
-    // Umlaufbeginn] - typischerweise selbst wieder eine der Umlaufweisen
-    // Primitiven oben, z.B. WertBei(APW_01, Ab(K1)): "welchen Countdown
-    // zeigte APW_01 im Moment des Abwurfs von K1". Anders als Ausgeloest/
-    // AnzahlAusloesungen (die nur wissen wollen, OB/WIE OFT belegt) liest
-    // dies den tatsächlichen Rohwert - siehe handle.rawSample (GZ.segments.
-    // makeRawValueSampler) und scope.__cycleStart (Umlaufbeginn in ms, vom
-    // Aufrufer gesetzt, siehe GZ.umlaufContext/formulaBuilder.js berechnen()).
+    // WertBei: der Rohwert einer Signalgruppe ODER eines Detektors/APW-/
+    // ÖPNV-Werts zu einem beliebigen Zeitpunkt innerhalb des aktuellen
+    // Umlaufs [s ab Umlaufbeginn] - typischerweise selbst wieder eine der
+    // Umlaufweisen Primitiven oben, z.B. WertBei(APW_01, Ab(K1)): "welchen
+    // Countdown zeigte APW_01 im Moment des Abwurfs von K1", oder
+    // WertBei(K2, Ab(K1)): "welches Signalbild (Rohwert) zeigte K2 in genau
+    // diesem Moment". Anders als Zustand() (aktueller Zeitpunkt, kategorisiert
+    // zu GRUEN/ROT/.../BELEGT/FREI) oder Ausgeloest/AnzahlAusloesungen (die
+    // nur wissen wollen, OB/WIE OFT belegt) liest dies den tatsächlichen,
+    // unkategorisierten Rohwert zu einem BELIEBIGEN Zeitpunkt - siehe
+    // handle.rawSample (GZ.segments.makeRawValueSampler) und
+    // scope.__cycleStart (Umlaufbeginn in ms, vom Aufrufer gesetzt, siehe
+    // GZ.umlaufContext/formulaBuilder.js berechnen()).
     WertBei: {
       arity: 2,
       check(args, pos) {
-        if (args[0].type !== 'DET' && args[0].type !== 'ANY') throw new ExprError('"WertBei" erwartet als 1. Argument einen Detektor/Wert (z. B. einen APW-Countdown)', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"WertBei" erwartet als 1. Argument eine Signalgruppe oder einen Detektor/Wert (z. B. einen APW-Countdown)', pos);
         if (!isNumCompatible(args[1].type)) throw new ExprError('"WertBei" erwartet als 2. Argument einen Zeitpunkt in Sekunden ab Umlaufbeginn (z. B. Ab(sg))', pos);
         return 'NUM';
       },
@@ -368,12 +372,15 @@
   // objArgType (optional): welchen Objekt-Typ das/die Argument(e) dieser
   // Primitive erwarten - 'SG' oder 'DET', wenn EINDEUTIG (unabhängig von der
   // Argumentposition, siehe Versatz/Ueberschneidung mit zwei SG-Argumenten);
-  // fehlt bei Zustand/Dauer/DauerSeit (akzeptieren SG ODER DET, siehe
-  // PRIMITIVES.check oben) sowie bei rein numerischen Primitiven wie MOD.
-  // umlaufstatistiken.js nutzt dies, um innerhalb eines Funktionsaufrufs
-  // (z.B. "An(") gezielt nur Signalgruppen- bzw. Detektor-/APW-Namen
-  // vorzuschlagen, statt aller bekannten Bezeichner - EINZIGE Stelle, die
-  // das pflegt (nicht länger separate SG_ARG_FNS/DET_ARG_FNS-Listen dort).
+  // 'OBJ', wenn BEIDES gültig ist UND eine kombinierte Vorschlagsliste (SG-
+  // UND Detektor-/APW-Namen) sinnvoll ist (siehe WertBei); fehlt bei Zustand/
+  // Dauer/DauerSeit (akzeptieren ebenfalls SG ODER DET, sind aber ohnehin
+  // perRowOnly und in Umlaufstatistiken gar nicht erst aufrufbar) sowie bei
+  // rein numerischen Primitiven wie MOD. umlaufstatistiken.js nutzt dies, um
+  // innerhalb eines Funktionsaufrufs (z.B. "An(") gezielt nur Signalgruppen-
+  // bzw. Detektor-/APW-Namen (bzw. bei 'OBJ' beide) vorzuschlagen, statt
+  // aller bekannten Bezeichner - EINZIGE Stelle, die das pflegt (nicht länger
+  // separate SG_ARG_FNS/DET_ARG_FNS-Listen dort).
   // perRowOnly (optional): true, wenn die Primitive aus handle.sweep liest
   // (Zustand am jeweils AKTUELLEN Zeitpunkt) statt aus handle.cycleMetrics/
   // handle.rawSample - funktioniert daher nur zeilenweise (Formel-Builder),
@@ -389,7 +396,7 @@
     { name: 'GE', params: ['sg'], desc: 'Gelb-Dauer unmittelbar nach dieser Freigabe [s] (0, falls keine)', objArgType: 'SG' },
     { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst', objArgType: 'DET' },
     { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf', objArgType: 'DET' },
-    { name: 'WertBei', params: ['det', 'zeitpunktSek'], desc: 'Rohwert (z. B. APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))', objArgType: 'DET' },
+    { name: 'WertBei', params: ['objekt', 'zeitpunktSek'], desc: 'Rohwert (Signalbild einer Signalgruppe ODER Detektor-/APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))', objArgType: 'OBJ' },
     { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division, stets ≥ 0)' },
     { name: 'Versatz', params: ['sgAbwurf', 'sgAnwurf'], desc: 'Versatzzeit von Abwurf sgAbwurf bis Anwurf sgAnwurf [s] - kurz für MOD(An(sgAnwurf)-Ab(sgAbwurf), TU_MED)', objArgType: 'SG' },
     { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)', objArgType: 'SG' }
