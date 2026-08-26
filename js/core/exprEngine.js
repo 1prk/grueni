@@ -363,23 +363,36 @@
   };
 
   // Anzeige-Metadaten für Primitiven (Autovervollständigung/Funktions-Palette
-  // in formulaBuilder.js) - getrennt von PRIMITIVES.check/run oben, da rein
-  // beschreibend (keine Auswertungslogik).
+  // in formulaBuilder.js UND umlaufstatistiken.js) - getrennt von
+  // PRIMITIVES.check/run oben, da rein beschreibend (keine Auswertungslogik).
+  // objArgType (optional): welchen Objekt-Typ das/die Argument(e) dieser
+  // Primitive erwarten - 'SG' oder 'DET', wenn EINDEUTIG (unabhängig von der
+  // Argumentposition, siehe Versatz/Ueberschneidung mit zwei SG-Argumenten);
+  // fehlt bei Zustand/Dauer/DauerSeit (akzeptieren SG ODER DET, siehe
+  // PRIMITIVES.check oben) sowie bei rein numerischen Primitiven wie MOD.
+  // umlaufstatistiken.js nutzt dies, um innerhalb eines Funktionsaufrufs
+  // (z.B. "An(") gezielt nur Signalgruppen- bzw. Detektor-/APW-Namen
+  // vorzuschlagen, statt aller bekannten Bezeichner - EINZIGE Stelle, die
+  // das pflegt (nicht länger separate SG_ARG_FNS/DET_ARG_FNS-Listen dort).
+  // perRowOnly (optional): true, wenn die Primitive aus handle.sweep liest
+  // (Zustand am jeweils AKTUELLEN Zeitpunkt) statt aus handle.cycleMetrics/
+  // handle.rawSample - funktioniert daher nur zeilenweise (Formel-Builder),
+  // nicht in Umlaufstatistiken (siehe dortiges findPerRowOnlyUsage()).
   const PRIMITIVE_INFO = [
-    { name: 'Zustand', params: ['objekt'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)' },
-    { name: 'Dauer', params: ['objekt'], desc: 'Sekunden im aktuellen Zustand' },
-    { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)' },
-    { name: 'An', params: ['sg'], desc: 'Anwurf-Offset der Signalgruppe ab Umlaufbeginn [s] (NaN ohne Grün in diesem Umlauf)' },
-    { name: 'Ab', params: ['sg'], desc: 'Abwurf-Offset der Signalgruppe ab Umlaufbeginn [s]' },
-    { name: 'TF', params: ['sg'], desc: 'Freigabezeit (Grünzeit) der Signalgruppe in diesem Umlauf [s]' },
-    { name: 'RG', params: ['sg'], desc: 'Rotgelb-Dauer unmittelbar vor dieser Freigabe [s] (0, falls keine)' },
-    { name: 'GE', params: ['sg'], desc: 'Gelb-Dauer unmittelbar nach dieser Freigabe [s] (0, falls keine)' },
-    { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst' },
-    { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf' },
-    { name: 'WertBei', params: ['det', 'zeitpunktSek'], desc: 'Rohwert (z. B. APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))' },
+    { name: 'Zustand', params: ['objekt'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)', perRowOnly: true },
+    { name: 'Dauer', params: ['objekt'], desc: 'Sekunden im aktuellen Zustand', perRowOnly: true },
+    { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)', perRowOnly: true },
+    { name: 'An', params: ['sg'], desc: 'Anwurf-Offset der Signalgruppe ab Umlaufbeginn [s] (NaN ohne Grün in diesem Umlauf)', objArgType: 'SG' },
+    { name: 'Ab', params: ['sg'], desc: 'Abwurf-Offset der Signalgruppe ab Umlaufbeginn [s]', objArgType: 'SG' },
+    { name: 'TF', params: ['sg'], desc: 'Freigabezeit (Grünzeit) der Signalgruppe in diesem Umlauf [s]', objArgType: 'SG' },
+    { name: 'RG', params: ['sg'], desc: 'Rotgelb-Dauer unmittelbar vor dieser Freigabe [s] (0, falls keine)', objArgType: 'SG' },
+    { name: 'GE', params: ['sg'], desc: 'Gelb-Dauer unmittelbar nach dieser Freigabe [s] (0, falls keine)', objArgType: 'SG' },
+    { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst', objArgType: 'DET' },
+    { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf', objArgType: 'DET' },
+    { name: 'WertBei', params: ['det', 'zeitpunktSek'], desc: 'Rohwert (z. B. APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))', objArgType: 'DET' },
     { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division, stets ≥ 0)' },
-    { name: 'Versatz', params: ['sgAbwurf', 'sgAnwurf'], desc: 'Versatzzeit von Abwurf sgAbwurf bis Anwurf sgAnwurf [s] - kurz für MOD(An(sgAnwurf)-Ab(sgAbwurf), TU_MED)' },
-    { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)' }
+    { name: 'Versatz', params: ['sgAbwurf', 'sgAnwurf'], desc: 'Versatzzeit von Abwurf sgAbwurf bis Anwurf sgAnwurf [s] - kurz für MOD(An(sgAnwurf)-Ab(sgAbwurf), TU_MED)', objArgType: 'SG' },
+    { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)', objArgType: 'SG' }
   ];
 
   // extraKatTokens: wie KAT_TOKENS, aber NUR für diesen einen tokenize()-

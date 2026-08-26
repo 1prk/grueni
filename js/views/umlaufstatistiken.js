@@ -54,16 +54,23 @@
   // gleichzeitig offen (das des fokussierten Ausdrucksfelds).
   let acItems = [], acActive = -1, acRange = null;
 
-  const SG_ARG_FNS = new Set(['An', 'Ab', 'TF', 'RG', 'GE', 'Versatz', 'Ueberschneidung']);
-  const DET_ARG_FNS = new Set(['Ausgeloest', 'AnzahlAusloesungen', 'WertBei']);
-  const US_FUNCTIONS = ['Versatz', 'Ueberschneidung', 'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'WertBei', 'MOD'];
+  // Aus GZ.exprEngine.PRIMITIVE_INFO abgeleitet statt hier separat gepflegt -
+  // EINZIGE Stelle, die "welche Primitive erwartet SG/DET als Argument bzw.
+  // ist nur zeilenweise nutzbar" kennt, ist das objArgType/perRowOnly-Feld
+  // dort (siehe Kommentar an PRIMITIVE_INFO); ein neues Primitiv wird so
+  // automatisch hier mitberücksichtigt, ohne dass diese Datei angefasst
+  // werden muss.
+  const PRIMITIVE_INFO = GZ.exprEngine.PRIMITIVE_INFO;
+  const SG_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'SG').map(p => p.name));
+  const DET_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'DET').map(p => p.name));
+  // Zeilenweise Primitiven des Formel-Builders (perRowOnly) - hier
+  // syntaktisch zwar bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne
+  // handle.sweep würde ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu
+  // liefern. Wird VOR der Auswertung geprüft (siehe findPerRowOnlyUsage()),
+  // nicht erst beim Absturz bemerkt - daher aus US_FUNCTIONS ausgeschlossen.
+  const PER_ROW_ONLY_FNS = new Set(PRIMITIVE_INFO.filter(p => p.perRowOnly).map(p => p.name));
+  const US_FUNCTIONS = PRIMITIVE_INFO.filter(p => !p.perRowOnly).map(p => p.name);
   const US_SCALARS = ['TU', 'TU_MED', 'SPL'];
-  // Zeilenweise Primitiven des Formel-Builders - hier syntaktisch zwar
-  // bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne handle.sweep würde
-  // ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu liefern. Wird VOR
-  // der Auswertung geprüft (siehe findPerRowOnlyUsage()), nicht erst beim
-  // Absturz bemerkt.
-  const PER_ROW_ONLY_FNS = new Set(['Zustand', 'Dauer', 'DauerSeit']);
 
   // exprEngine.js meldet unbekannte Namen ohne Vorschlag ("Unbekannte
   // Variable/Funktion "X""). Für Umlaufstatistiken lokal um eine "meinten
