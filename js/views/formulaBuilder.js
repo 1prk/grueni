@@ -84,9 +84,16 @@
   // Variable in Formeln unerreichbar (der Tokenizer erkennt z.B. "GRUEN"
   // immer als Zustands-Literal, unabhängig davon, was in varTypes steht).
   const RESERVED_CI = new Set(['AND', 'OR', 'NOT']);
+  // Aus GZ.exprEngine.PRIMITIVE_INFO/KAT_TOKENS abgeleitet statt hier separat
+  // gepflegt (dieselbe Lehre wie bei umlaufstatistiken.js' SG_ARG_FNS/
+  // DET_ARG_FNS: eine von Hand kopierte Liste wird bei einer neuen Primitive
+  // schlicht vergessen - WertBei/DauerBei fehlten hier tatsächlich, bis ihr
+  // Fehlen bei der WENN/LEER-Ergänzung auffiel). TX/LEER sind keine
+  // PRIMITIVE_INFO-Funktionen (bare Bezeichner ohne Klammern), daher separat.
   const RESERVED_EXACT = new Set([
-    'TX', 'GRUEN', 'ROT', 'GELB', 'ROTGELB', 'DUNKEL', 'BELEGT', 'FREI', 'Zustand', 'Dauer', 'DauerSeit',
-    'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD', 'Versatz', 'Ueberschneidung'
+    'TX', 'LEER',
+    ...Object.keys(GZ.exprEngine.KAT_TOKENS),
+    ...GZ.exprEngine.PRIMITIVE_INFO.map(p => p.name)
   ]);
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
@@ -172,6 +179,7 @@
       items.push({ group, label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length, kind: 'kat' });
     });
     items.push({ group: 'Sonstiges', label: 'TX', hint: 'reserviert', desc: 'aktueller Auswertungszeitpunkt - immer automatisch verfügbar, nicht selbst benennen/zuweisen', insertText: 'TX', selStart: 2, selEnd: 2, kind: 'var' });
+    items.push({ group: 'Sonstiges', label: 'LEER', hint: 'reserviert', desc: '"kein Wert" (NaN) - passt sich jedem Ergebnistyp an, z.B. als "sonst"-Zweig von WENN()', insertText: 'LEER', selStart: 4, selEnd: 4, kind: 'var' });
     // Vergleichsoperatoren + Zahl-Platzhalter: ohne sie endete der reine
     // Klickweg zwangsläufig bei einem unvollständigen Ausdruck (z.B.
     // "DauerSeit(K1, GRUEN)"), der noch zu WAHR/FALSCH ergänzt werden MUSS -

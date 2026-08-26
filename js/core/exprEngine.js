@@ -97,6 +97,13 @@
   const isKatType = t => typeof t === 'string' && t.indexOf('KAT_') === 0;
   const isKatCompatible = t => isKatType(t) || t === 'ANY';
   const isObjCompatible = t => t === 'SG' || t === 'DET' || t === 'ANY';
+  // Zwei Typen "passen zusammen", wenn sie exakt gleich sind oder (mindestens)
+  // einer davon noch ANY ist (unspezialisierter Funktionsparameter ODER das
+  // LEER-Literal, siehe parseAtom() - beide passen sich jedem konkreten Typ
+  // an). Grundlage von WENN() unten: "dann" und "sonst" müssen denselben
+  // Ergebnistyp liefern, sonst wäre der Typ des Gesamtausdrucks nicht
+  // eindeutig.
+  const typesMatch = (a, b) => a === b || a === 'ANY' || b === 'ANY';
 
   // Zustands-Konstanten (exakte Schreibweise, siehe GZ.parser STATE_CAT/
   // categorizeDetRaw) - UNBEKANNT/INV/LUECKE sind bewusst NICHT als
@@ -284,6 +291,35 @@
       }
     },
 
+    // WENN: Bedingung -> Wert (wie Excels WENN()/ein Ternary "? :") - erlaubt
+    // eine EINZELNE Spalte, deren Wert von einer Bedingung abhängt, statt
+    // mehrerer Spalten mit sich gegenseitig ausschließenden Formeln, z.B.
+    // WENN(TF(Det1) >= 5, An(Det1), LEER): "der Anwurf von Det1, aber nur für
+    // Umläufe/Ereignisse mit mindestens 5s Belegung, sonst LEER (NaN)" -
+    // gerade in Kombination mit LEER nützlich, weil die Umlaufstatistiken-
+    // Aggregatstatistik NaN-Zellen ohnehin schon aus Mittelwert/Median/etc.
+    // herausfiltert (siehe numericValues() in umlaufstatistiken.js): eine
+    // WENN/LEER-Spalte liefert damit direkt "Durchschnitt NUR über die
+    // Umläufe, die die Bedingung erfüllen". "dann" und "sonst" müssen
+    // denselben Ergebnistyp liefern (siehe typesMatch() oben) - der Typ des
+    // Gesamtausdrucks ist sonst nicht eindeutig; LEER (Typ ANY) passt sich
+    // dabei jedem der beiden an.
+    WENN: {
+      arity: 3,
+      check(args, pos) {
+        const [cond, dann, sonst] = args;
+        if (cond.type !== 'BOOL' && cond.type !== 'ANY') throw new ExprError('"WENN" erwartet als 1. Argument eine Bedingung (WAHR/FALSCH)', pos);
+        if (!typesMatch(dann.type, sonst.type)) {
+          throw new ExprError(`"WENN" erwartet für "dann" und "sonst" denselben Ergebnistyp, bekam ${TYPE_LABEL(dann.type)} und ${TYPE_LABEL(sonst.type)}`, pos);
+        }
+        return dann.type !== 'ANY' ? dann.type : sonst.type;
+      },
+      run(args) {
+        const [condNode, dannNode, sonstNode] = args;
+        return scope => (condNode.run(scope) ? dannNode.run(scope) : sonstNode.run(scope));
+      }
+    },
+
     // WertBei: der Rohwert einer Signalgruppe ODER eines Detektors/APW-/
     // ÖPNV-Werts zu einem beliebigen Zeitpunkt innerhalb des aktuellen
     // Umlaufs [s ab Umlaufbeginn] - typischerweise selbst wieder eine der
@@ -455,6 +491,7 @@
     { name: 'WertBei', params: ['objekt', 'zeitpunktSek'], desc: 'Roher, unkategorisierter Messwert von objekt zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - bei einer Signalgruppe der Signalbild-Rohcode, bei einem Detektor/APW-/ÖPNV-Wert der geloggte Rohwert (z.B. ein Countdown). zeitpunktSek ist typischerweise selbst wieder ein An/Ab-Aufruf, z.B. WertBei(APW_01, Ab(K1)): "welchen Countdown zeigte APW_01 im Moment des Abwurfs von K1".', objArgType: 'OBJ' },
     { name: 'DauerBei', params: ['objekt', 'zeitpunktSek'], desc: 'Wie lange (in Sekunden) war objekt zum angegebenen Zeitpunkt [s ab Umlaufbeginn] bereits ununterbrochen im dann jeweils AKTUELLEN Zustand - die um einen expliziten Zeitpunkt erweiterte Fassung von Dauer(), dadurch auch in Umlaufstatistiken nutzbar. Beispiel: DauerBei(Det1, Ab(K1)) = wie lange Det1 im Moment des Abwurfs von K1 schon in seinem dortigen Zustand war (meist: schon belegt). Achtung: liefert die Dauer des Zustands, der GENAU zu diesem Zeitpunkt gilt - ist objekt zu diesem Zeitpunkt bereits wieder frei, liefert es die Dauer der Freiphase, nicht der vorherigen Belegung.', objArgType: 'OBJ' },
     { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division), stets ≥ 0 - anders als JS-"%" nie negativ. Nur für Werte sinnvoll, die als zyklisch/umlaufend verstanden werden sollen; für eine reine Differenz zwischen zwei An/Ab-Werten DERSELBEN Zeile lieber ohne MOD rechnen (siehe Versatz-Hinweis unten).', objArgType: null },
+    { name: 'WENN', params: ['bedingung', 'dann', 'sonst'], desc: 'Bedingter Wert (wie Excel-WENN bzw. "? :"): liefert "dann", wenn "bedingung" wahr ist, sonst "sonst" - beide müssen denselben Ergebnistyp haben (Zahl, Text, Zustand, WAHR/FALSCH, ...). Beispiel: WENN(TF(Det1) >= 5, An(Det1), LEER) - der Anwurf von Det1, aber nur bei mindestens 5s Belegung, sonst LEER (siehe dort - wird von der Aggregatstatistik automatisch ausgeschlossen).', objArgType: null },
     { name: 'Versatz', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Zeit vom Ende des aktiven Zustands von objektAbwurf bis zum NÄCHSTEN Beginn des aktiven Zustands von objektAnwurf [s], vorwärts/zyklisch gerechnet (kurz für MOD(An(objektAnwurf)-Ab(objektAbwurf), TU_MED)). Beginnt objektAnwurf in DIESER Zeile schon VOR objektAbwurf endet (siehe Ueberschneidung), liefert das einen Wert nahe TU_MED statt einer kleinen negativen Zahl - für eine reine, ggf. negative Differenz stattdessen einfach "Ab(objektAnwurf) - Ab(objektAbwurf)" (ohne MOD) verwenden.', objArgType: 'OBJ' },
     { name: 'Ueberschneidung', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Wahr, wenn der aktive Zustand von objektAnwurf in dieser Zeile schon beginnt, BEVOR der von objektAbwurf endet (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen statt einer echten Überlappung).', objArgType: 'OBJ' }
   ];
@@ -702,6 +739,13 @@
       if (tok.type === 'IDENT') {
         next();
         if (peek().type === '(') { next(); return parseCall(tok.value, tok.pos); }
+        // LEER: "kein Wert" als Literal (immer NaN) - Typ ANY, damit es an
+        // JEDER Stelle passt, an der WENN()/ein Vergleich einen konkreten Typ
+        // erwartet (siehe typesMatch() bei WENN oben). Vor der varTypes-
+        // Prüfung abgefangen, damit es nicht durch eine gleichnamige Spalte
+        // verdeckt werden kann (unwahrscheinlich, aber eindeutig gewollt:
+        // LEER ist ein reserviertes Wort, keine Variable).
+        if (tok.value === 'LEER') return { type: 'ANY', run: () => NaN };
         const varType = varTypes[tok.value];
         if (!varType) throw new ExprError(`Unbekannte Variable "${tok.value}"`, tok.pos);
         const alias = tok.value;

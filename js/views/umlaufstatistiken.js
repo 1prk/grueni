@@ -74,7 +74,7 @@
   // nicht erst beim Absturz bemerkt - daher aus US_FUNCTIONS ausgeschlossen.
   const PER_ROW_ONLY_FNS = new Set(PRIMITIVE_INFO.filter(p => p.perRowOnly).map(p => p.name));
   const US_FUNCTIONS = PRIMITIVE_INFO.filter(p => !p.perRowOnly).map(p => p.name);
-  const US_SCALARS = ['TU', 'TU_MED', 'SPL'];
+  const US_SCALARS = ['TU', 'TU_MED', 'SPL', 'LEER'];
 
   // exprEngine.js meldet unbekannte Namen ohne Vorschlag ("Unbekannte
   // Variable/Funktion "X""). Für Umlaufstatistiken lokal um eine "meinten
