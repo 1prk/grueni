@@ -453,9 +453,19 @@
     els.exportBtn.disabled = validCols.length === 0;
 
     const errCount = evaluated.filter(e => e.error && !e.incomplete).length;
+    // Umlauf-Anzahl getrennt von Zeilen-Anzahl ausgewiesen: seit der
+    // Mehrfach-Ereignis-Aufteilung (siehe GZ.umlaufContext.buildAll()) kann
+    // ein Umlauf mehr als eine Zeile haben (mehrfaches Vorkommen einer
+    // Signalgruppe in diesem Umlauf) - sonst wirkt eine höhere Zeilenzahl
+    // als die tatsächliche Anzahl erkannter Umläufe wie ein Zählfehler.
+    const umlaufCount = ctxAll.cycles.reduce((n, c) => n + (c.eventIdx === 0 ? 1 : 0), 0);
+    const zusatzZeilen = ctxAll.cycles.length - umlaufCount;
+    const umlaufInfo = zusatzZeilen > 0
+      ? `${umlaufCount} Umlauf/Umläufe, ${ctxAll.cycles.length} Zeilen (${zusatzZeilen} zusätzliche Ereignis-Zeile(n) durch Umläufe mit Mehrfach-Vorkommen)`
+      : `${umlaufCount} Umlauf/Umläufe`;
     els.hint.textContent = cols.length === 0
       ? 'Bitte mindestens eine Spalte definieren.'
-      : `${validCols.length} von ${cols.length} Spalte(n) gültig` + (errCount ? ` · ${errCount} mit Fehler` : '') + ` · ${ctxAll.cycles.length} Umlauf/Umläufe.`;
+      : `${validCols.length} von ${cols.length} Spalte(n) gültig` + (errCount ? ` · ${errCount} mit Fehler` : '') + ` · ${umlaufInfo}.`;
     els.hint.className = errCount ? 'hint warn' : 'hint';
 
     // Umlaufprüfung zeigt die gültigen Spalten als eigene KENNZAHL-Spur je
@@ -476,14 +486,25 @@
   // Umlauf - nur gesetzt, wenn die Formel GENAU eine der Objekt-bezogenen
   // Primitiven ist (TF/RG/GE/Versatz/Ueberschneidung, siehe exprEngine.js
   // spanRun) - für die Balkendarstellung dort (tr.span).
+  //
+  // ctxAll.cycles ist seit der Mehrfach-Ereignis-Aufteilung (siehe
+  // GZ.umlaufContext.buildAll()) NICHT mehr 1:1 mit den Umlaufindizes -
+  // Umlaufprüfung erwartet aber GENAU einen Wert je Umlaufindex (Kennzahl-
+  // Spur, eine Zeile je Umlauf). Daher hier bewusst nur das JEWEILS ERSTE
+  // Ereignis je Umlauf (cyc.eventIdx === 0) zurückgereicht - Umlaufprüfungs
+  // Kennzahl-Spur zeigt (anders als die Tabelle hier) noch keine weiteren
+  // Ereignisse desselben Umlaufs an.
   function getSyntheticColumns() {
+    if (!ctxAll) return [];
+    const firstEventIdxs = [];
+    ctxAll.cycles.forEach((cyc, idx) => { if (cyc.eventIdx === 0) firstEventIdxs.push(idx); });
     return currentValidCols().map(e => ({
       index: KENNZAHL_INDEX_BASE + e.col.id,
       kuerzel: 'KENNZAHL',
       name: e.col.label || '(ohne Bezeichnung)',
       beschreibung: e.col.expr,
-      valuesByCycleIdx: e.values,
-      spansByCycleIdx: e.spans,
+      valuesByCycleIdx: firstEventIdxs.map(idx => e.values[idx]),
+      spansByCycleIdx: e.spans ? firstEventIdxs.map(idx => e.spans[idx]) : null,
       valueKind: e.kind
     }));
   }
@@ -515,19 +536,23 @@
 
     const n = ctxAll.cycles.length;
     const { from, to } = windowRange(n);
-    els.winLabel.textContent = showAll ? `Gesamte Aufzeichnung (${n} Umläufe)` : `Umlauf ${from + 1}–${to} von ${n}`;
+    els.winLabel.textContent = showAll ? `Gesamte Aufzeichnung (${n} Zeilen)` : `Zeile ${from + 1}–${to} von ${n}`;
     els.btnWinPrev.disabled = showAll || from <= 0;
     els.btnWinNext.disabled = showAll || to >= n;
     els.winSize.disabled = showAll;
 
-    els.tableHead.innerHTML = `<tr><th>#</th><th>Start</th><th>SPL</th><th>TU</th>${
+    els.tableHead.innerHTML = `<tr><th>#</th><th>Umlauf</th><th>Ereignis</th><th>Start</th><th>SPL</th><th>TU</th>${
       validCols.map(c => `<th>${esc(c.col.label || '(ohne Bezeichnung)')}</th>`).join('')
     }</tr>`;
 
     const rows = [];
     for (let i = from; i < to; i++) {
       const cyc = ctxAll.cycles[i];
-      const cells = [String(i + 1), fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
+      // Ereignis: nur angezeigt, wenn dieser Umlauf ueberhaupt mehr als eine
+      // Zeile hat (Mehrfach-Vorkommen einer Signalgruppe, siehe
+      // GZ.umlaufContext.buildAll()) - sonst "-" statt "1/1" auf jeder Zeile.
+      const ereignis = cyc.eventCount > 1 ? `${cyc.eventIdx + 1}/${cyc.eventCount}` : '–';
+      const cells = [String(i + 1), String(cyc.cycleIdx + 1), ereignis, fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
         .concat(validCols.map(c => formatCellHtml(c.values[i])));
       rows.push(`<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`);
     }
@@ -591,9 +616,14 @@
     const validCols = currentValidCols();
     if (!validCols.length || !ctxAll) return;
 
-    const header = ['#', 'Start', 'SPL', 'TU', 'TX'].concat(validCols.map(c => c.col.label || '(ohne Bezeichnung)'));
+    const header = ['#', 'Start', 'SPL', 'TU', 'TX', 'Ereignis'].concat(validCols.map(c => c.col.label || '(ohne Bezeichnung)'));
     const rows = ctxAll.cycles.map((cyc, i) => {
-      const base = [i + 1, fmtTs(new Date(cyc.start)), cyc.SPL, cyc.TU, cyc.TX];
+      // Ereignis: "1/1" auch für den Normalfall (anders als in der
+      // interaktiven Tabelle, wo "-" statt "1/1" weniger Spalten-Rauschen
+      // erzeugt) - im Export soll jede Zeile für sich lesbar bleiben, ohne
+      // Nachbarzeilen zum Verständnis von "-" heranziehen zu müssen.
+      const ereignis = `${cyc.eventIdx + 1}/${cyc.eventCount}`;
+      const base = [i + 1, fmtTs(new Date(cyc.start)), cyc.SPL, cyc.TU, cyc.TX, ereignis];
       validCols.forEach(c => base.push(exportValue(c.values[i])));
       return base;
     });

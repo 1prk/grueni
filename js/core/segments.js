@@ -215,51 +215,71 @@
   }
 
   // An/Ab/TF/Rotgelb/Gelb EINER Signalgruppe für JEDEN Umlauf (Index =
-  // Umlaufindex in cycleStarts), null wenn kein Grün in diesem Umlauf -
-  // Grundlage der umlaufweisen exprEngine-Primitiven An/Ab/TF/RG/GE (siehe
-  // dortigen Kopfkommentar zu handle.cycleMetrics). greens = stats.greens
-  // der Signalgruppe (nur GRUEN-Segmente), segs = deren vollständige
-  // Segmentliste (für die Rotgelb-/Gelb-Nachbarschaft).
+  // Umlaufindex in cycleStarts) - Grundlage der umlaufweisen exprEngine-
+  // Primitiven An/Ab/TF/RG/GE (siehe dortigen Kopfkommentar zu
+  // handle.cycleMetrics). greens = stats.greens der Signalgruppe (nur
+  // GRUEN-Segmente), segs = deren vollständige Segmentliste (für die
+  // Rotgelb-/Gelb-Nachbarschaft).
+  //
+  // Rückgabe: Array (je Umlauf) von Arrays EINES ODER MEHRERER Vorkommen
+  // (leeres Array = kein Grün in diesem Umlauf) - ein Umlauf kann mehr als
+  // EIN Anwurf/Abwurf-Paar derselben Signalgruppe enthalten (z.B. Fußgänger-
+  // Nachforderung/Re-Service), erkannt als jedes GRUEN-Segment, dessen
+  // START in dieses Umlauf-Fenster fällt (nicht nur das erste - das war der
+  // eigentliche Fehler: ein zweites/drittes Vorkommen wurde bisher
+  // stillschweigend verworfen, siehe GZ.umlaufContext.buildAll(), das daraus
+  // je Umlauf so viele AUSGEWERTETE ZEILEN macht wie das "ereignisreichste"
+  // SG-Vorkommen dort hat). Vorkommen[0] ist weiterhin das chronologisch
+  // erste je Umlauf - Aufrufer, die (wie bisher) nur EIN Vorkommen je Umlauf
+  // kennen (js/core/phases.js, js/views/formulaBuilder.js' zeilenweiser
+  // Formel-Builder), lesen bewusst nur Vorkommen[0] und bleiben damit exakt
+  // beim bisherigen Verhalten - die Mehrfach-Erkennung gilt vorerst nur für
+  // die umlaufweise Auswertung in Umlaufstatistiken.
+  //
+  // an/ab je Vorkommen bewusst relativ zum Beginn DIESES Umlaufs berechnet
+  // (nicht über computeSegmentAnAbTf(), dessen ab absichtlich relativ zu dem
+  // Umlauf verankert ist, in dem das Segment ENDET - richtig für
+  // umlaufpruefung.js' carrySegs-Zeilenanzeige bei über die Umlaufgrenze
+  // hinausreichendem Grün, aber falsch für EINEN in sich konsistenten
+  // Umlaufstatistiken-Datensatz, siehe Git-Historie). ab kann daher > TU_MED
+  // sein (ehrliches Signal für "dauerhaft grün über den Umlauf hinaus" statt
+  // einer verdeckenden Modulo-Faltung) - Versatz/Ueberschneidung falten das
+  // beim eigenen Vergleich ohnehin per MOD().
   function computeCycleSgMetrics(segs, greens, cycleStarts, tMax, TU_MED) {
     const n = cycleStarts ? cycleStarts.length : 0;
-    const out = new Array(n).fill(null);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = [];
     if (!TU_MED || n === 0) return out;
     const segIndexOfGreen = mapGreensToSegIndex(segs);
-    const greenSweep = makeIndexSweep(greens);
+    // Fortlaufender Zeiger statt makeIndexSweep(): der bräuchte "höchstens
+    // EIN Treffer je Fenster", hier soll die innere Schleife dagegen ALLE
+    // Vorkommen mit .start im aktuellen Fenster aufsammeln, bevor sie für
+    // das nächste (spätere) Umlauf-Fenster weiterrückt - bleibt trotzdem
+    // amortisiert O(Umläufe + Vorkommen) über die gesamte Aufzeichnung.
+    let ptr = 0;
     for (let i = 0; i < n; i++) {
       const start = cycleStarts[i];
       const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
-      const gIdx = greenSweep(start, end);
-      if (gIdx === -1) continue;
-      const seg = greens[gIdx];
-      // An UND Ab bewusst relativ zu DEMSELBEN Anker (start = Beginn DIESES
-      // Umlaufs) berechnet, NICHT über computeSegmentAnAbTf(): dessen ab ist
-      // absichtlich relativ zu dem Umlauf verankert, in dem das Segment
-      // ENDET (siehe dortigen Kopfkommentar sowie umlaufpruefung.js'
-      // carrySegs-Mechanismus, der genau das für die eigene Zeilenanzeige
-      // braucht, wenn ein Grün über eine Umlaufgrenze hinausreicht). Für
-      // EINEN Umlaufstatistiken-/exprEngine-Datensatz (An(sg)/Ab(sg)/TF(sg))
-      // wollen wir dagegen an UND ab konsistent relativ zu DIESEM einen
-      // Umlauf, auch wenn das Grün erst in einem SPÄTEREN Umlauf endet - ein
-      // Wechsel des Bezugs-Umlaufs würde sonst (per Modulo-Faltung in
-      // computeSegmentAnAbTf) einen kleinen, zufällig plausibel wirkenden,
-      // aber falschen ab-Wert liefern, der TF widerspricht (ab-an ≠ tf) und
-      // z.B. WertBei(det, Ab(sg)) an der falschen Stelle lesen lässt. seg.end
-      // kann daher hier > TU_MED liegen (ehrliches Signal für "dauerhaft
-      // grün über den Umlauf hinaus", statt es zu verstecken) - Versatz/
-      // Ueberschneidung falten das beim eigenen Vergleich ohnehin per MOD().
-      const an = Math.round((seg.start - start) / 1000);
-      const ab = Math.round((seg.end - start) / 1000);
-      const tf = Math.round((seg.end - seg.start) / 1000);
-      const segIdx = segIndexOfGreen[gIdx];
-      const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
-      // segIdx/segStart/segEnd (roh, unverundet) zusätzlich zu den gerundeten
-      // an/ab/tf-Kennzahlen - Aufrufer, die die tatsächliche Position dieses
-      // GRUEN-Segments im vollständigen segs-Array brauchen (z.B. GZ.phases'
-      // PÜ-Werkzeug, um genau dieses Segment plus seine Rotgelb-/Gelb-
-      // Nachbarn darzustellen, statt der gesamten Rohdaten-Zeitreihe der
-      // Signalgruppe), müssen sie sonst selbst neu suchen.
-      out[i] = { an, ab, tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end };
+      while (ptr < greens.length && greens[ptr].start < start) ptr++;
+      let j = ptr;
+      while (j < greens.length && greens[j].start < end) {
+        const seg = greens[j];
+        const an = Math.round((seg.start - start) / 1000);
+        const ab = Math.round((seg.end - start) / 1000);
+        const tf = Math.round((seg.end - seg.start) / 1000);
+        const segIdx = segIndexOfGreen[j];
+        const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+        // segIdx/segStart/segEnd (roh, unverundet) zusätzlich zu den
+        // gerundeten an/ab/tf-Kennzahlen - Aufrufer, die die tatsächliche
+        // Position dieses GRUEN-Segments im vollständigen segs-Array
+        // brauchen (z.B. GZ.phases' PÜ-Werkzeug, um genau dieses Segment
+        // plus seine Rotgelb-/Gelb-Nachbarn darzustellen, statt der
+        // gesamten Rohdaten-Zeitreihe der Signalgruppe), müssen sie sonst
+        // selbst neu suchen.
+        out[i].push({ an, ab, tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end });
+        j++;
+      }
+      ptr = j;
     }
     return out;
   }

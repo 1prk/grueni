@@ -1,11 +1,29 @@
-/* GZ.umlaufContext — baut für Umlaufstatistiken je Umlauf den Auswertungs-
-   scope für GZ.exprEngine.compileValue(): SG-/DET-Objekt-Handles im selben
-   Grundformat wie js/views/formulaBuilder.js (class + cycleMetrics, siehe
-   dort und exprEngine.js), aber OHNE zeilenweisen Sweep - Umlaufstatistiken
-   braucht nur EINEN Wert je Umlauf, nicht je Zeile. Anders als der Formel-
-   Builder (Variablen mit frei wählbarem Alias) werden hier die OCIT-Spalten-
-   namen selbst direkt als Bezeichner nutzbar gemacht - kein separater
-   "Variable anlegen"-Schritt. */
+/* GZ.umlaufContext — baut für Umlaufstatistiken je AUSWERTUNGSZEILE den
+   Auswertungsscope für GZ.exprEngine.compileValue(): SG-/DET-Objekt-Handles
+   im selben Grundformat wie js/views/formulaBuilder.js (class + cycleMetrics,
+   siehe dort und exprEngine.js), aber OHNE zeilenweisen Sweep - Umlauf-
+   statistiken braucht nur EINEN Wert je Zeile, nicht je Rohdaten-Zeile.
+   Anders als der Formel-Builder (Variablen mit frei wählbarem Alias) werden
+   hier die OCIT-Spaltennamen selbst direkt als Bezeichner nutzbar gemacht -
+   kein separater "Variable anlegen"-Schritt.
+
+   Eine AUSWERTUNGSZEILE ist NICHT zwingend ein Umlauf: ein Umlauf kann pro
+   Signalgruppe mehr als EIN Anwurf/Abwurf-Paar enthalten (z.B. Fußgänger-
+   Nachforderung/Re-Service) - GZ.segments.computeCycleSgMetrics() liefert
+   seither je Umlauf ein ARRAY aller erkannten Vorkommen statt nur des
+   ersten. buildAll() erzeugt daher je Umlauf so viele Zeilen wie das
+   "ereignisreichste" SG-Vorkommen dort hat (mindestens 1, auch ohne jedes
+   Vorkommen - wie bisher eine Zeile mit lauter NaN/leeren Werten): Zeile e
+   eines Umlaufs sieht für JEDE Signalgruppe deren e-tes Vorkommen (oder
+   NaN/null, falls diese Signalgruppe in diesem Umlauf weniger Vorkommen
+   hatte) - Vorkommen werden dabei chronologisch INDEX-gepaart (1. Vorkommen
+   von K1 mit 1. Vorkommen von K2 usw.), nicht inhaltlich/zeitlich
+   korreliert. TU/SPL/TU_MED bleiben über alle Zeilen desselben Umlaufs
+   gleich (siehe cyc.cycleIdx/eventIdx/eventCount). Detektor-/APW-/ÖPNV-Werte
+   (Ausgeloest/AnzahlAusloesungen) bleiben bewusst UMLAUF-weite Aggregate
+   (nicht je Vorkommen aufgeteilt) - anders als An/Ab/TF gibt es dafür keinen
+   "welches Vorkommen"-Bezug, sie gelten unverändert für JEDE Zeile desselben
+   Umlaufs. */
 (function (GZ) {
   'use strict';
   const { computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, findSplAt, makeRawValueSampler } = GZ.segments;
@@ -34,7 +52,7 @@
   // Baut den Kontext für JEDEN Umlauf der Aufzeichnung auf einmal - die
   // teure Sweep-Arbeit (GZ.segments.computeCycleSgMetrics/-DetMetrics) läuft
   // einmal über die Aufzeichnung, danach ist das Auswerten einer Formel je
-  // Umlauf nur noch ein Baum-Durchlauf über wenige Knoten (compiled.run()).
+  // Zeile nur noch ein Baum-Durchlauf über wenige Knoten (compiled.run()).
   function buildAll(analysis) {
     const index = buildIdentifierIndex(analysis);
     const { allStats, otherColumns, cycleStarts, tMax, times, seriesByCol, splValues } = analysis;
@@ -43,10 +61,13 @@
     const TU_MED = computeGlobalTU(cycleStarts);
     const n = cycleStarts.length;
 
-    const sgMetricsByName = new Map();
+    // sgOccByName: Name -> Array (je Umlauf) von Arrays aller Vorkommen
+    // dieser Signalgruppe in diesem Umlauf (siehe computeCycleSgMetrics()-
+    // Kopfkommentar) - GRUNDLAGE der Zeilen-Aufteilung unten.
+    const sgOccByName = new Map();
     const sgRawSamplerByName = new Map();
     allStats.forEach(({ col, segs, stats }) => {
-      sgMetricsByName.set(col.name, computeCycleSgMetrics(segs, stats.greens, cycleStarts, tMax, TU_MED));
+      sgOccByName.set(col.name, computeCycleSgMetrics(segs, stats.greens, cycleStarts, tMax, TU_MED));
       sgRawSamplerByName.set(col.name, makeRawValueSampler(times, seriesByCol.get(col.index)));
     });
     const detMetricsByName = new Map();
@@ -65,20 +86,41 @@
       const spl = findSplAt(start, times, splValues) || '';
       const tu = Math.round((end - start) / 1000);
 
-      // __cycleStart: kein regulärer, per varTypes deklarierter Bezeichner
-      // (Nutzer können ihn nicht referenzieren) - nur intern von der
-      // WertBei()-Primitive gelesen (siehe exprEngine.js), um deren
-      // Sekunden-Zeitpunkt in einen absoluten Zeitstempel für
-      // handle.rawSample() umzurechnen.
-      const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, __cycleStart: start };
+      // Zeilenanzahl DIESES Umlaufs = die größte Vorkommen-Anzahl unter
+      // ALLEN Signalgruppen der Aufzeichnung in diesem Umlauf (mindestens 1,
+      // auch ganz ohne jedes Vorkommen - wie bisher eine Zeile mit lauter
+      // NaN-Werten). Bewusst über ALLE Signalgruppen ermittelt (nicht nur
+      // die in aktuell definierten Spalten-Formeln referenzierten) - sonst
+      // würde sich die Zeilenzahl eines Umlaufs bei jeder Formeländerung
+      // verschieben.
+      let eventCount = 1;
       index.sgList.forEach(name => {
-        scope[name] = { class: 'SG', cycleMetrics: sgMetricsByName.get(name)[i] || null, rawSample: sgRawSamplerByName.get(name) };
-      });
-      index.detList.forEach(name => {
-        scope[name] = { class: 'DET', cycleMetrics: detMetricsByName.get(name)[i] || null, rawSample: rawSamplerByName.get(name) };
+        const occs = sgOccByName.get(name)[i];
+        if (occs && occs.length > eventCount) eventCount = occs.length;
       });
 
-      cycles.push({ scope, start, end, TX: i + 1, SPL: spl, TU: tu });
+      for (let e = 0; e < eventCount; e++) {
+        // __cycleStart: kein regulärer, per varTypes deklarierter Bezeichner
+        // (Nutzer können ihn nicht referenzieren) - nur intern von der
+        // WertBei()-Primitive gelesen (siehe exprEngine.js), um deren
+        // Sekunden-Zeitpunkt in einen absoluten Zeitstempel für
+        // handle.rawSample() umzurechnen. Gilt für ALLE Zeilen desselben
+        // Umlaufs gleich (der Umlauf selbst wird ja nicht aufgeteilt, nur
+        // die pro Zeile sichtbaren SG-Vorkommen).
+        const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, __cycleStart: start };
+        index.sgList.forEach(name => {
+          const occs = sgOccByName.get(name)[i];
+          const cycleMetrics = (occs && occs[e]) || null;
+          scope[name] = { class: 'SG', cycleMetrics, rawSample: sgRawSamplerByName.get(name) };
+        });
+        // Detektor-/APW-/ÖPNV-Werte bleiben Umlauf-weite Aggregate, gleich
+        // für jede Zeile desselben Umlaufs (siehe Datei-Kopfkommentar).
+        index.detList.forEach(name => {
+          scope[name] = { class: 'DET', cycleMetrics: detMetricsByName.get(name)[i] || null, rawSample: rawSamplerByName.get(name) };
+        });
+
+        cycles.push({ scope, start, end, TX: i + 1, SPL: spl, TU: tu, cycleIdx: i, eventIdx: e, eventCount });
+      }
     }
 
     return { index, cycles };

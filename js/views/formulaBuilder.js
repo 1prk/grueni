@@ -941,9 +941,16 @@
       const sgEntry = a.allStats.find(s => s.col.index === col.index);
       const segs = sgEntry ? sgEntry.segs : [];
       const greens = sgEntry ? sgEntry.stats.greens : [];
+      // computeCycleSgMetrics liefert seit der Mehrfach-Vorkommen-Erkennung
+      // ein Array von Vorkommen je Umlauf (siehe dortigen Kopfkommentar) -
+      // der zeilenweise Formel-Builder kennt (wie bisher) nur EIN Vorkommen
+      // je Umlauf und nimmt bewusst das chronologisch erste; die
+      // Mehrfach-Erkennung gilt vorerst nur für Umlaufstatistiken (siehe
+      // GZ.umlaufContext.buildAll()).
+      const sgMetricsByIdx = computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED).map(occs => occs[0] || null);
       return {
         class: 'SG', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
-        cycleMetricsByIdx: computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED),
+        cycleMetricsByIdx: sgMetricsByIdx,
         // rawSample: für die WertBei()-Primitive (siehe exprEngine.js), z.B.
         // WertBei(K2, Ab(K1)) - das rohe Signalbild von K2 im Moment des
         // Abwurfs von K1, statt dessen kategorisierten Zustand() zum jeweils
