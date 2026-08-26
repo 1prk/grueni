@@ -60,6 +60,40 @@
     return ans >= 0 ? (splValues[ans] || '') : '';
   }
 
+  // Liefert eine sample(tMs)-Funktion für den Rohwert EINER Spalte (DET/BLK/
+  // APW/ÖPNV) zu einem beliebigen Zeitpunkt - Grundlage der exprEngine-
+  // Primitive WertBei(det, zeitpunkt) (z.B. "welchen APW-Countdown zeigte
+  // APW_01 im Moment des Abwurfs von K1"). Anders als splValues sind
+  // DET/APW/ÖPNV-Rohreihen NICHT vorab aufgefüllt (siehe GZ.parser.
+  // parseOcitText: nur TC/SP werden beim Einlesen "forward-filled") - eine
+  // leere Zelle bedeutet "unverändert seit dem letzten Wert", nicht "kein
+  // Wert" (buildSegments() überspringt leere Zellen aus demselben Grund).
+  // Daher hier einmalig (nicht pro Abfrage) vorwärts aufgefüllt, danach wie
+  // findSplAt() eine Binärsuche nach dem letzten Zeitindex <= t. Eine
+  // WIRKLICH leere Zelle (kein Wert je gesehen) sowie ein nicht-numerischer
+  // Rohwert (z.B. "INV") liefern NaN - konsistent mit dem NUM/NaN-Vertrag
+  // aus exprEngine.js.
+  function makeRawValueSampler(times, rawVals) {
+    const filled = new Array(rawVals.length);
+    let last = '';
+    for (let i = 0; i < rawVals.length; i++) {
+      if (rawVals[i] !== '') last = rawVals[i];
+      filled[i] = last;
+    }
+    return function sample(tMs) {
+      let lo = 0, hi = times.length - 1, ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (times[mid] <= tMs) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (ans === -1) return NaN;
+      const raw = filled[ans];
+      if (raw === '') return NaN;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : NaN;
+    };
+  }
+
   // Wie computeCycleStats, aber getrennt je aktivem SPL zum Zeitpunkt des
   // jeweiligen Grünbeginns. Ø Umlauf wird nur aus Zyklen gebildet, die
   // vollständig innerhalb desselben SPL liegen.
@@ -412,7 +446,7 @@
 
   GZ.segments = {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
-    findSplAt, computeSplTransitions, computeGlobalTU,
+    findSplAt, makeRawValueSampler, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
     mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleDetMetrics,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,

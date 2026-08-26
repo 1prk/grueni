@@ -51,7 +51,7 @@
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
-  const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics } = GZ.segments;
+  const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
   const { compile, compileFunctionDef } = GZ.exprEngine;
   const { wzIstBelegt } = GZ.wartezeitLogic;
@@ -951,7 +951,12 @@
     const occupied = a.times.map((_, k) => wzIstBelegt(rawVals[k]));
     return {
       class: 'DET', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
-      cycleMetricsByIdx: computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax)
+      cycleMetricsByIdx: computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax),
+      // rawSample: für die WertBei()-Primitive (siehe exprEngine.js) - anders
+      // als cycleMetrics unverändert über den gesamten Berechnen()-Durchlauf
+      // (kein Fortschreiten pro Zeile nötig, da sample() selbst per
+      // Binärsuche beliebige Zeitpunkte auflöst).
+      rawSample: makeRawValueSampler(a.times, rawVals)
     };
   }
 
@@ -1099,7 +1104,10 @@
         const cycleEnd = cyclePtr + 1 < cycleStarts.length ? cycleStarts[cyclePtr + 1] : a.tMax;
         const tuSeconds = cycleStarts.length ? Math.round((cycleEnd - cycleStarts[cyclePtr]) / 1000) : NaN;
 
-        const scope = { TX: txSeconds, TU: tuSeconds, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: a.splValues ? (a.splValues[i] || '') : '' };
+        // __cycleStart: siehe GZ.umlaufContext.buildAll() - dieselbe interne,
+        // für Nutzer-Formeln nicht referenzierbare Konvention, hier je Zeile
+        // auf den Beginn des aktuellen Umlaufs (cyclePtr) aktualisiert.
+        const scope = { TX: txSeconds, TU: tuSeconds, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: a.splValues ? (a.splValues[i] || '') : '', __cycleStart: cycleStarts.length ? cycleStarts[cyclePtr] : NaN };
         scopeSpecs.forEach(s => {
           if (s.handle) {
             s.handle.sweep.advance(t);

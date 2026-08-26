@@ -18,9 +18,13 @@
    JE UMLAUF aus und lässt beliebige Ergebnistypen zu (GZ.exprEngine.
    compileValue() statt compile()) - die Primitiven An/Ab/TF/RG/GE/
    Ausgeloest/AnzahlAusloesungen lesen dafür aus handle.cycleMetrics statt
-   handle.sweep (siehe GZ.umlaufContext.buildAll()). Zustand/Dauer/DauerSeit
-   sind hier bewusst NICHT nutzbar (kein wohldefinierter "aktueller
-   Zeitpunkt" für einen ganzen Umlauf) - siehe findPerRowOnlyUsage().
+   handle.sweep (siehe GZ.umlaufContext.buildAll()). WertBei(det, zeitpunkt)
+   liest stattdessen über handle.rawSample() den tatsächlichen Rohwert (z.B.
+   einen APW-Countdown) zu einem beliebigen Zeitpunkt im Umlauf - meist
+   selbst wieder ein An/Ab/TF/RG/GE-Aufruf, z.B. WertBei(APW_01, Ab(K1)).
+   Zustand/Dauer/DauerSeit sind hier bewusst NICHT nutzbar (kein
+   wohldefinierter "aktueller Zeitpunkt" für einen ganzen Umlauf) - siehe
+   findPerRowOnlyUsage().
 
    Einige Primitiven (TF/RG/GE/Versatz/Ueberschneidung) haben zusätzlich zu
    ihrem Zahlen-/Wahrheitswert eine eindeutige ZEITSPANNE innerhalb des
@@ -51,8 +55,8 @@
   let acItems = [], acActive = -1, acRange = null;
 
   const SG_ARG_FNS = new Set(['An', 'Ab', 'TF', 'RG', 'GE', 'Versatz', 'Ueberschneidung']);
-  const DET_ARG_FNS = new Set(['Ausgeloest', 'AnzahlAusloesungen']);
-  const US_FUNCTIONS = ['Versatz', 'Ueberschneidung', 'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD'];
+  const DET_ARG_FNS = new Set(['Ausgeloest', 'AnzahlAusloesungen', 'WertBei']);
+  const US_FUNCTIONS = ['Versatz', 'Ueberschneidung', 'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'WertBei', 'MOD'];
   const US_SCALARS = ['TU', 'TU_MED', 'SPL'];
   // Zeilenweise Primitiven des Formel-Builders - hier syntaktisch zwar
   // bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne handle.sweep würde

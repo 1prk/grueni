@@ -8,7 +8,7 @@
    "Variable anlegen"-Schritt. */
 (function (GZ) {
   'use strict';
-  const { computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, findSplAt } = GZ.segments;
+  const { computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, findSplAt, makeRawValueSampler } = GZ.segments;
   const { wzIstBelegt } = GZ.wartezeitLogic;
 
   // Statischer Bezeichner-Index (Namen + Typen) - Grundlage für varTypes je
@@ -48,10 +48,12 @@
       sgMetricsByName.set(col.name, computeCycleSgMetrics(segs, stats.greens, cycleStarts, tMax, TU_MED));
     });
     const detMetricsByName = new Map();
+    const rawSamplerByName = new Map();
     otherColumns.forEach(col => {
       const rawVals = seriesByCol.get(col.index);
       const occupied = times.map((_, k) => wzIstBelegt(rawVals[k]));
       detMetricsByName.set(col.name, computeCycleDetMetrics(times, occupied, cycleStarts, tMax));
+      rawSamplerByName.set(col.name, makeRawValueSampler(times, rawVals));
     });
 
     const cycles = [];
@@ -61,12 +63,17 @@
       const spl = findSplAt(start, times, splValues) || '';
       const tu = Math.round((end - start) / 1000);
 
-      const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl };
+      // __cycleStart: kein regulärer, per varTypes deklarierter Bezeichner
+      // (Nutzer können ihn nicht referenzieren) - nur intern von der
+      // WertBei()-Primitive gelesen (siehe exprEngine.js), um deren
+      // Sekunden-Zeitpunkt in einen absoluten Zeitstempel für
+      // handle.rawSample() umzurechnen.
+      const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, __cycleStart: start };
       index.sgList.forEach(name => {
         scope[name] = { class: 'SG', cycleMetrics: sgMetricsByName.get(name)[i] || null };
       });
       index.detList.forEach(name => {
-        scope[name] = { class: 'DET', cycleMetrics: detMetricsByName.get(name)[i] || null };
+        scope[name] = { class: 'DET', cycleMetrics: detMetricsByName.get(name)[i] || null, rawSample: rawSamplerByName.get(name) };
       });
 
       cycles.push({ scope, start, end, TX: i + 1, SPL: spl, TU: tu });

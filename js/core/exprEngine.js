@@ -274,6 +274,33 @@
       }
     },
 
+    // WertBei: der Rohwert eines Detektors/APW-/ÖPNV-Werts zu einem
+    // beliebigen Zeitpunkt innerhalb des aktuellen Umlaufs [s ab
+    // Umlaufbeginn] - typischerweise selbst wieder eine der Umlaufweisen
+    // Primitiven oben, z.B. WertBei(APW_01, Ab(K1)): "welchen Countdown
+    // zeigte APW_01 im Moment des Abwurfs von K1". Anders als Ausgeloest/
+    // AnzahlAusloesungen (die nur wissen wollen, OB/WIE OFT belegt) liest
+    // dies den tatsächlichen Rohwert - siehe handle.rawSample (GZ.segments.
+    // makeRawValueSampler) und scope.__cycleStart (Umlaufbeginn in ms, vom
+    // Aufrufer gesetzt, siehe GZ.umlaufContext/formulaBuilder.js berechnen()).
+    WertBei: {
+      arity: 2,
+      check(args, pos) {
+        if (args[0].type !== 'DET' && args[0].type !== 'ANY') throw new ExprError('"WertBei" erwartet als 1. Argument einen Detektor/Wert (z. B. einen APW-Countdown)', pos);
+        if (!isNumCompatible(args[1].type)) throw new ExprError('"WertBei" erwartet als 2. Argument einen Zeitpunkt in Sekunden ab Umlaufbeginn (z. B. Ab(sg))', pos);
+        return 'NUM';
+      },
+      run(args) {
+        const [objNode, tNode] = args;
+        return scope => {
+          const handle = objNode.run(scope);
+          const t = tNode.run(scope);
+          if (!handle || !handle.rawSample || !Number.isFinite(t) || !Number.isFinite(scope.__cycleStart)) return NaN;
+          return handle.rawSample(scope.__cycleStart + t * 1000);
+        };
+      }
+    },
+
     // Versatz/Ueberschneidung: die eigentliche Motivation für An/Ab/TU_MED
     // oben - "Zeit von Abwurf sg1 bis Anwurf sg2" ist der häufigste Fall,
     // verdient also eine eigene, selbsterklärende Primitive statt jedes Mal
@@ -349,6 +376,7 @@
     { name: 'GE', params: ['sg'], desc: 'Gelb-Dauer unmittelbar nach dieser Freigabe [s] (0, falls keine)' },
     { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst' },
     { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf' },
+    { name: 'WertBei', params: ['det', 'zeitpunktSek'], desc: 'Rohwert (z. B. APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))' },
     { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division, stets ≥ 0)' },
     { name: 'Versatz', params: ['sgAbwurf', 'sgAnwurf'], desc: 'Versatzzeit von Abwurf sgAbwurf bis Anwurf sgAnwurf [s] - kurz für MOD(An(sgAnwurf)-Ab(sgAbwurf), TU_MED)' },
     { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)' }
