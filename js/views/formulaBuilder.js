@@ -964,9 +964,29 @@
     const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);
     const rawVals = a.seriesByCol.get(col.index);
     const occupied = a.times.map((_, k) => wzIstBelegt(rawVals[k]));
+    // An/Ab/TF/RG/GE sind universell (siehe exprEngine.js PRIMITIVES-
+    // Kopfkommentar) - ein Detektor/Wert hat mit BELEGT genau denselben
+    // Begriff eines "aktiven Zustands" wie eine Signalgruppe mit GRUEN,
+    // daher dieselbe computeCycleSgMetrics()-Grundlage (nur erstes Vorkommen
+    // je Umlauf, wie bei SG oben) statt einer eigenen Berechnung. Ausgeloest/
+    // AnzahlAusloesungen bleiben eigene, umlauf-weite Aggregate
+    // (computeCycleDetMetrics) - beide Kennzahl-Arten werden hier zu EINEM
+    // cycleMetrics-Objekt je Umlauf zusammengeführt.
+    const belegtSegs = segs.filter(s => s.cat === 'BELEGT');
+    const anAbByIdx = computeCycleSgMetrics(segs, belegtSegs, a.cycleStarts, a.tMax, TU_MED).map(occs => occs[0] || null);
+    const aggByIdx = computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax);
+    const detMetricsByIdx = aggByIdx.map((agg, idx) => {
+      const anab = anAbByIdx[idx];
+      return {
+        an: anab ? anab.an : NaN, ab: anab ? anab.ab : NaN, tf: anab ? anab.tf : NaN,
+        rotgelb: anab ? anab.rotgelb : 0, gelb: anab ? anab.gelb : 0,
+        segIdx: anab ? anab.segIdx : null, segStart: anab ? anab.segStart : null, segEnd: anab ? anab.segEnd : null,
+        triggered: agg.triggered, count: agg.count
+      };
+    });
     return {
       class: 'DET', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
-      cycleMetricsByIdx: computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax),
+      cycleMetricsByIdx: detMetricsByIdx,
       // rawSample: für die WertBei()-Primitive (siehe exprEngine.js) - anders
       // als cycleMetrics unverändert über den gesamten Berechnen()-Durchlauf
       // (kein Fortschreiten pro Zeile nötig, da sample() selbst per

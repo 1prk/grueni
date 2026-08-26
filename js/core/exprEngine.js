@@ -184,10 +184,20 @@
     // ein Wert (kein Grün in diesem Umlauf bzw. kein cycleMetrics gesetzt),
     // liefern die NUM-Primitiven NaN (konsistent mit dem NUM/NaN-Vertrag
     // dieser Datei, siehe Kopfkommentar) statt eines Sonderfalls.
+    // An/Ab/TF/RG/GE sind UNIVERSELL: eine Signalgruppe UND ein Detektor/APW-/
+    // ÖPNV-Wert haben beide genau EINEN "aktiven" Zustand, dessen Beginn/Ende
+    // je Umlauf interessiert - GRUEN bei einer Signalgruppe, BELEGT bei einem
+    // Detektor/Wert (siehe GZ.parser.categorizeSgRaw/categorizeDetRaw). "An"
+    // ist dabei einfach "wann beginnt dieser aktive Zustand" (Anwurf bei einer
+    // Signalgruppe, Belegungsbeginn bei einem Detektor), "Ab" entsprechend
+    // dessen Ende. RG/GE (Rotgelb/Gelb unmittelbar vor/nach der Freigabe)
+    // ergeben nur für Signalgruppen einen Wert ungleich 0 - ein Detektor/Wert
+    // kennt diese Zwischenkategorien nicht (adjacentTransitionDurations()
+    // trifft dort schlicht nie, kein Sonderfall nötig).
     An: {
       arity: 1,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"An" erwartet als Argument eine Signalgruppe', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"An" erwartet als Argument eine Signalgruppe oder einen Detektor/Wert', pos);
         return 'NUM';
       },
       run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.an : NaN; }; }
@@ -195,7 +205,7 @@
     Ab: {
       arity: 1,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"Ab" erwartet als Argument eine Signalgruppe', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"Ab" erwartet als Argument eine Signalgruppe oder einen Detektor/Wert', pos);
         return 'NUM';
       },
       run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.ab : NaN; }; }
@@ -203,7 +213,7 @@
     TF: {
       arity: 1,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"TF" erwartet als Argument eine Signalgruppe', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"TF" erwartet als Argument eine Signalgruppe oder einen Detektor/Wert', pos);
         return 'NUM';
       },
       run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.tf : NaN; }; },
@@ -218,7 +228,7 @@
     RG: {
       arity: 1,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"RG" erwartet als Argument eine Signalgruppe', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"RG" erwartet als Argument eine Signalgruppe oder einen Detektor/Wert', pos);
         return 'NUM';
       },
       run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.rotgelb : NaN; }; },
@@ -233,7 +243,7 @@
     GE: {
       arity: 1,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"GE" erwartet als Argument eine Signalgruppe', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"GE" erwartet als Argument eine Signalgruppe oder einen Detektor/Wert', pos);
         return 'NUM';
       },
       run(args) { const [objNode] = args; return scope => { const cm = objNode.run(scope).cycleMetrics; return cm ? cm.gelb : NaN; }; },
@@ -341,12 +351,14 @@
     // oben - "Zeit von Abwurf sg1 bis Anwurf sg2" ist der häufigste Fall,
     // verdient also eine eigene, selbsterklärende Primitive statt jedes Mal
     // MOD(An(sg2) - Ab(sg1), TU_MED) von Hand auszuschreiben. Wrapt intern
-    // exakt so (inkl. Umlaufgrenze) - siehe An/Ab oben.
+    // exakt so (inkl. Umlaufgrenze) - siehe An/Ab oben. Wie An/Ab UNIVERSELL:
+    // "Abwurf"/"Anwurf" gilt sinngemäß auch für Detektor/APW-/ÖPNV-Werte
+    // (Belegungsende/-beginn).
     Versatz: {
       arity: 2,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"Versatz" erwartet als 1. Argument eine Signalgruppe (die Abwurf-Seite)', pos);
-        if (args[1].type !== 'SG' && args[1].type !== 'ANY') throw new ExprError('"Versatz" erwartet als 2. Argument eine Signalgruppe (die Anwurf-Seite)', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"Versatz" erwartet als 1. Argument eine Signalgruppe oder einen Detektor/Wert (die Abwurf-Seite)', pos);
+        if (!isObjCompatible(args[1].type)) throw new ExprError('"Versatz" erwartet als 2. Argument eine Signalgruppe oder einen Detektor/Wert (die Anwurf-Seite)', pos);
         return 'NUM';
       },
       run(args) {
@@ -376,8 +388,8 @@
     Ueberschneidung: {
       arity: 2,
       check(args, pos) {
-        if (args[0].type !== 'SG' && args[0].type !== 'ANY') throw new ExprError('"Ueberschneidung" erwartet als 1. Argument eine Signalgruppe (die Abwurf-Seite)', pos);
-        if (args[1].type !== 'SG' && args[1].type !== 'ANY') throw new ExprError('"Ueberschneidung" erwartet als 2. Argument eine Signalgruppe (die Anwurf-Seite)', pos);
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"Ueberschneidung" erwartet als 1. Argument eine Signalgruppe oder einen Detektor/Wert (die Abwurf-Seite)', pos);
+        if (!isObjCompatible(args[1].type)) throw new ExprError('"Ueberschneidung" erwartet als 2. Argument eine Signalgruppe oder einen Detektor/Wert (die Anwurf-Seite)', pos);
         return 'BOOL';
       },
       run(args) {
@@ -399,40 +411,52 @@
   };
 
   // Anzeige-Metadaten für Primitiven (Autovervollständigung/Funktions-Palette
-  // in formulaBuilder.js UND umlaufstatistiken.js) - getrennt von
-  // PRIMITIVES.check/run oben, da rein beschreibend (keine Auswertungslogik).
+  // in formulaBuilder.js UND umlaufstatistiken.js, sowie Tooltip-/Legende-
+  // Text dort) - getrennt von PRIMITIVES.check/run oben, da rein
+  // beschreibend (keine Auswertungslogik). desc ist die einzige Doku, die
+  // Nutzer je Primitive zu sehen bekommen (Autovervollständigung, ƒ-Palette,
+  // Umlaufstatistiken-Legende) - entsprechend ausführlich: was genau
+  // geliefert wird, für welche Objekt-Typen, und wie sich Sonderfälle
+  // (kein Ereignis, keine Rotgelb-/Gelb-Nachbarschaft, ...) verhalten.
+  //
   // objArgType (optional): welchen Objekt-Typ das/die Argument(e) dieser
-  // Primitive erwarten - 'SG' oder 'DET', wenn EINDEUTIG (unabhängig von der
-  // Argumentposition, siehe Versatz/Ueberschneidung mit zwei SG-Argumenten);
-  // 'OBJ', wenn BEIDES gültig ist UND eine kombinierte Vorschlagsliste (SG-
-  // UND Detektor-/APW-Namen) sinnvoll ist (siehe WertBei); fehlt bei Zustand/
-  // Dauer/DauerSeit (akzeptieren ebenfalls SG ODER DET, sind aber ohnehin
-  // perRowOnly und in Umlaufstatistiken gar nicht erst aufrufbar) sowie bei
-  // rein numerischen Primitiven wie MOD. umlaufstatistiken.js nutzt dies, um
-  // innerhalb eines Funktionsaufrufs (z.B. "An(") gezielt nur Signalgruppen-
-  // bzw. Detektor-/APW-Namen (bzw. bei 'OBJ' beide) vorzuschlagen, statt
-  // aller bekannten Bezeichner - EINZIGE Stelle, die das pflegt (nicht länger
-  // separate SG_ARG_FNS/DET_ARG_FNS-Listen dort).
+  // Primitive erwarten - 'SG' oder 'DET', wenn NUR einer der beiden Typen
+  // gültig ist (z.B. Ausgeloest/AnzahlAusloesungen: nur Detektor/Wert, kein
+  // "wie oft war diese Signalgruppe an" definiert); 'OBJ', wenn BEIDES
+  // gültig ist (An/Ab/TF/RG/GE/Versatz/Ueberschneidung/WertBei/DauerBei sind
+  // UNIVERSELL - eine Signalgruppe UND ein Detektor/APW-/ÖPNV-Wert haben
+  // beide genau einen "aktiven" Zustand mit Beginn/Ende, siehe An/Ab-
+  // Kopfkommentar in PRIMITIVES oben); fehlt bei Zustand/Dauer/DauerSeit
+  // (akzeptieren ebenfalls SG ODER DET, sind aber ohnehin perRowOnly und in
+  // Umlaufstatistiken gar nicht erst aufrufbar) sowie bei rein numerischen
+  // Primitiven wie MOD. umlaufstatistiken.js nutzt dies, um innerhalb eines
+  // Funktionsaufrufs (z.B. "An(") gezielt nur Signalgruppen- bzw. Detektor-/
+  // APW-Namen (bzw. bei 'OBJ' beide) vorzuschlagen, statt aller bekannten
+  // Bezeichner - EINZIGE Stelle, die das pflegt (nicht länger separate
+  // SG_ARG_FNS/DET_ARG_FNS-Listen dort).
+  //
   // perRowOnly (optional): true, wenn die Primitive aus handle.sweep liest
   // (Zustand am jeweils AKTUELLEN Zeitpunkt) statt aus handle.cycleMetrics/
-  // handle.rawSample - funktioniert daher nur zeilenweise (Formel-Builder),
-  // nicht in Umlaufstatistiken (siehe dortiges findPerRowOnlyUsage()).
+  // handle.rawSample/handle.durationAt - funktioniert daher nur zeilenweise
+  // (Formel-Builder), nicht in Umlaufstatistiken (siehe dortiges
+  // findPerRowOnlyUsage()). DauerBei ist die um einen expliziten Zeitpunkt
+  // erweiterte, dadurch auch in Umlaufstatistiken nutzbare Fassung von Dauer.
   const PRIMITIVE_INFO = [
-    { name: 'Zustand', params: ['objekt'], desc: 'aktueller Zustand (GRUEN/ROT/GELB/ROTGELB/DUNKEL bzw. BELEGT/FREI)', perRowOnly: true },
-    { name: 'Dauer', params: ['objekt'], desc: 'Sekunden im aktuellen Zustand', perRowOnly: true },
-    { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit letztem Eintritt in "zustand" (0, wenn nicht aktuell darin)', perRowOnly: true },
-    { name: 'An', params: ['sg'], desc: 'Anwurf-Offset der Signalgruppe ab Umlaufbeginn [s] (NaN ohne Grün in diesem Umlauf)', objArgType: 'SG' },
-    { name: 'Ab', params: ['sg'], desc: 'Abwurf-Offset der Signalgruppe ab Umlaufbeginn [s]', objArgType: 'SG' },
-    { name: 'TF', params: ['sg'], desc: 'Freigabezeit (Grünzeit) der Signalgruppe in diesem Umlauf [s]', objArgType: 'SG' },
-    { name: 'RG', params: ['sg'], desc: 'Rotgelb-Dauer unmittelbar vor dieser Freigabe [s] (0, falls keine)', objArgType: 'SG' },
-    { name: 'GE', params: ['sg'], desc: 'Gelb-Dauer unmittelbar nach dieser Freigabe [s] (0, falls keine)', objArgType: 'SG' },
-    { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst', objArgType: 'DET' },
-    { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf', objArgType: 'DET' },
-    { name: 'WertBei', params: ['objekt', 'zeitpunktSek'], desc: 'Rohwert (Signalbild einer Signalgruppe ODER Detektor-/APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))', objArgType: 'OBJ' },
-    { name: 'DauerBei', params: ['objekt', 'zeitpunktSek'], desc: 'wie lange (in Sekunden) war Signalgruppe/Detektor/Wert zum angegebenen Zeitpunkt schon ununterbrochen im selben Zustand - z. B. DauerBei(Det1, Ab(K1)): wie lange Det1 im Moment des Abwurfs von K1 schon belegt war', objArgType: 'OBJ' },
-    { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division, stets ≥ 0)' },
-    { name: 'Versatz', params: ['sgAbwurf', 'sgAnwurf'], desc: 'Versatzzeit von Abwurf sgAbwurf bis Anwurf sgAnwurf [s] - kurz für MOD(An(sgAnwurf)-Ab(sgAbwurf), TU_MED)', objArgType: 'SG' },
-    { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)', objArgType: 'SG' }
+    { name: 'Zustand', params: ['objekt'], desc: 'Aktueller Zustand von objekt (Signalgruppe: GRUEN/ROT/GELB/ROTGELB/DUNKEL; Detektor/APW-/ÖPNV-Wert: BELEGT/FREI). Nur zeilenweise (Formel-Builder) - "aktuell" braucht einen konkreten Zeitpunkt.', perRowOnly: true },
+    { name: 'Dauer', params: ['objekt'], desc: 'Sekunden, die objekt bereits ununterbrochen im aktuellen Zustand ist. Nur zeilenweise - siehe DauerBei für die Variante mit explizitem Zeitpunkt (auch in Umlaufstatistiken nutzbar).', perRowOnly: true },
+    { name: 'DauerSeit', params: ['objekt', 'zustand'], desc: 'Sekunden seit dem letzten Eintritt von objekt in "zustand" (0, wenn objekt aktuell NICHT in diesem Zustand ist). Nur zeilenweise.', perRowOnly: true },
+    { name: 'An', params: ['objekt'], desc: 'Beginn des aktiven Zustands von objekt in diesem Umlauf, als Sekunden-Offset ab Umlaufbeginn [s] - bei einer Signalgruppe der Anwurf (Beginn Grün), bei einem Detektor/APW-/ÖPNV-Wert der Belegungsbeginn. NaN, wenn objekt in diesem Umlauf keinen solchen Beginn hat (z.B. eine Signalgruppe ohne Grün, oder ein Detektor, der schon in einem früheren Umlauf belegt wurde und erst hier wieder frei wird).', objArgType: 'OBJ' },
+    { name: 'Ab', params: ['objekt'], desc: 'Ende des aktiven Zustands von objekt in diesem Umlauf [s ab Umlaufbeginn] - Abwurf (Grün-Ende) bei einer Signalgruppe, Belegungsende bei einem Detektor/Wert. NaN, wenn objekt in DIESEM Umlauf nicht endet (z.B. weil es erst im nächsten endet - siehe An).', objArgType: 'OBJ' },
+    { name: 'TF', params: ['objekt'], desc: 'Freigabezeit: Gesamtdauer des aktiven Zustands [s] (Grünzeit bei einer Signalgruppe, Belegungsdauer bei einem Detektor/Wert) - nur bekannt, sobald der Zustand in DIESEM Umlauf auch endet (sonst NaN, siehe Ab).', objArgType: 'OBJ' },
+    { name: 'RG', params: ['objekt'], desc: 'Rotgelb-Dauer unmittelbar VOR diesem Anwurf [s] (0, falls keine) - nur für Signalgruppen sinnvoll ungleich 0; ein Detektor/Wert kennt keine Rotgelb-Kategorie und liefert daher immer 0.', objArgType: 'OBJ' },
+    { name: 'GE', params: ['objekt'], desc: 'Gelb-Dauer unmittelbar NACH diesem Abwurf [s] (0, falls keine) - wie RG nur für Signalgruppen ungleich 0.', objArgType: 'OBJ' },
+    { name: 'Ausgeloest', params: ['det'], desc: 'Wahr, wenn der Detektor/Wert in diesem Umlauf mindestens einmal belegt/ausgelöst war (Umlauf-weites Aggregat, unabhängig davon, wie oft).', objArgType: 'DET' },
+    { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken (frei->belegt) des Detektors/Werts in diesem Umlauf (Umlauf-weites Aggregat).', objArgType: 'DET' },
+    { name: 'WertBei', params: ['objekt', 'zeitpunktSek'], desc: 'Roher, unkategorisierter Messwert von objekt zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - bei einer Signalgruppe der Signalbild-Rohcode, bei einem Detektor/APW-/ÖPNV-Wert der geloggte Rohwert (z.B. ein Countdown). zeitpunktSek ist typischerweise selbst wieder ein An/Ab-Aufruf, z.B. WertBei(APW_01, Ab(K1)): "welchen Countdown zeigte APW_01 im Moment des Abwurfs von K1".', objArgType: 'OBJ' },
+    { name: 'DauerBei', params: ['objekt', 'zeitpunktSek'], desc: 'Wie lange (in Sekunden) war objekt zum angegebenen Zeitpunkt [s ab Umlaufbeginn] bereits ununterbrochen im dann jeweils AKTUELLEN Zustand - die um einen expliziten Zeitpunkt erweiterte Fassung von Dauer(), dadurch auch in Umlaufstatistiken nutzbar. Beispiel: DauerBei(Det1, Ab(K1)) = wie lange Det1 im Moment des Abwurfs von K1 schon in seinem dortigen Zustand war (meist: schon belegt). Achtung: liefert die Dauer des Zustands, der GENAU zu diesem Zeitpunkt gilt - ist objekt zu diesem Zeitpunkt bereits wieder frei, liefert es die Dauer der Freiphase, nicht der vorherigen Belegung.', objArgType: 'OBJ' },
+    { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division), stets ≥ 0 - anders als JS-"%" nie negativ. Nur für Werte sinnvoll, die als zyklisch/umlaufend verstanden werden sollen; für eine reine Differenz zwischen zwei An/Ab-Werten DERSELBEN Zeile lieber ohne MOD rechnen (siehe Versatz-Hinweis unten).', objArgType: null },
+    { name: 'Versatz', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Zeit vom Ende des aktiven Zustands von objektAbwurf bis zum NÄCHSTEN Beginn des aktiven Zustands von objektAnwurf [s], vorwärts/zyklisch gerechnet (kurz für MOD(An(objektAnwurf)-Ab(objektAbwurf), TU_MED)). Beginnt objektAnwurf in DIESER Zeile schon VOR objektAbwurf endet (siehe Ueberschneidung), liefert das einen Wert nahe TU_MED statt einer kleinen negativen Zahl - für eine reine, ggf. negative Differenz stattdessen einfach "Ab(objektAnwurf) - Ab(objektAbwurf)" (ohne MOD) verwenden.', objArgType: 'OBJ' },
+    { name: 'Ueberschneidung', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Wahr, wenn der aktive Zustand von objektAnwurf in dieser Zeile schon beginnt, BEVOR der von objektAbwurf endet (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen statt einer echten Überlappung).', objArgType: 'OBJ' }
   ];
 
   // extraKatTokens: wie KAT_TOKENS, aber NUR für diesen einen tokenize()-
