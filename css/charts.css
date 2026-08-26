@@ -70,40 +70,59 @@
    Übergangs-Referenzzeit bezogen (nicht die Umlauf-TX). NUR ANZEIGE - die
    Bearbeitung selbst (Zeilen hinzufügen/entfernen, An/Ab überschreiben)
    lebt im Tab „Stammdaten LSA" (siehe dort .sd-pue-* weiter unten), von
-   hier aus per "Bearbeiten"-Knopf erreichbar. */
+   hier aus per "Bearbeiten"-Knopf erreichbar. Zeilen UND die Achsen-Zeile
+   (.up-pue-axis-row) teilen sich dasselbe Grid-Spaltenraster (statt Flex),
+   damit die Sekunden-Ticks der gemeinsamen Achse exakt über den Balken der
+   Zeilen darunter stehen. */
 .up-pue-panel{ margin:8px 16px 4px; padding:10px 12px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); }
 .up-pue-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; margin-bottom:8px; }
 .up-pue-panel-sub{ font-weight:400; color:var(--text-muted); }
 .up-pue-panel-actions{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .up-pue-panel-actions button{ font-size:11px; padding:4px 9px; }
 .up-pue-rows{ display:flex; flex-direction:column; gap:6px; }
-.up-pue-row{ display:flex; align-items:center; gap:8px; }
+.up-pue-row, .up-pue-axis-row{ display:grid; grid-template-columns:92px 56px 1fr; align-items:center; gap:8px; }
+.up-pue-axis-row{ margin-bottom:4px; }
 .up-pue-sg-label{ width:92px; flex-shrink:0; font-size:11.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.up-pue-field{ display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--text-muted); flex-shrink:0; }
-.up-pue-field b{ font-family:var(--mono); font-size:11.5px; color:var(--text); font-weight:700; }
+.up-pue-always-tag{ font-size:9px; font-weight:400; color:var(--text-faint); }
 .up-pue-tf{ width:56px; flex-shrink:0; font-family:var(--mono); font-size:11px; color:var(--text-muted); }
-.up-pue-track{ flex:1; height:20px; border-radius:3px; overflow:hidden; }
+.up-pue-track{ height:20px; border-radius:3px; overflow:hidden; }
 .up-pue-track svg{ display:block; width:100%; height:100%; }
+.up-pue-axis-track{ height:13px; }
+.up-pue-axis-track svg{ display:block; width:100%; height:100%; }
+.up-pue-axis-track svg text{ font-family:var(--mono); font-size:9.5px; fill:var(--text-faint); }
 .up-pue-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:6px 0; }
 
 /* PÜ-Werkzeug: Bearbeitung (Stammdaten LSA) - eine Zeilenliste je in der
    Aufzeichnung tatsächlich vorkommendem Übergangstyp (siehe stammdatenLsa.js
    renderPueSection()), sonst dieselbe Optik wie die Lese-Ansicht oben, nur
-   mit echten Eingabefeldern statt reinem Text. */
-.sd-pue-block{ margin:0 16px 14px; padding:12px 14px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); transition:box-shadow .3s, border-color .3s; }
-.sd-pue-block:last-child{ margin-bottom:2px; }
+   mit echten Eingabefeldern statt reinem Text. #sdPueBody legt die Blöcke
+   selbst als Grid an (statt einer einzelnen Spalte) - bis zu 3 nebeneinander.
+   grid-template-columns wird von renderPueSection() dynamisch gesetzt
+   (repeat(min(Anzahl Blöcke, 3), 1fr)) statt hier fest/über auto-fit
+   vorgegeben, damit z.B. ein einzelner Übergang die volle verfügbare Breite
+   nutzt statt auf einer Mindestspaltenbreite stehenzubleiben, und 3
+   nebeneinander die volle Fensterbreite ausfüllen statt an einer gedeckelten
+   max-width stehenzubleiben. */
+#sdPueBody{ display:grid; gap:16px; align-items:start; }
+.sd-pue-block{ padding:12px 14px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); transition:box-shadow .3s, border-color .3s; }
 .sd-pue-block.sd-pue-highlight{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-bg); }
-.sd-pue-block-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; margin-bottom:10px; }
+.sd-pue-block-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 10px; font-size:12px; margin-bottom:10px; }
 .sd-pue-block-sub{ font-weight:400; color:var(--text-muted); }
 .sd-pue-block-head button{ font-size:11px; padding:4px 9px; flex-shrink:0; }
+.sd-pue-start-label{ font-size:10.5px; color:var(--text-muted); flex-shrink:0; }
 .sd-pue-rows{ display:flex; flex-direction:column; gap:6px; }
-.sd-pue-row{ display:flex; align-items:center; gap:8px; }
+.sd-pue-row, .sd-pue-axis-row{ display:grid; grid-template-columns:92px 66px 82px 82px 56px 1fr 29px; align-items:center; gap:8px; }
+.sd-pue-axis-row{ margin-bottom:4px; }
 .sd-pue-sg{ width:92px; flex-shrink:0; font-size:11.5px; padding:3px 5px; }
+.sd-pue-always{ display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-muted); flex-shrink:0; white-space:nowrap; }
 .sd-pue-field{ display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--text-muted); flex-shrink:0; }
 .sd-pue-field input{ width:52px; font-size:11.5px; padding:3px 5px; }
 .sd-pue-tf{ width:56px; flex-shrink:0; font-family:var(--mono); font-size:11px; color:var(--text-muted); }
-.sd-pue-track{ flex:1; height:20px; border-radius:3px; overflow:hidden; }
+.sd-pue-track{ height:20px; border-radius:3px; overflow:hidden; }
 .sd-pue-track svg{ display:block; width:100%; height:100%; }
+.sd-pue-axis-track{ height:13px; }
+.sd-pue-axis-track svg{ display:block; width:100%; height:100%; }
+.sd-pue-axis-track svg text{ font-family:var(--mono); font-size:9.5px; fill:var(--text-faint); }
 .sd-pue-row-remove{ flex-shrink:0; padding:2px 7px; font-size:11px; color:var(--sig-red); border-color:var(--border); }
 .sd-pue-row-remove:hover{ background:var(--crit-bg); border-color:var(--sig-red); }
 .sd-pue-addrow{ margin-top:8px; font-size:11px; padding:4px 10px; }
@@ -206,4 +225,8 @@
   .lane-row{ gap:5px; }
   .axis{ margin-left:120px; }
   .spl-bar-label-fixed{ width:120px; }
+  /* überschreibt die per JS gesetzte inline grid-template-columns (siehe
+     stammdatenLsa.js renderPueSection()) - auf schmalen Bildschirmen immer
+     eine einzelne Spalte, sonst würden 2-3 Blöcke unbrauchbar schmal. */
+  #sdPueBody{ grid-template-columns:1fr !important; }
 }

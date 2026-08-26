@@ -8,7 +8,7 @@
   'use strict';
   const { esc } = GZ.format;
   const { createPhase } = GZ.phases;
-  const { renderLane } = GZ.charts.timelineLane;
+  const { renderLane, renderTimeAxis } = GZ.charts.timelineLane;
 
   let els = null;
 
@@ -90,9 +90,13 @@
       const fromKuerzel = kuerzelById.get(fromId), toKuerzel = kuerzelById.get(toId);
       if (!fromKuerzel || !toKuerzel) return; // referenziert eine inzwischen gelöschte Phase
       const rows = ov.rows
-        .map(r => ({ sg: sgNameByIndex.get(r.sgIndex), an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null }))
+        .map(r => ({ sg: sgNameByIndex.get(r.sgIndex), an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null, always: !!r.always }))
         .filter(r => r.sg);
-      if (rows.length) pueOverrides[fromKuerzel + '→' + toKuerzel] = { rows };
+      const entry = { rows };
+      if (ov.endSec != null) entry.endSec = ov.endSec;
+      // Auch ein reines Ende-Override ohne Zeilenänderung persistieren
+      // (nicht nur, wenn zusätzlich Zeilen vorhanden sind).
+      if (rows.length || entry.endSec != null) pueOverrides[fromKuerzel + '→' + toKuerzel] = entry;
     });
 
     const cfg = {
@@ -148,12 +152,17 @@
       const [fromKuerzel, toKuerzel] = key.split('→');
       const fromId = idByKuerzel.get(fromKuerzel), toId = idByKuerzel.get(toKuerzel);
       if (!fromId || !toId) { skipped.push(`PÜ-Korrektur „${key}“ (Phase fehlt)`); return; }
-      const rows = (ov.rows || []).map(r => {
+      // Permanent in kanonischer Reihenfolge (K vor R vor F vor S, je Gruppe
+      // numerisch) unabhängig davon, in welcher Reihenfolge die Datei sie
+      // gespeichert hat.
+      const rows = (ov.rows || []).slice().sort((r1, r2) => GZ.phases.compareSgNames(r1.sg, r2.sg)).map(r => {
         const sgIndex = sgIndexByName.get(r.sg);
         if (sgIndex == null) { skipped.push(`Signalgruppe „${r.sg}“ (PÜ ${key})`); return null; }
-        return { sgIndex, an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null };
+        return { sgIndex, an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null, always: !!r.always };
       }).filter(Boolean);
-      if (rows.length) newOverrides[fromId + '→' + toId] = { rows };
+      const entry = { rows };
+      if (ov.endSec != null) entry.endSec = ov.endSec;
+      if (rows.length || entry.endSec != null) newOverrides[fromId + '→' + toId] = entry;
     });
 
     GZ.state.data.phases = newPhases;
@@ -277,6 +286,21 @@
 
   function formatPueNum(v) { return v != null ? v : '–'; }
 
+  // Sortiert Übergänge nach Nomenklatur (PÜ1.2, PÜ1.3, PÜ2.1, ...) statt nach
+  // Reihenfolge des ersten Vorkommens in der Aufzeichnung (siehe
+  // listDistinctTransitions) - numerischer Vergleich der beiden Zahlen im
+  // Standard-Label (GZ.phases.pueLabelFor), damit z.B. PÜ1.10 nicht vor
+  // PÜ1.2 einsortiert wird. Frei benannte Kürzel (Fallback-Label "PÜ k1→k2")
+  // fallen danach, alphabetisch, zurück.
+  function comparePueTransitionLabels(t1, t2) {
+    const parse = t => { const m = /^PÜ(\d+)\.(\d+)$/.exec(t.label); return m ? [Number(m[1]), Number(m[2])] : null; };
+    const p1 = parse(t1), p2 = parse(t2);
+    if (p1 && p2) return p1[0] - p2[0] || p1[1] - p2[1];
+    if (p1) return -1;
+    if (p2) return 1;
+    return t1.label.localeCompare(t2.label);
+  }
+
   function renderPueSection() {
     const a = GZ.state.data.currentAnalysis;
     const phases = GZ.state.data.phases;
@@ -290,13 +314,26 @@
       ...GZ.phases.computePhaseOccurrences(phase, a.allStats),
       color: GZ.phases.colorForIndex(i)
     }));
-    const transitions = GZ.phases.listDistinctTransitions(occEntries, a.tMin, a.tMax);
+    const transitions = GZ.phases.listDistinctTransitions(occEntries, a.tMin, a.tMax).sort(comparePueTransitionLabels);
     if (!transitions.length) {
       els.pueSection.style.display = 'none';
       return;
     }
     els.pueSection.style.display = '';
     els.pueBody.innerHTML = transitions.map(t => renderTransitionBlockHtml(t, phases, a, TU_MED)).join('');
+    // Bis zu 3 Spalten, so viele wie Blöcke vorhanden sind (statt einer
+    // auto-fit/minmax-Rasterbreite) - so nutzt z.B. ein einzelner Übergang
+    // die volle verfügbare Breite statt auf der Mindestbreite einer
+    // möglichen Mehrspalten-Aufteilung stehenzubleiben. Zusätzlich an der
+    // tatsächlich verfügbaren Breite gedeckelt (MIN_BLOCK_W je Spalte,
+    // inkl. Gap) - sonst könnte die Spur-Spalte (1fr) einer einzelnen Zeile
+    // bei zu vielen erzwungenen Spalten auf einem schmalen Fenster auf 0px
+    // zusammenschrumpfen (die festen Spalten - SG, "immer an", An, Ab, TF,
+    // Entfernen-Button - allein brauchen bereits ca. 480px).
+    const MIN_BLOCK_W = 560, GAP = 16;
+    const containerW = els.pueBody.clientWidth || 0;
+    const maxColsByWidth = containerW ? Math.max(1, Math.floor((containerW + GAP) / (MIN_BLOCK_W + GAP))) : 3;
+    els.pueBody.style.gridTemplateColumns = `repeat(${Math.min(transitions.length, 3, maxColsByWidth)}, 1fr)`;
     wirePueSectionEvents(a, TU_MED);
   }
 
@@ -304,34 +341,53 @@
     const fromPhase = phases.find(p => p.id === t.fromPhaseId);
     const toPhase = phases.find(p => p.id === t.toPhaseId);
     if (!fromPhase || !toPhase) return '';
-    const cycleIdx = GZ.phases.cycleIdxAtTime(t.firstOccurrence.start, a.cycleStarts);
+    const cycleIdx = GZ.phases.cycleIdxAtTime(t.sampleOccurrence.start, a.cycleStarts);
     const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
 
+    // K vor R vor F vor S, je Gruppe numerisch (GZ.phases.compareSgNames) -
+    // dieselbe Reihenfolge wie die Zeilen selbst (siehe autoDetectPueRows),
+    // damit die Auswahlliste nicht in der rohen CSV-Spaltenreihenfolge bleibt.
+    const sortedStats = [...a.allStats].sort((x, y) => GZ.phases.compareSgNames(x.col.name, y.col.name));
     const rowsHtml = resolved.rows.map((row, i) => {
-      const cm = row.an != null ? GZ.phases.realCycleMetricsForSg(row.sgIndex, cycleIdx, a, TU_MED) : null;
-      const tf = cm && Number.isFinite(cm.tf) ? cm.tf : (row.an != null && row.ab != null ? Math.round((row.ab - row.an) * 10) / 10 : null);
-      const sgOptions = a.allStats.map(s =>
+      const sgOptions = sortedStats.map(s =>
         `<option value="${s.col.index}" ${s.col.index === row.sgIndex ? 'selected' : ''}>${esc(s.col.name)}</option>`
       ).join('');
+      // TF wird NICHT hier vorausberechnet, sondern erst in
+      // wirePueSectionEvents() aus dem tatsächlich gerenderten (ggf.
+      // überschriebenen) Segment abgelesen (siehe dort) - "TF relativ zum
+      // Diagramm, nie aus den Rohdaten hergeleitet".
       return `
         <div class="sd-pue-row" data-row="${i}">
-          <select class="sd-pue-sg">${sgOptions}</select>
-          <label class="sd-pue-field">An <input type="number" class="sd-pue-an" step="0.1" value="${row.an != null ? row.an : ''}"></label>
-          <label class="sd-pue-field">Ab <input type="number" class="sd-pue-ab" step="0.1" value="${row.ab != null ? row.ab : ''}"></label>
-          <span class="sd-pue-tf">TF ${esc(formatPueNum(tf))}</span>
+          <select class="sd-pue-sg" ${row.always ? 'disabled' : ''}>${sgOptions}</select>
+          <label class="sd-pue-always" title="Bleibt über diesen Übergang hinweg durchgehend grün (kein An-/Ab-Ereignis)"><input type="checkbox" class="sd-pue-always-cb" ${row.always ? 'checked' : ''}> immer an</label>
+          <label class="sd-pue-field">An <input type="number" class="sd-pue-an" step="1" value="${row.an != null ? row.an : ''}" ${row.always ? 'disabled' : ''}></label>
+          <label class="sd-pue-field">Ab <input type="number" class="sd-pue-ab" step="1" value="${row.ab != null ? row.ab : ''}" ${row.always ? 'disabled' : ''}></label>
+          <span class="sd-pue-tf">TF –</span>
           <div class="sd-pue-track"><svg></svg></div>
           <button type="button" class="sd-pue-row-remove" title="Zeile entfernen">✕</button>
         </div>`;
     }).join('');
 
     const fromLabel = phaseLabelText(fromPhase), toLabel = phaseLabelText(toPhase);
+    // Achsen-Zeile teilt sich das Grid-Spaltenraster mit den echten Zeilen
+    // (siehe CSS .sd-pue-row/.sd-pue-axis-row) - dieselben leeren Platzhalter-
+    // Zellen wie eine Zeile, nur die Spur-Zelle trägt die Sekunden-Ticks
+    // (renderTimeAxis mit stepMs=5000, siehe wirePueSectionEvents).
+    const axisRowHtml = resolved.rows.length ? `
+        <div class="sd-pue-axis-row">
+          <span></span><span></span><span></span><span></span><span></span>
+          <div class="sd-pue-track sd-pue-axis-track"><svg></svg></div>
+          <span></span>
+        </div>` : '';
     return `
       <div class="sd-pue-block" id="sd-pue-${fromPhase.id}-${toPhase.id}" data-from="${fromPhase.id}" data-to="${toPhase.id}" data-cycle-idx="${cycleIdx}">
         <div class="sd-pue-block-head">
           <span><b>${esc(t.label)}</b><span class="sd-pue-block-sub"> · ${esc(fromLabel)} → ${esc(toLabel)}${resolved.overridden ? ' · manuell angepasst' : ''}</span></span>
+          <span class="sd-pue-start-label" title="Frühester Gelbbeginn der abwerfenden Phase - per Definition TX=0, nicht änderbar">Start 0s</span>
+          <label class="sd-pue-field" title="Spätestes echtes Grün der anwerfenden Phase - markiert als Linie im Diagramm">Ende <input type="number" class="sd-pue-end" step="1" value="${resolved.endSec != null ? resolved.endSec : ''}"> s</label>
           <button type="button" class="sd-pue-reset" ${resolved.overridden ? '' : 'disabled'}>Automatisch erkannt zurücksetzen</button>
         </div>
-        ${resolved.rows.length ? `<div class="sd-pue-rows">${rowsHtml}</div>` : '<div class="sd-pue-empty">Keine Daten für das erste Vorkommen (z. B. Datenlücke).</div>'}
+        ${resolved.rows.length ? `${axisRowHtml}<div class="sd-pue-rows">${rowsHtml}</div>` : '<div class="sd-pue-empty">Keine Daten für das erste Vorkommen (z. B. Datenlücke).</div>'}
         <button type="button" class="sd-pue-addrow">+ Zeile hinzufügen</button>
       </div>`;
   }
@@ -347,24 +403,117 @@
       const seedRows = resolved.rows;
       const referenceAbsMs = a.cycleStarts[cycleIdx] + (resolved.referenceSec != null ? resolved.referenceSec : 0) * 1000;
 
-      const allVals = resolved.rows.flatMap(r => [r.an, r.ab]).filter(v => v != null);
-      const maxVal = allVals.length ? Math.max(...allVals, 0) : 15;
-      const minVal = allVals.length ? Math.min(...allVals, 0) : 0;
-      const localWMin = (minVal - 5) * 1000, localWMax = (maxVal + 5) * 1000;
+      // Fensterbreite fest an den Übergang selbst gekoppelt statt an eine
+      // pauschale Polsterung um die Zeilenwerte: -3s vor dem Start (früheste
+      // Signalgruppe der abwerfenden Phase auf Gelb), damit sichtbar bleibt,
+      // dass sie davor tatsächlich durchgehend grün war, +2s hinter dem Ende
+      // (späteste Signalgruppe der anwerfenden Phase im Grün). Ende bewusst
+      // nie VOR Start geklemmt (Math.max) - bei einer entarteten/falsch
+      // erkannten Übergangsdefinition (z.B. eine anwerfende Signalgruppe kam
+      // laut Rohdaten schon vor der abwerfenden Referenz ins Grün) wäre das
+      // Fenster sonst invertiert (wMax < wMin) und die Spur bliebe leer statt
+      // wenigstens das -3/+2s-Basisfenster um die Referenz zu zeigen.
+      const startSec = resolved.startSec != null ? resolved.startSec : 0;
+      const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
+      // cm je Zeile einmal vorab bestimmen (statt später im Render-Loop
+      // erneut) - wird sowohl für die Fensterbreite unten als auch für die
+      // Balken selbst gebraucht, so bleiben beide garantiert konsistent.
+      const cmByRow = resolved.rows.map(row => row.always ? null : GZ.phases.cmForRow(row, referenceAbsMs, a));
+      // Das FENSTER (localWMax) muss zusätzlich den tatsächlichen Grün-
+      // Endpunkt jeder Zeile abdecken (An + reale Rotgelb-Dauer bzw. Ab +
+      // reale Gelb-Dauer), nicht nur das logische Ende - sonst könnte eine
+      // manuelle Korrektur, die über das (unverändert am echten Grünbeginn
+      // hängende) Ende hinausgeht, eine Zeile aus dem sichtbaren Fenster
+      // schieben und ihr synthetisierter Grün-Balken (buildRowDisplaySegs)
+      // würde als Nullbreite unsichtbar - obwohl er laut Phasendefinition da
+      // sein MUSS.
+      // Beide Seiten unabhängig einrechnen (nicht exklusiv An ODER Ab) -
+      // eine Zeile kann beides gleichzeitig gesetzt haben (siehe
+      // buildRowDisplaySegs: Ab<=An = zwei getrennte Grün-Abschnitte mit
+      // echter Lücke dazwischen), dann muss das Fenster auch den späteren
+      // der beiden Endpunkte abdecken.
+      const rowMaxSec = resolved.rows.reduce((m, r, i) => {
+        const cm = cmByRow[i];
+        const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
+        const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
+        const abExtent = r.ab != null ? r.ab + gelb : -Infinity;
+        const anExtent = r.an != null ? r.an + rotgelb : -Infinity;
+        return Math.max(m, abExtent, anExtent);
+      }, -Infinity);
+      const windowEndSec = Number.isFinite(rowMaxSec) ? Math.max(endSec, rowMaxSec) : endSec;
+      const localWMin = (startSec - 3) * 1000, localWMax = (windowEndSec + 2) * 1000;
+
+      // Ende-Markierung (siehe renderLane()'s endMarks) - eine durchgezogene
+      // senkrechte Linie bei Ende, sowohl je Zeile als auch auf der
+      // Achsen-Zeile, damit der definierte Übergangs-Stopp im Diagramm
+      // sichtbar bleibt, nicht nur als Zahl im Kopf.
+      const endMarks = resolved.endSec != null ? [{ t: resolved.endSec * 1000, label: `Übergangsende (Ende), ${resolved.endSec}s` }] : [];
+
+      // Eine gemeinsame Achse für den ganzen Block (nicht je Zeile) - Ticks
+      // alle 5s (stepMs=5000), exakt über den Balken dank identischem Grid-
+      // Spaltenraster (siehe CSS .sd-pue-row/.sd-pue-axis-row).
+      const axisSvg = block.querySelector('.sd-pue-axis-track svg');
+      if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000, resolved.endSec != null ? resolved.endSec * 1000 : null);
 
       block.querySelectorAll('.sd-pue-row').forEach((rowEl, i) => {
         const row = resolved.rows[i];
         const svg = rowEl.querySelector('.sd-pue-track svg');
-        const shiftedSegs = GZ.phases.buildLocalShiftedSegs(row.sgIndex, referenceAbsMs, a)
-          .filter(s => s.end > localWMin - 5000 && s.start < localWMax + 5000);
-        renderLane(svg, {
-          wMin: localWMin, wMax: localWMax, segs: shiftedSegs,
-          baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
-          gridStepMs: 5000, laneStyle: 'minimal'
-        });
+        const tfEl = rowEl.querySelector('.sd-pue-tf');
+
+        if (row.always) {
+          // "Immer an" - bewusst KEINE Rohdaten (siehe setPueOverrideRowAlways),
+          // ein durchgehend voller Grün-Balken über das ganze Fenster.
+          renderLane(svg, {
+            wMin: localWMin, wMax: localWMax, segs: [{ cat: 'GRUEN', start: localWMin, end: localWMax }],
+            baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+            gridStepMs: 5000, laneStyle: 'minimal', endMarks
+          });
+          tfEl.textContent = 'TF –';
+        } else {
+          const cm = cmByRow[i];
+          // Balken wird DIREKT aus den (ggf. manuell überschriebenen)
+          // Zeilenwerten synthetisiert (buildRowDisplaySegs), nicht aus den
+          // Rohdaten gesucht und angepasst - eine anwerfende Zeile MUSS ab
+          // ihrem Wechsel bis mindestens Ende grün sein, eine abwerfende war
+          // bis zu ihrem Wechsel bereits durchgehend grün (Kern der
+          // Phasendefinition) - der Balken darf dort NIE einen anderen
+          // Zustand zeigen, unabhängig davon, was die Rohdaten an exakt
+          // dieser Stelle gerade hergeben.
+          const rowSegs = GZ.phases.buildRowDisplaySegs(row, cm, localWMin, localWMax);
+          renderLane(svg, {
+            wMin: localWMin, wMax: localWMax, segs: rowSegs,
+            baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
+            gridStepMs: 5000, laneStyle: 'minimal', endMarks,
+            // An/Ab-Sekunden direkt auf dem Balken (gleiches Muster wie die
+            // Hauptspuren in Umlaufprüfung) statt separat daneben. "An"
+            // markiert den Rot→Gelb-Wechsel (ROTGELB-Segment, sofern
+            // vorhanden - sonst fällt es auf den GRUEN-Beginn zurück),
+            // "Ab" bleibt das Ende des GRUEN-Segments (Beginn GELB).
+            edgeLabelsFor: d => {
+              const nearAn = row.an != null && (d.cat === 'ROTGELB' || d.cat === 'GRUEN') && Math.abs(d.start - row.an * 1000) < 500;
+              const nearAb = row.ab != null && d.cat === 'GRUEN' && Math.abs(d.end - row.ab * 1000) < 500;
+              if (!nearAn && !nearAb) return null;
+              return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
+            }
+          });
+          // TF relativ zum ÜBERGANG (nicht die volle reale Freigabedauer,
+          // die sich weit vor/nach diesem Übergang erstreckt) - siehe
+          // GZ.phases.computeRowTf().
+          const tf = GZ.phases.computeRowTf(row, cm, startSec, endSec);
+          tfEl.textContent = 'TF ' + formatPueNum(tf);
+        }
 
         rowEl.querySelector('.sd-pue-sg').addEventListener('change', e => {
           GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'sgIndex', Number(e.target.value), seedRows);
+          // Andere Signalgruppe kann die kanonische Sortierposition der
+          // Zeile ändern (siehe sortPueOverrideRows) - im Gegensatz zu
+          // An/Ab/immer-an bleibt die Reihenfolge hier nicht automatisch
+          // stimmig.
+          GZ.phases.sortPueOverrideRows(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, a);
+          notifyChanged();
+        });
+        rowEl.querySelector('.sd-pue-always-cb').addEventListener('change', e => {
+          GZ.phases.setPueOverrideRowAlways(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, e.target.checked, seedRows);
           notifyChanged();
         });
         rowEl.querySelector('.sd-pue-an').addEventListener('change', e => {
@@ -383,10 +532,18 @@
         });
       });
 
+      const endInput = block.querySelector('.sd-pue-end');
+      if (endInput) endInput.addEventListener('change', e => {
+        const v = e.target.value.trim();
+        GZ.phases.setPueOverrideEndSec(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, seedRows, v === '' ? null : Number(v));
+        notifyChanged();
+      });
+
       const addBtn = block.querySelector('.sd-pue-addrow');
       if (addBtn) addBtn.addEventListener('click', () => {
         const defaultSgIndex = a.allStats.length ? a.allStats[0].col.index : 0;
         GZ.phases.addPueOverrideRow(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, seedRows, defaultSgIndex);
+        GZ.phases.sortPueOverrideRows(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, a);
         notifyChanged();
       });
 

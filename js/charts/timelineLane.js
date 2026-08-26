@@ -87,9 +87,15 @@
   }
 
   // opts: {wMin, wMax, segs, baselineCat, baselineColor, baselineHeight,
-  //   cycleMarks, splMarks, anomalyBands, reqPoints, segTitle, onGreenClick,
-  //   onSegClick, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
-  //   edgeLabelsFor, gridStepMs, laneStyle, highlights, width, height}
+  //   cycleMarks, splMarks, anomalyBands, reqPoints, endMarks, segTitle,
+  //   onGreenClick, onSegClick, fillFor, segLabelFor, segLabelColorFor,
+  //   segOpacityFor, edgeLabelsFor, gridStepMs, laneStyle, highlights,
+  //   width, height}
+  // endMarks: [{t, label}] - durchgezogene senkrechte Markierungslinie(n) an
+  // einem fest definierten Zeitpunkt, unabhängig von den Segmenten (z.B. das
+  // Ende eines Phasenübergangs im PÜ-Werkzeug, siehe stammdatenLsa.js/
+  // umlaufpruefung.js) - visuell bewusst von cycleMarks/splMarks (gestrichelt)
+  // unterschieden, da es kein Umlaufbeginn/Signalprogrammwechsel ist.
   // onSegClick(d, event): wie onGreenClick, aber für JEDES Segment
   // (unabhängig von cat) und ohne die "angepinnt"-Randmarkierung - z.B. für
   // Umlaufprüfung, um einen Klick auf einen Phasenübergang zum Öffnen des
@@ -149,7 +155,7 @@
 
     const {
       wMin, wMax, segs = [], baselineCat = 'ROT', baselineColor = 'var(--sig-red)',
-      baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [],
+      baselineHeight = 3, cycleMarks = [], splMarks = [], anomalyBands = [], reqPoints = [], endMarks = [],
       segTitle = defaultTitle, onGreenClick, onSegClick, segCursor, fillFor, segLabelFor, segLabelColorFor, segOpacityFor,
       edgeLabelsFor, gridStepMs, laneStyle = 'default', highlights = []
     } = opts;
@@ -306,6 +312,16 @@
       .style('stroke', 'var(--req-marker)').style('stroke-dasharray', '3,2').style('stroke-width', 1)
       .append('title').text(d => `Signalprogrammwechsel ${fmtTimeShort(d.t)}: SPL ${esc(d.from)} → ${esc(d.to)}`);
 
+    // endMarks: durchgezogene (nicht gestrichelte, zur Unterscheidung von
+    // cycle-/spl-marks) Markierungslinie(n) für einen fest definierten
+    // Zeitpunkt (z.B. das Ende eines Phasenübergangs im PÜ-Werkzeug) - siehe
+    // Kopfkommentar zu opts oben.
+    svg.append('g').attr('class', 'end-marks').selectAll('line')
+      .data(endMarks.filter(m => m.t >= wMin && m.t <= wMax)).join('line')
+      .attr('x1', d => x(d.t)).attr('x2', d => x(d.t)).attr('y1', 0).attr('y2', height)
+      .style('stroke', 'var(--accent)').style('stroke-width', 1.5)
+      .append('title').text(d => d.label || fmtTimeShort(d.t));
+
     svg.append('g').attr('class', 'anomaly-bands').selectAll('rect')
       .data(anomalyBands.filter(b => b.end > wMin && b.start < wMax)).join('rect')
       .attr('x', d => x(Math.max(d.start, wMin))).attr('y', 0)
@@ -351,14 +367,37 @@
   }
 
   // Zeitachse als eigene kleine D3-Achse (x-Skala identisch zu den Spuren).
-  function renderTimeAxis(svgEl, wMin, wMax) {
+  // stepMs (optional): feste Tick-Schrittweite (z.B. 5000 = alle 5s), Ticks
+  // als reine Sekundenzahl relativ zu wMin/wMax=0 statt als Uhrzeit - für
+  // kurze, lokale Zeitfenster (z.B. PÜ-Werkzeug), in denen fmtTimeShort()
+  // (Uhrzeitformat) keinen Sinn ergäbe. Ohne stepMs unverändert die
+  // bisherige, auf den sichtbaren Bereich skalierte 6-Teilung mit Uhrzeiten
+  // (Signalzeitendiagramm u.a.). markMs (optional, nur mit stepMs sinnvoll):
+  // dieselbe Markierungslinie wie renderLane()'s endMarks, hier auf der
+  // Achsen-Zeile selbst, damit die Ende-Markierung im PÜ-Werkzeug auch ohne
+  // eine sichtbare Zeile (z.B. bei "Keine Daten") erkennbar bleibt.
+  function renderTimeAxis(svgEl, wMin, wMax, stepMs, markMs) {
     const width = svgEl.clientWidth, height = svgEl.clientHeight;
     if (!width || !height) return false;
     const x = d3.scaleLinear().domain([wMin, wMax]).range([0, width]);
     const svg = d3.select(svgEl).attr('viewBox', `0 0 ${width} ${height}`).attr('preserveAspectRatio', 'none');
     svg.selectAll('*').remove();
-    const n = 6;
     const g = svg.append('g').attr('class', 'd3-axis-x');
+    if (stepMs) {
+      const first = Math.ceil(wMin / stepMs) * stepMs;
+      for (let t = first; t <= wMax; t += stepMs) {
+        const px = x(t);
+        const anchor = px < 12 ? 'start' : (px > width - 12 ? 'end' : 'middle');
+        g.append('text').attr('x', px).attr('y', height - 2).attr('text-anchor', anchor).text(String(Math.round(t / 1000)));
+      }
+      if (markMs != null && markMs >= wMin && markMs <= wMax) {
+        svg.append('line').attr('class', 'end-marks')
+          .attr('x1', x(markMs)).attr('x2', x(markMs)).attr('y1', 0).attr('y2', height)
+          .style('stroke', 'var(--accent)').style('stroke-width', 1.5);
+      }
+      return true;
+    }
+    const n = 6;
     for (let i = 0; i <= n; i++) {
       const t = wMin + (wMax - wMin) * i / n;
       const px = x(t);

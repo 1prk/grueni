@@ -202,7 +202,13 @@
       if (!anab) continue;
       const segIdx = segIndexOfGreen[gIdx];
       const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
-      out[i] = { an: anab.an, ab: anab.ab, tf: anab.tf, rotgelb: extra.rotgelb, gelb: extra.gelb };
+      // segIdx/segStart/segEnd (roh, unverundet) zusätzlich zu den gerundeten
+      // an/ab/tf-Kennzahlen - Aufrufer, die die tatsächliche Position dieses
+      // GRUEN-Segments im vollständigen segs-Array brauchen (z.B. GZ.phases'
+      // PÜ-Werkzeug, um genau dieses Segment plus seine Rotgelb-/Gelb-
+      // Nachbarn darzustellen, statt der gesamten Rohdaten-Zeitreihe der
+      // Signalgruppe), müssen sie sonst selbst neu suchen.
+      out[i] = { an: anab.an, ab: anab.ab, tf: anab.tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end };
     }
     return out;
   }
