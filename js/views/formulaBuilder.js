@@ -51,7 +51,7 @@
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
-  const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler } = GZ.segments;
+  const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler, makeSegmentDurationSampler } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
   const { compile, compileFunctionDef } = GZ.exprEngine;
   const { wzIstBelegt } = GZ.wartezeitLogic;
@@ -955,7 +955,10 @@
         // WertBei(K2, Ab(K1)) - das rohe Signalbild von K2 im Moment des
         // Abwurfs von K1, statt dessen kategorisierten Zustand() zum jeweils
         // AKTUELLEN Zeitpunkt.
-        rawSample: makeRawValueSampler(a.times, a.seriesByCol.get(col.index))
+        rawSample: makeRawValueSampler(a.times, a.seriesByCol.get(col.index)),
+        // durationAt: für die DauerBei()-Primitive - wie Dauer(objekt), nur
+        // für einen beliebigen statt den jeweils AKTUELLEN Zeitpunkt.
+        durationAt: makeSegmentDurationSampler(segs)
       };
     }
     const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);
@@ -968,7 +971,10 @@
       // als cycleMetrics unverändert über den gesamten Berechnen()-Durchlauf
       // (kein Fortschreiten pro Zeile nötig, da sample() selbst per
       // Binärsuche beliebige Zeitpunkte auflöst).
-      rawSample: makeRawValueSampler(a.times, rawVals)
+      rawSample: makeRawValueSampler(a.times, rawVals),
+      // durationAt: für die DauerBei()-Primitive, z.B. "wie lange war dieser
+      // Detektor im Moment des Abwurfs von K1 schon belegt".
+      durationAt: makeSegmentDurationSampler(segs)
     };
   }
 

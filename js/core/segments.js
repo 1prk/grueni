@@ -94,6 +94,36 @@
     };
   }
 
+  // Liefert eine durationAt(tMs)-Funktion: wie lange (in Sekunden) war der
+  // Zustand, der zum Zeitpunkt tMs gilt, zu diesem Zeitpunkt bereits
+  // UNUNTERBROCHEN aktiv? Grundlage der exprEngine-Primitive DauerBei(objekt,
+  // zeitpunkt) - bewusst GENERISCH über beliebige Zustandssegmente (segs, wie
+  // von buildSegments() erzeugt): für eine Signalgruppe sind das GRUEN/ROT/...
+  // -Segmente, für einen Detektor/APW-/ÖPNV-Wert BELEGT/FREI-Segmente
+  // (categorizeDetRaw) - dieser Funktion ist es gleichgültig, WELCHE Kategorie
+  // gerade gilt, sie beantwortet nur "seit wann gilt der jeweils AKTUELLE
+  // Zustand". Entspricht damit dem zeilenweisen Dauer(objekt) aus
+  // exprEngine.js, nur mit einem beliebigen (nicht nur dem "aktuellen")
+  // Zeitpunkt - Binärsuche statt fortlaufendem Sweep, da Abfragen (anders als
+  // ein Sweep über die Rohdaten) nicht notwendig aufsteigend erfolgen.
+  // Liefert NaN, wenn tMs vor dem ersten Segment liegt oder in eine
+  // Aufzeichnungslücke fällt (siehe buildSegments()' LUECKE-Segmente - das
+  // IST ein eigenes Segment mit .start, "seit wann Lücke" ist daher wohl-
+  // definiert und wird wie jeder andere Zustand behandelt).
+  function makeSegmentDurationSampler(segs) {
+    return function durationAt(tMs) {
+      let lo = 0, hi = segs.length - 1, ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (segs[mid].start <= tMs) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (ans === -1) return NaN;
+      const seg = segs[ans];
+      if (tMs >= seg.end) return NaN; // hinter dem letzten Segment - kein aktueller Zustand bekannt
+      return (tMs - seg.start) / 1000;
+    };
+  }
+
   // Wie computeCycleStats, aber getrennt je aktivem SPL zum Zeitpunkt des
   // jeweiligen Grünbeginns. Ø Umlauf wird nur aus Zyklen gebildet, die
   // vollständig innerhalb desselben SPL liegen.
@@ -281,6 +311,83 @@
       }
       ptr = j;
     }
+    return out;
+  }
+
+  // Wie computeCycleSgMetrics(), aber An UND Ab UNABHÄNGIG voneinander
+  // erfasst statt als EIN gemeinsames Vorkommen: An gehört zu dem Umlauf,
+  // in dem das Segment STARTET, Ab zu dem Umlauf, in dem es ENDET - bei
+  // einem Grün, das über eine Umlaufgrenze hinausreicht, sind das ZWEI
+  // VERSCHIEDENE Umläufe. Grundlage von GZ.umlaufContext.buildAll()
+  // (Umlaufstatistiken) - anders als computeCycleSgMetrics (weiterhin genutzt
+  // von js/core/phases.js und dem zeilenweisen Formel-Builder, die ein
+  // einzelnes, in sich geschlossenes Vorkommen mit garantiert zusammen-
+  // gehörigem An+Ab wollen).
+  //
+  // Motivation: An(sg)/Ab(sg) sollen in Umlaufstatistiken je Umlauf ein rein
+  // LOKALER Wert bleiben (immer < TU dieses Umlaufs, nie über eine Modulo-
+  // Faltung verdeckt UND nie an einen fremden, nur zufällig "zugehörigen"
+  // Umlauf gekoppelt) - "wir reden hier immer über relative Zeit [innerhalb
+  // DIESES Umlaufs]" (siehe Konversation). Ein Grün, das in Umlauf A beginnt
+  // und erst in Umlauf B endet, erzeugt daher in Umlauf A ein An OHNE
+  // zugehöriges Ab (TF/Ab dort NaN - "wissen wir hier noch nicht") und in
+  // Umlauf B ein Ab OHNE zugehöriges An (An dort NaN - "hat woanders
+  // begonnen"), STATT beides künstlich in EINEM Umlauf zusammenzuzwingen.
+  //
+  // Rückgabe: Array (je Umlauf) von { an: [...], ab: [...] } - an[k] =
+  // {value, rotgelb, segIdx, segStart}, ab[k] = {value, tf, gelb, segIdx,
+  // segEnd}. rotgelb (Dauer unmittelbar VOR dieser Freigabe) gehört inhaltlich
+  // zu An, gelb (unmittelbar NACH dieser Freigabe) zu Ab; tf (Gesamtdauer des
+  // Grün-Segments) ist erst beim Abwurf "fertig" bekannt, daher bei Ab. An[k]
+  // und ab[k] MÜSSEN NICHT vom selben Grün-Segment stammen, sobald ein
+  // Umlauf für dieselbe Signalgruppe unterschiedlich viele An- wie Ab-
+  // Ereignisse hat (siehe oben) - GZ.umlaufContext.buildAll() paart sie rein
+  // über den Index k (n-tes An mit n-tem Ab, unabhängig von der Frage, ob sie
+  // zum selben Grün-Segment gehören).
+  function computeCycleSgEvents(segs, greens, cycleStarts, tMax) {
+    const n = cycleStarts ? cycleStarts.length : 0;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = { an: [], ab: [] };
+    if (n === 0) return out;
+    const segIndexOfGreen = mapGreensToSegIndex(segs);
+
+    // An-Seite: Sweep über greens nach .start (wie computeCycleSgMetrics).
+    let ptrAn = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptrAn < greens.length && greens[ptrAn].start < start) ptrAn++;
+      let j = ptrAn;
+      while (j < greens.length && greens[j].start < end) {
+        const seg = greens[j];
+        const segIdx = segIndexOfGreen[j];
+        const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+        out[i].an.push({ value: Math.round((seg.start - start) / 1000), rotgelb: extra.rotgelb, segIdx, segStart: seg.start });
+        j++;
+      }
+      ptrAn = j;
+    }
+
+    // Ab-Seite: EIGENER Sweep über dieselben greens, aber nach .end - greens
+    // ist bereits nach .start UND .end aufsteigend (disjunkte Segmente einer
+    // Zeitreihe), ein zweiter monoton fortschreitender Zeiger reicht daher
+    // aus (kein erneutes Sortieren nötig).
+    let ptrAb = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptrAb < greens.length && greens[ptrAb].end < start) ptrAb++;
+      let j = ptrAb;
+      while (j < greens.length && greens[j].end < end) {
+        const seg = greens[j];
+        const segIdx = segIndexOfGreen[j];
+        const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+        out[i].ab.push({ value: Math.round((seg.end - start) / 1000), tf: Math.round((seg.end - seg.start) / 1000), gelb: extra.gelb, segIdx, segEnd: seg.end });
+        j++;
+      }
+      ptrAb = j;
+    }
+
     return out;
   }
 
@@ -483,9 +590,9 @@
 
   GZ.segments = {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
-    findSplAt, makeRawValueSampler, computeSplTransitions, computeGlobalTU,
+    findSplAt, makeRawValueSampler, makeSegmentDurationSampler, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
-    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleDetMetrics,
+    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleSgEvents, computeCycleDetMetrics,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
     computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep, makePointSegmentSweep
   };

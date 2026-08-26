@@ -305,6 +305,38 @@
       }
     },
 
+    // DauerBei: wie lange (in Sekunden) war eine Signalgruppe ODER ein
+    // Detektor/APW-/ÖPNV-Wert zu einem beliebigen Zeitpunkt bereits
+    // UNUNTERBROCHEN im selben (jeweils aktuellen) Zustand - generische,
+    // um einen expliziten Zeitpunkt erweiterte Fassung von Dauer() (das nur
+    // den JEWEILS AKTUELLEN Zeitpunkt kennt und deshalb in Umlaufstatistiken
+    // nicht nutzbar ist, siehe perRowOnly unten). Beantwortet z.B. "wie lange
+    // war Det1 im Moment des Abwurfs von K1 schon ununterbrochen belegt" -
+    // WertBei(det, Ab(sg)) liefert nur den Rohwert an dieser Stelle, DauerBei
+    // dagegen "seit wann gilt dieser Zustand" - für Signalgruppen ebenso
+    // (z.B. "wie lange war K2 zum Zeitpunkt X schon grün"). Bewusst
+    // GENERISCH: fragt nicht nach einer bestimmten Kategorie (GRUEN/BELEGT/
+    // ...), sondern nach der Dauer des Zustands, der zu diesem Zeitpunkt
+    // eben gerade gilt - siehe handle.durationAt (GZ.segments.
+    // makeSegmentDurationSampler) und scope.__cycleStart (wie bei WertBei).
+    DauerBei: {
+      arity: 2,
+      check(args, pos) {
+        if (!isObjCompatible(args[0].type)) throw new ExprError('"DauerBei" erwartet als 1. Argument eine Signalgruppe oder einen Detektor/Wert', pos);
+        if (!isNumCompatible(args[1].type)) throw new ExprError('"DauerBei" erwartet als 2. Argument einen Zeitpunkt in Sekunden ab Umlaufbeginn (z. B. Ab(sg))', pos);
+        return 'NUM';
+      },
+      run(args) {
+        const [objNode, tNode] = args;
+        return scope => {
+          const handle = objNode.run(scope);
+          const t = tNode.run(scope);
+          if (!handle || !handle.durationAt || !Number.isFinite(t) || !Number.isFinite(scope.__cycleStart)) return NaN;
+          return handle.durationAt(scope.__cycleStart + t * 1000);
+        };
+      }
+    },
+
     // Versatz/Ueberschneidung: die eigentliche Motivation für An/Ab/TU_MED
     // oben - "Zeit von Abwurf sg1 bis Anwurf sg2" ist der häufigste Fall,
     // verdient also eine eigene, selbsterklärende Primitive statt jedes Mal
@@ -397,6 +429,7 @@
     { name: 'Ausgeloest', params: ['det'], desc: 'wurde der Detektor/Wert in diesem Umlauf mindestens einmal ausgelöst', objArgType: 'DET' },
     { name: 'AnzahlAusloesungen', params: ['det'], desc: 'Anzahl steigender Flanken des Detektors/Werts in diesem Umlauf', objArgType: 'DET' },
     { name: 'WertBei', params: ['objekt', 'zeitpunktSek'], desc: 'Rohwert (Signalbild einer Signalgruppe ODER Detektor-/APW-Countdown) zum angegebenen Zeitpunkt [s ab Umlaufbeginn] - z. B. WertBei(APW_01, Ab(K1))', objArgType: 'OBJ' },
+    { name: 'DauerBei', params: ['objekt', 'zeitpunktSek'], desc: 'wie lange (in Sekunden) war Signalgruppe/Detektor/Wert zum angegebenen Zeitpunkt schon ununterbrochen im selben Zustand - z. B. DauerBei(Det1, Ab(K1)): wie lange Det1 im Moment des Abwurfs von K1 schon belegt war', objArgType: 'OBJ' },
     { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division, stets ≥ 0)' },
     { name: 'Versatz', params: ['sgAbwurf', 'sgAnwurf'], desc: 'Versatzzeit von Abwurf sgAbwurf bis Anwurf sgAnwurf [s] - kurz für MOD(An(sgAnwurf)-Ab(sgAbwurf), TU_MED)', objArgType: 'SG' },
     { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)', objArgType: 'SG' }
