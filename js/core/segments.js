@@ -232,8 +232,25 @@
       const gIdx = greenSweep(start, end);
       if (gIdx === -1) continue;
       const seg = greens[gIdx];
-      const anab = computeSegmentAnAbTf(seg, cycleStarts, TU_MED);
-      if (!anab) continue;
+      // An UND Ab bewusst relativ zu DEMSELBEN Anker (start = Beginn DIESES
+      // Umlaufs) berechnet, NICHT über computeSegmentAnAbTf(): dessen ab ist
+      // absichtlich relativ zu dem Umlauf verankert, in dem das Segment
+      // ENDET (siehe dortigen Kopfkommentar sowie umlaufpruefung.js'
+      // carrySegs-Mechanismus, der genau das für die eigene Zeilenanzeige
+      // braucht, wenn ein Grün über eine Umlaufgrenze hinausreicht). Für
+      // EINEN Umlaufstatistiken-/exprEngine-Datensatz (An(sg)/Ab(sg)/TF(sg))
+      // wollen wir dagegen an UND ab konsistent relativ zu DIESEM einen
+      // Umlauf, auch wenn das Grün erst in einem SPÄTEREN Umlauf endet - ein
+      // Wechsel des Bezugs-Umlaufs würde sonst (per Modulo-Faltung in
+      // computeSegmentAnAbTf) einen kleinen, zufällig plausibel wirkenden,
+      // aber falschen ab-Wert liefern, der TF widerspricht (ab-an ≠ tf) und
+      // z.B. WertBei(det, Ab(sg)) an der falschen Stelle lesen lässt. seg.end
+      // kann daher hier > TU_MED liegen (ehrliches Signal für "dauerhaft
+      // grün über den Umlauf hinaus", statt es zu verstecken) - Versatz/
+      // Ueberschneidung falten das beim eigenen Vergleich ohnehin per MOD().
+      const an = Math.round((seg.start - start) / 1000);
+      const ab = Math.round((seg.end - start) / 1000);
+      const tf = Math.round((seg.end - seg.start) / 1000);
       const segIdx = segIndexOfGreen[gIdx];
       const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
       // segIdx/segStart/segEnd (roh, unverundet) zusätzlich zu den gerundeten
@@ -242,7 +259,7 @@
       // PÜ-Werkzeug, um genau dieses Segment plus seine Rotgelb-/Gelb-
       // Nachbarn darzustellen, statt der gesamten Rohdaten-Zeitreihe der
       // Signalgruppe), müssen sie sonst selbst neu suchen.
-      out[i] = { an: anab.an, ab: anab.ab, tf: anab.tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end };
+      out[i] = { an, ab, tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end };
     }
     return out;
   }
