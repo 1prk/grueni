@@ -525,6 +525,18 @@
       if (isDigit(ch) || (ch === '.' && isDigit(text[i + 1]))) {
         let j = i;
         while (j < n && isDigit(text[j])) j++;
+        // Bezeichner, der mit Ziffern beginnt (z.B. eine OCIT-Signalgruppe/
+        // Knotennummer wie "809_Koord"): folgt direkt ein Buchstabe/
+        // Unterstrich, ist das kein Zahlenliteral - den kompletten
+        // Bezeichner konsumieren statt nur die Ziffern (sonst Absturz beim
+        // Parsen: "809" als NUMBER, "_Koord" als eigenes, unerwartetes IDENT).
+        if (j < n && /[A-Za-z_]/.test(text[j])) {
+          let k = j;
+          while (k < n && isIdentPart(text[k])) k++;
+          tokens.push({ type: 'IDENT', value: text.slice(i, k), pos: start, end: k });
+          i = k;
+          continue;
+        }
         if (text[j] === '.') { j++; while (j < n && isDigit(text[j])) j++; }
         tokens.push({ type: 'NUMBER', value: Number(text.slice(i, j)), pos: start, end: j });
         i = j;
