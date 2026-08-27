@@ -320,6 +320,28 @@
       }
     },
 
+    // ISTLEER: WAHR, wenn ein Wert LEER ist (siehe dort) - unterscheidet
+    // "es gab hier gar kein Ereignis" von "es gab ein Ereignis, das eine
+    // Bedingung nicht erfüllt hat", wenn beide sonst als dasselbe NaN
+    // ununterscheidbar wären. Typischerweise verschachtelt mit WENN, z.B.
+    // WENN(ISTLEER(An(Det1)), 0, WENN(TF(Det1) >= 5, An(Det1), LEER)):
+    // "0, wenn Det1 in diesem Umlauf gar nicht ausgelöst hat (An(Det1) hat
+    // dann selbst keinen Wert); sonst der Anwurf, aber nur bei mind. 5s
+    // Belegung, sonst LEER" - das äußere WENN hält Umläufe OHNE Ereignis
+    // sichtbar (als 0), während das innere WENN Umläufe MIT Ereignis, das
+    // die Bedingung nicht erfüllt, ausblendet, statt beide Fälle gleich als
+    // 0 bzw. LEER zu behandeln. Akzeptiert JEDEN Typ (auch Text/Zustand/
+    // WAHR-FALSCH) - LEER liefert technisch immer den rohen JS-Wert NaN,
+    // unabhängig vom "Typ", den es sich per typesMatch() angepasst hat.
+    ISTLEER: {
+      arity: 1,
+      check() { return 'BOOL'; },
+      run(args) {
+        const [valNode] = args;
+        return scope => { const v = valNode.run(scope); return typeof v === 'number' && Number.isNaN(v); };
+      }
+    },
+
     // WertBei: der Rohwert einer Signalgruppe ODER eines Detektors/APW-/
     // ÖPNV-Werts zu einem beliebigen Zeitpunkt innerhalb des aktuellen
     // Umlaufs [s ab Umlaufbeginn] - typischerweise selbst wieder eine der
@@ -492,6 +514,7 @@
     { name: 'DauerBei', params: ['objekt', 'zeitpunktSek'], desc: 'Wie lange (in Sekunden) war objekt zum angegebenen Zeitpunkt [s ab Umlaufbeginn] bereits ununterbrochen im dann jeweils AKTUELLEN Zustand - die um einen expliziten Zeitpunkt erweiterte Fassung von Dauer(), dadurch auch in Umlaufstatistiken nutzbar. Beispiel: DauerBei(Det1, Ab(K1)) = wie lange Det1 im Moment des Abwurfs von K1 schon in seinem dortigen Zustand war (meist: schon belegt). Achtung: liefert die Dauer des Zustands, der GENAU zu diesem Zeitpunkt gilt - ist objekt zu diesem Zeitpunkt bereits wieder frei, liefert es die Dauer der Freiphase, nicht der vorherigen Belegung.', objArgType: 'OBJ' },
     { name: 'MOD', params: ['zahl', 'divisor'], desc: 'Modulo (Rest der Division), stets ≥ 0 - anders als JS-"%" nie negativ. Nur für Werte sinnvoll, die als zyklisch/umlaufend verstanden werden sollen; für eine reine Differenz zwischen zwei An/Ab-Werten DERSELBEN Zeile lieber ohne MOD rechnen (siehe Versatz-Hinweis unten).', objArgType: null },
     { name: 'WENN', params: ['bedingung', 'dann', 'sonst'], desc: 'Bedingter Wert (wie Excel-WENN bzw. "? :"): liefert "dann", wenn "bedingung" wahr ist, sonst "sonst" - beide müssen denselben Ergebnistyp haben (Zahl, Text, Zustand, WAHR/FALSCH, ...). Beispiel: WENN(TF(Det1) >= 5, An(Det1), LEER) - der Anwurf von Det1, aber nur bei mindestens 5s Belegung, sonst LEER (siehe dort - wird von der Aggregatstatistik automatisch ausgeschlossen).', objArgType: null },
+    { name: 'ISTLEER', params: ['wert'], desc: 'Wahr, wenn "wert" LEER ist. Unterscheidet "hier gab es gar kein Ereignis" von "es gab ein Ereignis, das eine Bedingung nicht erfüllt hat" - beide wären sonst gleichermaßen NaN. Beispiel: WENN(ISTLEER(An(Det1)), 0, WENN(TF(Det1) >= 5, An(Det1), LEER)) - 0 für Umläufe ohne jedes Ereignis (bleibt sichtbar), LEER (ausgeblendet) nur für Umläufe MIT Ereignis, das die Bedingung nicht erfüllt.', objArgType: null },
     { name: 'Versatz', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Zeit vom Ende des aktiven Zustands von objektAbwurf bis zum NÄCHSTEN Beginn des aktiven Zustands von objektAnwurf [s], vorwärts/zyklisch gerechnet (kurz für MOD(An(objektAnwurf)-Ab(objektAbwurf), TU_MED)). Beginnt objektAnwurf in DIESER Zeile schon VOR objektAbwurf endet (siehe Ueberschneidung), liefert das einen Wert nahe TU_MED statt einer kleinen negativen Zahl - für eine reine, ggf. negative Differenz stattdessen einfach "Ab(objektAnwurf) - Ab(objektAbwurf)" (ohne MOD) verwenden.', objArgType: 'OBJ' },
     { name: 'Ueberschneidung', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Wahr, wenn der aktive Zustand von objektAnwurf in dieser Zeile schon beginnt, BEVOR der von objektAbwurf endet (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen statt einer echten Überlappung).', objArgType: 'OBJ' }
   ];
