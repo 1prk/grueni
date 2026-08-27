@@ -60,6 +60,70 @@
     return ans >= 0 ? (splValues[ans] || '') : '';
   }
 
+  // Liefert eine sample(tMs)-Funktion für den Rohwert EINER Spalte (DET/BLK/
+  // APW/ÖPNV) zu einem beliebigen Zeitpunkt - Grundlage der exprEngine-
+  // Primitive WertBei(det, zeitpunkt) (z.B. "welchen APW-Countdown zeigte
+  // APW_01 im Moment des Abwurfs von K1"). Anders als splValues sind
+  // DET/APW/ÖPNV-Rohreihen NICHT vorab aufgefüllt (siehe GZ.parser.
+  // parseOcitText: nur TC/SP werden beim Einlesen "forward-filled") - eine
+  // leere Zelle bedeutet "unverändert seit dem letzten Wert", nicht "kein
+  // Wert" (buildSegments() überspringt leere Zellen aus demselben Grund).
+  // Daher hier einmalig (nicht pro Abfrage) vorwärts aufgefüllt, danach wie
+  // findSplAt() eine Binärsuche nach dem letzten Zeitindex <= t. Eine
+  // WIRKLICH leere Zelle (kein Wert je gesehen) sowie ein nicht-numerischer
+  // Rohwert (z.B. "INV") liefern NaN - konsistent mit dem NUM/NaN-Vertrag
+  // aus exprEngine.js.
+  function makeRawValueSampler(times, rawVals) {
+    const filled = new Array(rawVals.length);
+    let last = '';
+    for (let i = 0; i < rawVals.length; i++) {
+      if (rawVals[i] !== '') last = rawVals[i];
+      filled[i] = last;
+    }
+    return function sample(tMs) {
+      let lo = 0, hi = times.length - 1, ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (times[mid] <= tMs) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (ans === -1) return NaN;
+      const raw = filled[ans];
+      if (raw === '') return NaN;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : NaN;
+    };
+  }
+
+  // Liefert eine durationAt(tMs)-Funktion: wie lange (in Sekunden) war der
+  // Zustand, der zum Zeitpunkt tMs gilt, zu diesem Zeitpunkt bereits
+  // UNUNTERBROCHEN aktiv? Grundlage der exprEngine-Primitive DauerBei(objekt,
+  // zeitpunkt) - bewusst GENERISCH über beliebige Zustandssegmente (segs, wie
+  // von buildSegments() erzeugt): für eine Signalgruppe sind das GRUEN/ROT/...
+  // -Segmente, für einen Detektor/APW-/ÖPNV-Wert BELEGT/FREI-Segmente
+  // (categorizeDetRaw) - dieser Funktion ist es gleichgültig, WELCHE Kategorie
+  // gerade gilt, sie beantwortet nur "seit wann gilt der jeweils AKTUELLE
+  // Zustand". Entspricht damit dem zeilenweisen Dauer(objekt) aus
+  // exprEngine.js, nur mit einem beliebigen (nicht nur dem "aktuellen")
+  // Zeitpunkt - Binärsuche statt fortlaufendem Sweep, da Abfragen (anders als
+  // ein Sweep über die Rohdaten) nicht notwendig aufsteigend erfolgen.
+  // Liefert NaN, wenn tMs vor dem ersten Segment liegt oder in eine
+  // Aufzeichnungslücke fällt (siehe buildSegments()' LUECKE-Segmente - das
+  // IST ein eigenes Segment mit .start, "seit wann Lücke" ist daher wohl-
+  // definiert und wird wie jeder andere Zustand behandelt).
+  function makeSegmentDurationSampler(segs) {
+    return function durationAt(tMs) {
+      let lo = 0, hi = segs.length - 1, ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (segs[mid].start <= tMs) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (ans === -1) return NaN;
+      const seg = segs[ans];
+      if (tMs >= seg.end) return NaN; // hinter dem letzten Segment - kein aktueller Zustand bekannt
+      return (tMs - seg.start) / 1000;
+    };
+  }
+
   // Wie computeCycleStats, aber getrennt je aktivem SPL zum Zeitpunkt des
   // jeweiligen Grünbeginns. Ø Umlauf wird nur aus Zyklen gebildet, die
   // vollständig innerhalb desselben SPL liegen.
@@ -181,35 +245,149 @@
   }
 
   // An/Ab/TF/Rotgelb/Gelb EINER Signalgruppe für JEDEN Umlauf (Index =
-  // Umlaufindex in cycleStarts), null wenn kein Grün in diesem Umlauf -
-  // Grundlage der umlaufweisen exprEngine-Primitiven An/Ab/TF/RG/GE (siehe
-  // dortigen Kopfkommentar zu handle.cycleMetrics). greens = stats.greens
-  // der Signalgruppe (nur GRUEN-Segmente), segs = deren vollständige
-  // Segmentliste (für die Rotgelb-/Gelb-Nachbarschaft).
+  // Umlaufindex in cycleStarts) - Grundlage der umlaufweisen exprEngine-
+  // Primitiven An/Ab/TF/RG/GE (siehe dortigen Kopfkommentar zu
+  // handle.cycleMetrics). greens = stats.greens der Signalgruppe (nur
+  // GRUEN-Segmente), segs = deren vollständige Segmentliste (für die
+  // Rotgelb-/Gelb-Nachbarschaft).
+  //
+  // Rückgabe: Array (je Umlauf) von Arrays EINES ODER MEHRERER Vorkommen
+  // (leeres Array = kein Grün in diesem Umlauf) - ein Umlauf kann mehr als
+  // EIN Anwurf/Abwurf-Paar derselben Signalgruppe enthalten (z.B. Fußgänger-
+  // Nachforderung/Re-Service), erkannt als jedes GRUEN-Segment, dessen
+  // START in dieses Umlauf-Fenster fällt (nicht nur das erste - das war der
+  // eigentliche Fehler: ein zweites/drittes Vorkommen wurde bisher
+  // stillschweigend verworfen, siehe GZ.umlaufContext.buildAll(), das daraus
+  // je Umlauf so viele AUSGEWERTETE ZEILEN macht wie das "ereignisreichste"
+  // SG-Vorkommen dort hat). Vorkommen[0] ist weiterhin das chronologisch
+  // erste je Umlauf - Aufrufer, die (wie bisher) nur EIN Vorkommen je Umlauf
+  // kennen (js/core/phases.js, js/views/formulaBuilder.js' zeilenweiser
+  // Formel-Builder), lesen bewusst nur Vorkommen[0] und bleiben damit exakt
+  // beim bisherigen Verhalten - die Mehrfach-Erkennung gilt vorerst nur für
+  // die umlaufweise Auswertung in Umlaufstatistiken.
+  //
+  // an/ab je Vorkommen bewusst relativ zum Beginn DIESES Umlaufs berechnet
+  // (nicht über computeSegmentAnAbTf(), dessen ab absichtlich relativ zu dem
+  // Umlauf verankert ist, in dem das Segment ENDET - richtig für
+  // umlaufpruefung.js' carrySegs-Zeilenanzeige bei über die Umlaufgrenze
+  // hinausreichendem Grün, aber falsch für EINEN in sich konsistenten
+  // Umlaufstatistiken-Datensatz, siehe Git-Historie). ab kann daher > TU_MED
+  // sein (ehrliches Signal für "dauerhaft grün über den Umlauf hinaus" statt
+  // einer verdeckenden Modulo-Faltung) - Versatz/Ueberschneidung falten das
+  // beim eigenen Vergleich ohnehin per MOD().
   function computeCycleSgMetrics(segs, greens, cycleStarts, tMax, TU_MED) {
     const n = cycleStarts ? cycleStarts.length : 0;
-    const out = new Array(n).fill(null);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = [];
     if (!TU_MED || n === 0) return out;
     const segIndexOfGreen = mapGreensToSegIndex(segs);
-    const greenSweep = makeIndexSweep(greens);
+    // Fortlaufender Zeiger statt makeIndexSweep(): der bräuchte "höchstens
+    // EIN Treffer je Fenster", hier soll die innere Schleife dagegen ALLE
+    // Vorkommen mit .start im aktuellen Fenster aufsammeln, bevor sie für
+    // das nächste (spätere) Umlauf-Fenster weiterrückt - bleibt trotzdem
+    // amortisiert O(Umläufe + Vorkommen) über die gesamte Aufzeichnung.
+    let ptr = 0;
     for (let i = 0; i < n; i++) {
       const start = cycleStarts[i];
       const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
-      const gIdx = greenSweep(start, end);
-      if (gIdx === -1) continue;
-      const seg = greens[gIdx];
-      const anab = computeSegmentAnAbTf(seg, cycleStarts, TU_MED);
-      if (!anab) continue;
-      const segIdx = segIndexOfGreen[gIdx];
-      const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
-      // segIdx/segStart/segEnd (roh, unverundet) zusätzlich zu den gerundeten
-      // an/ab/tf-Kennzahlen - Aufrufer, die die tatsächliche Position dieses
-      // GRUEN-Segments im vollständigen segs-Array brauchen (z.B. GZ.phases'
-      // PÜ-Werkzeug, um genau dieses Segment plus seine Rotgelb-/Gelb-
-      // Nachbarn darzustellen, statt der gesamten Rohdaten-Zeitreihe der
-      // Signalgruppe), müssen sie sonst selbst neu suchen.
-      out[i] = { an: anab.an, ab: anab.ab, tf: anab.tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end };
+      while (ptr < greens.length && greens[ptr].start < start) ptr++;
+      let j = ptr;
+      while (j < greens.length && greens[j].start < end) {
+        const seg = greens[j];
+        const an = Math.round((seg.start - start) / 1000);
+        const ab = Math.round((seg.end - start) / 1000);
+        const tf = Math.round((seg.end - seg.start) / 1000);
+        const segIdx = segIndexOfGreen[j];
+        const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+        // segIdx/segStart/segEnd (roh, unverundet) zusätzlich zu den
+        // gerundeten an/ab/tf-Kennzahlen - Aufrufer, die die tatsächliche
+        // Position dieses GRUEN-Segments im vollständigen segs-Array
+        // brauchen (z.B. GZ.phases' PÜ-Werkzeug, um genau dieses Segment
+        // plus seine Rotgelb-/Gelb-Nachbarn darzustellen, statt der
+        // gesamten Rohdaten-Zeitreihe der Signalgruppe), müssen sie sonst
+        // selbst neu suchen.
+        out[i].push({ an, ab, tf, rotgelb: extra.rotgelb, gelb: extra.gelb, segIdx, segStart: seg.start, segEnd: seg.end });
+        j++;
+      }
+      ptr = j;
     }
+    return out;
+  }
+
+  // Wie computeCycleSgMetrics(), aber An UND Ab UNABHÄNGIG voneinander
+  // erfasst statt als EIN gemeinsames Vorkommen: An gehört zu dem Umlauf,
+  // in dem das Segment STARTET, Ab zu dem Umlauf, in dem es ENDET - bei
+  // einem Grün, das über eine Umlaufgrenze hinausreicht, sind das ZWEI
+  // VERSCHIEDENE Umläufe. Grundlage von GZ.umlaufContext.buildAll()
+  // (Umlaufstatistiken) - anders als computeCycleSgMetrics (weiterhin genutzt
+  // von js/core/phases.js und dem zeilenweisen Formel-Builder, die ein
+  // einzelnes, in sich geschlossenes Vorkommen mit garantiert zusammen-
+  // gehörigem An+Ab wollen).
+  //
+  // Motivation: An(sg)/Ab(sg) sollen in Umlaufstatistiken je Umlauf ein rein
+  // LOKALER Wert bleiben (immer < TU dieses Umlaufs, nie über eine Modulo-
+  // Faltung verdeckt UND nie an einen fremden, nur zufällig "zugehörigen"
+  // Umlauf gekoppelt) - "wir reden hier immer über relative Zeit [innerhalb
+  // DIESES Umlaufs]" (siehe Konversation). Ein Grün, das in Umlauf A beginnt
+  // und erst in Umlauf B endet, erzeugt daher in Umlauf A ein An OHNE
+  // zugehöriges Ab (TF/Ab dort NaN - "wissen wir hier noch nicht") und in
+  // Umlauf B ein Ab OHNE zugehöriges An (An dort NaN - "hat woanders
+  // begonnen"), STATT beides künstlich in EINEM Umlauf zusammenzuzwingen.
+  //
+  // Rückgabe: Array (je Umlauf) von { an: [...], ab: [...] } - an[k] =
+  // {value, rotgelb, segIdx, segStart}, ab[k] = {value, tf, gelb, segIdx,
+  // segEnd}. rotgelb (Dauer unmittelbar VOR dieser Freigabe) gehört inhaltlich
+  // zu An, gelb (unmittelbar NACH dieser Freigabe) zu Ab; tf (Gesamtdauer des
+  // Grün-Segments) ist erst beim Abwurf "fertig" bekannt, daher bei Ab. An[k]
+  // und ab[k] MÜSSEN NICHT vom selben Grün-Segment stammen, sobald ein
+  // Umlauf für dieselbe Signalgruppe unterschiedlich viele An- wie Ab-
+  // Ereignisse hat (siehe oben) - GZ.umlaufContext.buildAll() paart sie rein
+  // über den Index k (n-tes An mit n-tem Ab, unabhängig von der Frage, ob sie
+  // zum selben Grün-Segment gehören).
+  function computeCycleSgEvents(segs, greens, cycleStarts, tMax) {
+    const n = cycleStarts ? cycleStarts.length : 0;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = { an: [], ab: [] };
+    if (n === 0) return out;
+    const segIndexOfGreen = mapGreensToSegIndex(segs);
+
+    // An-Seite: Sweep über greens nach .start (wie computeCycleSgMetrics).
+    let ptrAn = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptrAn < greens.length && greens[ptrAn].start < start) ptrAn++;
+      let j = ptrAn;
+      while (j < greens.length && greens[j].start < end) {
+        const seg = greens[j];
+        const segIdx = segIndexOfGreen[j];
+        const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+        out[i].an.push({ value: Math.round((seg.start - start) / 1000), rotgelb: extra.rotgelb, segIdx, segStart: seg.start });
+        j++;
+      }
+      ptrAn = j;
+    }
+
+    // Ab-Seite: EIGENER Sweep über dieselben greens, aber nach .end - greens
+    // ist bereits nach .start UND .end aufsteigend (disjunkte Segmente einer
+    // Zeitreihe), ein zweiter monoton fortschreitender Zeiger reicht daher
+    // aus (kein erneutes Sortieren nötig).
+    let ptrAb = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptrAb < greens.length && greens[ptrAb].end < start) ptrAb++;
+      let j = ptrAb;
+      while (j < greens.length && greens[j].end < end) {
+        const seg = greens[j];
+        const segIdx = segIndexOfGreen[j];
+        const extra = segIdx != null ? adjacentTransitionDurations(segs, segIdx) : { rotgelb: 0, gelb: 0 };
+        out[i].ab.push({ value: Math.round((seg.end - start) / 1000), tf: Math.round((seg.end - seg.start) / 1000), gelb: extra.gelb, segIdx, segEnd: seg.end });
+        j++;
+      }
+      ptrAb = j;
+    }
+
     return out;
   }
 
@@ -412,9 +590,9 @@
 
   GZ.segments = {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
-    findSplAt, computeSplTransitions, computeGlobalTU,
+    findSplAt, makeRawValueSampler, makeSegmentDurationSampler, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
-    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleDetMetrics,
+    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleSgEvents, computeCycleDetMetrics,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
     computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep, makePointSegmentSweep
   };

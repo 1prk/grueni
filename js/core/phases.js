@@ -315,7 +315,12 @@
     const entry = findSgEntryByColIndex(sgIndex, a);
     if (!entry) return null;
     const metrics = GZ.segments.computeCycleSgMetrics(entry.segs, entry.stats.greens, a.cycleStarts, a.tMax, TU_MED);
-    return metrics[cycleIdx] || null;
+    // computeCycleSgMetrics liefert seit der Mehrfach-Vorkommen-Erkennung ein
+    // ARRAY von Vorkommen je Umlauf (siehe dortigen Kopfkommentar) - das
+    // PÜ-Werkzeug kennt (wie bisher) nur EIN Vorkommen je Umlauf und nimmt
+    // bewusst das chronologisch erste.
+    const occs = metrics[cycleIdx];
+    return (occs && occs[0]) || null;
   }
 
   // Spätestes Intervallende einer Phase (computePhaseOccurrences), das noch

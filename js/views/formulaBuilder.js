@@ -52,7 +52,7 @@
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
-  const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics } = GZ.segments;
+  const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler, makeSegmentDurationSampler } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
   const { compile, compileFunctionDef, argRangesFor } = GZ.exprEngine;
   const { wzIstBelegt } = GZ.wartezeitLogic;
@@ -85,9 +85,16 @@
   // Variable in Formeln unerreichbar (der Tokenizer erkennt z.B. "GRUEN"
   // immer als Zustands-Literal, unabhängig davon, was in varTypes steht).
   const RESERVED_CI = new Set(['AND', 'OR', 'NOT']);
+  // Aus GZ.exprEngine.PRIMITIVE_INFO/KAT_TOKENS abgeleitet statt hier separat
+  // gepflegt (dieselbe Lehre wie bei umlaufstatistiken.js' SG_ARG_FNS/
+  // DET_ARG_FNS: eine von Hand kopierte Liste wird bei einer neuen Primitive
+  // schlicht vergessen - WertBei/DauerBei fehlten hier tatsächlich, bis ihr
+  // Fehlen bei der WENN/LEER-Ergänzung auffiel). TX/LEER sind keine
+  // PRIMITIVE_INFO-Funktionen (bare Bezeichner ohne Klammern), daher separat.
   const RESERVED_EXACT = new Set([
-    'TX', 'GRUEN', 'ROT', 'GELB', 'ROTGELB', 'DUNKEL', 'BELEGT', 'FREI', 'Zustand', 'Dauer', 'DauerSeit',
-    'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD', 'Versatz', 'Ueberschneidung'
+    'TX', 'LEER',
+    ...Object.keys(GZ.exprEngine.KAT_TOKENS),
+    ...GZ.exprEngine.PRIMITIVE_INFO.map(p => p.name)
   ]);
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
@@ -154,6 +161,7 @@
       items.push({ group, label: tok, hint: '', desc: '', insertText: tok, selStart: tok.length, selEnd: tok.length, kind: 'kat' });
     });
     items.push({ group: 'Sonstiges', label: 'TX', hint: 'reserviert', desc: 'aktueller Auswertungszeitpunkt - immer automatisch verfügbar, nicht selbst benennen/zuweisen', insertText: 'TX', selStart: 2, selEnd: 2, kind: 'var' });
+    items.push({ group: 'Sonstiges', label: 'LEER', hint: 'reserviert', desc: '"kein Wert" (NaN) - passt sich jedem Ergebnistyp an, z.B. als "sonst"-Zweig von WENN()', insertText: 'LEER', selStart: 4, selEnd: 4, kind: 'var' });
     // Vergleichsoperatoren + Zahl-Platzhalter: ohne sie endete der reine
     // Klickweg zwangsläufig bei einem unvollständigen Ausdruck (z.B.
     // "DauerSeit(K1, GRUEN)"), der noch zu WAHR/FALSCH ergänzt werden MUSS -
@@ -799,17 +807,60 @@
       const sgEntry = a.allStats.find(s => s.col.index === col.index);
       const segs = sgEntry ? sgEntry.segs : [];
       const greens = sgEntry ? sgEntry.stats.greens : [];
+      // computeCycleSgMetrics liefert seit der Mehrfach-Vorkommen-Erkennung
+      // ein Array von Vorkommen je Umlauf (siehe dortigen Kopfkommentar) -
+      // der zeilenweise Formel-Builder kennt (wie bisher) nur EIN Vorkommen
+      // je Umlauf und nimmt bewusst das chronologisch erste; die
+      // Mehrfach-Erkennung gilt vorerst nur für Umlaufstatistiken (siehe
+      // GZ.umlaufContext.buildAll()).
+      const sgMetricsByIdx = computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED).map(occs => occs[0] || null);
       return {
         class: 'SG', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
-        cycleMetricsByIdx: computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED)
+        cycleMetricsByIdx: sgMetricsByIdx,
+        // rawSample: für die WertBei()-Primitive (siehe exprEngine.js), z.B.
+        // WertBei(K2, Ab(K1)) - das rohe Signalbild von K2 im Moment des
+        // Abwurfs von K1, statt dessen kategorisierten Zustand() zum jeweils
+        // AKTUELLEN Zeitpunkt.
+        rawSample: makeRawValueSampler(a.times, a.seriesByCol.get(col.index)),
+        // durationAt: für die DauerBei()-Primitive - wie Dauer(objekt), nur
+        // für einen beliebigen statt den jeweils AKTUELLEN Zeitpunkt.
+        durationAt: makeSegmentDurationSampler(segs)
       };
     }
     const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);
     const rawVals = a.seriesByCol.get(col.index);
     const occupied = a.times.map((_, k) => wzIstBelegt(rawVals[k]));
+    // An/Ab/TF/RG/GE sind universell (siehe exprEngine.js PRIMITIVES-
+    // Kopfkommentar) - ein Detektor/Wert hat mit BELEGT genau denselben
+    // Begriff eines "aktiven Zustands" wie eine Signalgruppe mit GRUEN,
+    // daher dieselbe computeCycleSgMetrics()-Grundlage (nur erstes Vorkommen
+    // je Umlauf, wie bei SG oben) statt einer eigenen Berechnung. Ausgeloest/
+    // AnzahlAusloesungen bleiben eigene, umlauf-weite Aggregate
+    // (computeCycleDetMetrics) - beide Kennzahl-Arten werden hier zu EINEM
+    // cycleMetrics-Objekt je Umlauf zusammengeführt.
+    const belegtSegs = segs.filter(s => s.cat === 'BELEGT');
+    const anAbByIdx = computeCycleSgMetrics(segs, belegtSegs, a.cycleStarts, a.tMax, TU_MED).map(occs => occs[0] || null);
+    const aggByIdx = computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax);
+    const detMetricsByIdx = aggByIdx.map((agg, idx) => {
+      const anab = anAbByIdx[idx];
+      return {
+        an: anab ? anab.an : NaN, ab: anab ? anab.ab : NaN, tf: anab ? anab.tf : NaN,
+        rotgelb: anab ? anab.rotgelb : 0, gelb: anab ? anab.gelb : 0,
+        segIdx: anab ? anab.segIdx : null, segStart: anab ? anab.segStart : null, segEnd: anab ? anab.segEnd : null,
+        triggered: agg.triggered, count: agg.count
+      };
+    });
     return {
       class: 'DET', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
-      cycleMetricsByIdx: computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax)
+      cycleMetricsByIdx: detMetricsByIdx,
+      // rawSample: für die WertBei()-Primitive (siehe exprEngine.js) - anders
+      // als cycleMetrics unverändert über den gesamten Berechnen()-Durchlauf
+      // (kein Fortschreiten pro Zeile nötig, da sample() selbst per
+      // Binärsuche beliebige Zeitpunkte auflöst).
+      rawSample: makeRawValueSampler(a.times, rawVals),
+      // durationAt: für die DauerBei()-Primitive, z.B. "wie lange war dieser
+      // Detektor im Moment des Abwurfs von K1 schon belegt".
+      durationAt: makeSegmentDurationSampler(segs)
     };
   }
 
@@ -957,7 +1008,10 @@
         const cycleEnd = cyclePtr + 1 < cycleStarts.length ? cycleStarts[cyclePtr + 1] : a.tMax;
         const tuSeconds = cycleStarts.length ? Math.round((cycleEnd - cycleStarts[cyclePtr]) / 1000) : NaN;
 
-        const scope = { TX: txSeconds, TU: tuSeconds, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: a.splValues ? (a.splValues[i] || '') : '' };
+        // __cycleStart: siehe GZ.umlaufContext.buildAll() - dieselbe interne,
+        // für Nutzer-Formeln nicht referenzierbare Konvention, hier je Zeile
+        // auf den Beginn des aktuellen Umlaufs (cyclePtr) aktualisiert.
+        const scope = { TX: txSeconds, TU: tuSeconds, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: a.splValues ? (a.splValues[i] || '') : '', __cycleStart: cycleStarts.length ? cycleStarts[cyclePtr] : NaN };
         scopeSpecs.forEach(s => {
           if (s.handle) {
             s.handle.sweep.advance(t);
