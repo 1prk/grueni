@@ -18,9 +18,14 @@
    JE UMLAUF aus und lässt beliebige Ergebnistypen zu (GZ.exprEngine.
    compileValue() statt compile()) - die Primitiven An/Ab/TF/RG/GE/
    Ausgeloest/AnzahlAusloesungen lesen dafür aus handle.cycleMetrics statt
-   handle.sweep (siehe GZ.umlaufContext.buildAll()). Zustand/Dauer/DauerSeit
-   sind hier bewusst NICHT nutzbar (kein wohldefinierter "aktueller
-   Zeitpunkt" für einen ganzen Umlauf) - siehe findPerRowOnlyUsage().
+   handle.sweep (siehe GZ.umlaufContext.buildAll()). WertBei(objekt, zeitpunkt)
+   liest stattdessen über handle.rawSample() den tatsächlichen Rohwert (z.B.
+   einen APW-Countdown ODER das Signalbild einer Signalgruppe) zu einem
+   beliebigen Zeitpunkt im Umlauf - meist selbst wieder ein An/Ab/TF/RG/GE-
+   Aufruf, z.B. WertBei(APW_01, Ab(K1)) oder WertBei(K2, Ab(K1)).
+   Zustand/Dauer/DauerSeit sind hier bewusst NICHT nutzbar (kein
+   wohldefinierter "aktueller Zeitpunkt" für einen ganzen Umlauf) - siehe
+   findPerRowOnlyUsage().
 
    Einige Primitiven (TF/RG/GE/Versatz/Ueberschneidung) haben zusätzlich zu
    ihrem Zahlen-/Wahrheitswert eine eindeutige ZEITSPANNE innerhalb des
@@ -44,22 +49,36 @@
   let nextColId = 1;
   let ctxAll = null; // {index, cycles} - einmal je Analyse gebaut (GZ.umlaufContext.buildAll)
   let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, incomplete, values, spans, kind, skip}
+  // Indizes in ctxAll.cycles, die NICHT durch eine LEER-Spalte ausgeblendet
+  // wurden (siehe usesLeer()/recompute()) - Tabelle/Statistik/Export/
+  // Kennzahl-Spur iterieren hierüber statt über ctxAll.cycles direkt.
+  let visibleIdx = [];
   let windowCount = 25, windowStartIdx = 0, showAll = false;
 
   // Aktueller Autocomplete-Zustand - es ist immer höchstens ein Dropdown
   // gleichzeitig offen (das des fokussierten Ausdrucksfelds).
   let acItems = [], acActive = -1, acRange = null;
 
-  const SG_ARG_FNS = new Set(['An', 'Ab', 'TF', 'RG', 'GE', 'Versatz', 'Ueberschneidung']);
-  const DET_ARG_FNS = new Set(['Ausgeloest', 'AnzahlAusloesungen']);
-  const US_FUNCTIONS = ['Versatz', 'Ueberschneidung', 'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD'];
-  const US_SCALARS = ['TU', 'TU_MED', 'SPL'];
-  // Zeilenweise Primitiven des Formel-Builders - hier syntaktisch zwar
-  // bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne handle.sweep würde
-  // ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu liefern. Wird VOR
-  // der Auswertung geprüft (siehe findPerRowOnlyUsage()), nicht erst beim
-  // Absturz bemerkt.
-  const PER_ROW_ONLY_FNS = new Set(['Zustand', 'Dauer', 'DauerSeit']);
+  // Aus GZ.exprEngine.PRIMITIVE_INFO abgeleitet statt hier separat gepflegt -
+  // EINZIGE Stelle, die "welche Primitive erwartet SG/DET als Argument bzw.
+  // ist nur zeilenweise nutzbar" kennt, ist das objArgType/perRowOnly-Feld
+  // dort (siehe Kommentar an PRIMITIVE_INFO); ein neues Primitiv wird so
+  // automatisch hier mitberücksichtigt, ohne dass diese Datei angefasst
+  // werden muss.
+  const PRIMITIVE_INFO = GZ.exprEngine.PRIMITIVE_INFO;
+  const SG_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'SG').map(p => p.name));
+  const DET_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'DET').map(p => p.name));
+  // objArgType 'OBJ' (z.B. WertBei): SG ODER DET gültig - Vorschlagsliste
+  // kombiniert beide statt nur eine (siehe suggestAt() unten).
+  const OBJ_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'OBJ').map(p => p.name));
+  // Zeilenweise Primitiven des Formel-Builders (perRowOnly) - hier
+  // syntaktisch zwar bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne
+  // handle.sweep würde ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu
+  // liefern. Wird VOR der Auswertung geprüft (siehe findPerRowOnlyUsage()),
+  // nicht erst beim Absturz bemerkt - daher aus US_FUNCTIONS ausgeschlossen.
+  const PER_ROW_ONLY_FNS = new Set(PRIMITIVE_INFO.filter(p => p.perRowOnly).map(p => p.name));
+  const US_FUNCTIONS = PRIMITIVE_INFO.filter(p => !p.perRowOnly).map(p => p.name);
+  const US_SCALARS = ['TU', 'TU_MED', 'SPL', 'LEER', 'EREIGNIS'];
 
   // exprEngine.js meldet unbekannte Namen ohne Vorschlag ("Unbekannte
   // Variable/Funktion "X""). Für Umlaufstatistiken lokal um eine "meinten
@@ -276,6 +295,7 @@
     let candidates;
     if (owner && SG_ARG_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' }));
     else if (owner && DET_ARG_FNS.has(owner)) candidates = index.detList.map(n => ({ value: n, label: n, kind: 'det' }));
+    else if (owner && OBJ_ARG_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' })).concat(index.detList.map(n => ({ value: n, label: n, kind: 'det' })));
     else candidates = US_FUNCTIONS.map(n => ({ value: n, label: n + '(…)', kind: 'fn' }))
       .concat(US_SCALARS.map(n => ({ value: n, label: n, kind: 'scalar' })));
 
@@ -384,6 +404,21 @@
     return null;
   }
 
+  // Verwendet der Spaltenausdruck irgendwo das LEER-Literal (siehe
+  // exprEngine.js)? Rein syntaktisch per Tokenizer geprüft (kein Auswerten
+  // nötig) - Grundlage für die Zeilen-Ausblendung in recompute()/visibleRows:
+  // eine Spalte, die LEER referenziert, markiert damit explizit "eine Zeile,
+  // für die ich LEER liefere, gehört gar nicht erst in die Tabelle" (siehe
+  // dortigen Kommentar) - eine Spalte OHNE LEER liefert NaN dagegen weiterhin
+  // ganz normal als "–"-Zelle (z.B. An(K1) ohne Grün in diesem Umlauf bleibt
+  // sichtbar, das ist keine bewusste Filterung).
+  function usesLeer(text) {
+    try { return GZ.exprEngine.tokenize(text).some(t => t.type === 'IDENT' && t.value === 'LEER'); }
+    catch (e) { return false; }
+  }
+
+  function isEmptyValue(v) { return v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v)); }
+
   function currentValidCols() { return evaluated.filter(e => !e.error && !e.skip && e.values); }
 
   function recompute() {
@@ -431,15 +466,41 @@
     });
 
     const validCols = currentValidCols();
+
+    // Zeilen-Ausblendung: jede Spalte, deren Ausdruck LEER referenziert,
+    // wirkt als Filter - eine Zeile, für die eine SOLCHE Spalte LEER (NaN)
+    // liefert, fällt aus der GESAMTEN Tabelle/Statistik/Export/Kennzahl-Spur
+    // heraus, statt dort als "–"-Zelle zu erscheinen (siehe usesLeer()-
+    // Kommentar). Spalten OHNE LEER beeinflussen die Sichtbarkeit nicht -
+    // ihr NaN (z.B. An(K1) ohne Grün in diesem Umlauf) bleibt wie bisher
+    // eine normale "–"-Zelle in einer weiterhin sichtbaren Zeile.
+    const filterCols = validCols.filter(c => usesLeer(c.col.expr));
+    visibleIdx = [];
+    for (let i = 0; i < ctxAll.cycles.length; i++) {
+      if (!filterCols.some(c => isEmptyValue(c.values[i]))) visibleIdx.push(i);
+    }
+
     renderResultsTable(validCols);
     renderStats(validCols);
     els.statsPanel.style.display = validCols.length ? '' : 'none';
     els.exportBtn.disabled = validCols.length === 0;
 
     const errCount = evaluated.filter(e => e.error && !e.incomplete).length;
+    // Umlauf-Anzahl getrennt von Zeilen-Anzahl ausgewiesen: seit der
+    // Mehrfach-Ereignis-Aufteilung (siehe GZ.umlaufContext.buildAll()) kann
+    // ein Umlauf mehr als eine Zeile haben (mehrfaches Vorkommen einer
+    // Signalgruppe in diesem Umlauf) - sonst wirkt eine höhere Zeilenzahl
+    // als die tatsächliche Anzahl erkannter Umläufe wie ein Zählfehler.
+    const umlaufCount = ctxAll.cycles.reduce((n, c) => n + (c.eventIdx === 0 ? 1 : 0), 0);
+    const zusatzZeilen = ctxAll.cycles.length - umlaufCount;
+    const umlaufInfo = zusatzZeilen > 0
+      ? `${umlaufCount} Umlauf/Umläufe, ${ctxAll.cycles.length} Zeilen (${zusatzZeilen} zusätzliche Ereignis-Zeile(n) durch Umläufe mit Mehrfach-Vorkommen)`
+      : `${umlaufCount} Umlauf/Umläufe`;
+    const ausgeblendet = ctxAll.cycles.length - visibleIdx.length;
+    const filterInfo = ausgeblendet > 0 ? ` · ${ausgeblendet} Zeile(n) durch LEER ausgeblendet` : '';
     els.hint.textContent = cols.length === 0
       ? 'Bitte mindestens eine Spalte definieren.'
-      : `${validCols.length} von ${cols.length} Spalte(n) gültig` + (errCount ? ` · ${errCount} mit Fehler` : '') + ` · ${ctxAll.cycles.length} Umlauf/Umläufe.`;
+      : `${validCols.length} von ${cols.length} Spalte(n) gültig` + (errCount ? ` · ${errCount} mit Fehler` : '') + ` · ${umlaufInfo}${filterInfo}.`;
     els.hint.className = errCount ? 'hint warn' : 'hint';
 
     // Umlaufprüfung zeigt die gültigen Spalten als eigene KENNZAHL-Spur je
@@ -460,14 +521,29 @@
   // Umlauf - nur gesetzt, wenn die Formel GENAU eine der Objekt-bezogenen
   // Primitiven ist (TF/RG/GE/Versatz/Ueberschneidung, siehe exprEngine.js
   // spanRun) - für die Balkendarstellung dort (tr.span).
+  //
+  // ctxAll.cycles ist seit der Mehrfach-Ereignis-Aufteilung (siehe
+  // GZ.umlaufContext.buildAll()) NICHT mehr 1:1 mit den Umlaufindizes -
+  // Umlaufprüfung erwartet aber GENAU einen Wert je Umlaufindex (Kennzahl-
+  // Spur, eine Zeile je Umlauf). Daher hier bewusst nur das JEWEILS ERSTE
+  // Ereignis je Umlauf (cyc.eventIdx === 0) zurückgereicht - Umlaufprüfungs
+  // Kennzahl-Spur zeigt (anders als die Tabelle hier) noch keine weiteren
+  // Ereignisse desselben Umlaufs an. Durch eine LEER-Spalte ausgeblendete
+  // Zeilen (siehe visibleIdx/recompute()) liefern hier bewusst NaN statt des
+  // tatsächlich berechneten Werts - eine aus der Tabelle ausgeblendete Zeile
+  // soll auch in der Kennzahl-Spur nicht auftauchen.
   function getSyntheticColumns() {
+    if (!ctxAll) return [];
+    const visibleSet = new Set(visibleIdx);
+    const firstEventIdxs = [];
+    ctxAll.cycles.forEach((cyc, idx) => { if (cyc.eventIdx === 0) firstEventIdxs.push(idx); });
     return currentValidCols().map(e => ({
       index: KENNZAHL_INDEX_BASE + e.col.id,
       kuerzel: 'KENNZAHL',
       name: e.col.label || '(ohne Bezeichnung)',
       beschreibung: e.col.expr,
-      valuesByCycleIdx: e.values,
-      spansByCycleIdx: e.spans,
+      valuesByCycleIdx: firstEventIdxs.map(idx => visibleSet.has(idx) ? e.values[idx] : NaN),
+      spansByCycleIdx: e.spans ? firstEventIdxs.map(idx => visibleSet.has(idx) ? e.spans[idx] : null) : null,
       valueKind: e.kind
     }));
   }
@@ -482,14 +558,14 @@
 
   function fmtNum(v) { return Number.isInteger(v) ? String(v) : v.toFixed(1); }
   function formatCellHtml(v) {
-    if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '<span class="us-empty-cell">–</span>';
+    if (isEmptyValue(v)) return '<span class="us-empty-cell">–</span>';
     if (typeof v === 'boolean') return v ? '<span class="us-bool-true">Wahr</span>' : '<span class="us-bool-false">Falsch</span>';
     if (typeof v === 'number') return esc(fmtNum(v));
     return esc(String(v));
   }
 
   function renderResultsTable(validCols) {
-    if (!ctxAll || !ctxAll.cycles.length || validCols.length === 0) {
+    if (!ctxAll || !visibleIdx.length || validCols.length === 0) {
       els.tablePanel.style.display = 'none';
       els.diagramControls.style.display = 'none';
       return;
@@ -497,22 +573,29 @@
     els.tablePanel.style.display = '';
     els.diagramControls.style.display = 'flex';
 
-    const n = ctxAll.cycles.length;
+    const n = visibleIdx.length;
     const { from, to } = windowRange(n);
-    els.winLabel.textContent = showAll ? `Gesamte Aufzeichnung (${n} Umläufe)` : `Umlauf ${from + 1}–${to} von ${n}`;
+    els.winLabel.textContent = showAll ? `Gesamte Aufzeichnung (${n} Zeilen)` : `Zeile ${from + 1}–${to} von ${n}`;
     els.btnWinPrev.disabled = showAll || from <= 0;
     els.btnWinNext.disabled = showAll || to >= n;
     els.winSize.disabled = showAll;
 
-    els.tableHead.innerHTML = `<tr><th>#</th><th>Start</th><th>SPL</th><th>TU</th>${
+    els.tableHead.innerHTML = `<tr><th>#</th><th>Umlauf</th><th>Ereignis</th><th>Start</th><th>SPL</th><th>TU</th>${
       validCols.map(c => `<th>${esc(c.col.label || '(ohne Bezeichnung)')}</th>`).join('')
     }</tr>`;
 
     const rows = [];
     for (let i = from; i < to; i++) {
-      const cyc = ctxAll.cycles[i];
-      const cells = [String(i + 1), fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
-        .concat(validCols.map(c => formatCellHtml(c.values[i])));
+      const realIdx = visibleIdx[i];
+      const cyc = ctxAll.cycles[realIdx];
+      // Ereignis: nur angezeigt, wenn dieser Umlauf ueberhaupt mehr als eine
+      // Zeile hat (Mehrfach-Vorkommen einer Signalgruppe, siehe
+      // GZ.umlaufContext.buildAll()) - sonst "-" statt einer immer-"1" auf
+      // jeder Zeile. Plain Zahl (1, 2, 3, ...) statt "1/3" - die Gesamtzahl
+      // steht ohnehin schon in der Umlaufinfo-Zeile, nicht in jeder Zelle.
+      const ereignis = cyc.eventCount > 1 ? String(cyc.eventIdx + 1) : '–';
+      const cells = [String(i + 1), String(cyc.cycleIdx + 1), ereignis, fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
+        .concat(validCols.map(c => formatCellHtml(c.values[realIdx])));
       rows.push(`<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`);
     }
     els.tableBody.innerHTML = rows.join('');
@@ -524,7 +607,12 @@
     const sorted = [...vals].sort((a, b) => a - b);
     return { n: vals.length, mean: mean(vals), median: median(vals), sd: stdDev(vals), min: Math.min(...vals), max: Math.max(...vals), p85: percentile(sorted, 85) };
   }
-  function numericValues(c) { return c.values.filter(v => typeof v === 'number' && !Number.isNaN(v)); }
+  // Nur über visibleIdx (siehe recompute()) statt c.values direkt - durch
+  // eine LEER-Spalte ausgeblendete Zeilen fließen dadurch in KEINER Spalte
+  // mehr in die Aggregatstatistik ein, nicht nur in der ausblendenden
+  // Spalte selbst (eine ausgeblendete Zeile gilt für die ganze Tabelle).
+  function visibleValues(c) { return visibleIdx.map(i => c.values[i]); }
+  function numericValues(c) { return visibleValues(c).filter(v => typeof v === 'number' && !Number.isNaN(v)); }
 
   function renderStats(validCols) {
     const rows = validCols.map(c => {
@@ -536,7 +624,7 @@
         return `<tr><td>${label}</td><td>${s.n}</td><td>${s.mean.toFixed(1)}</td><td>${s.median.toFixed(1)}</td><td>${s.sd.toFixed(1)}</td><td>${s.min.toFixed(1)}</td><td>${s.max.toFixed(1)}</td><td>${s.p85.toFixed(1)}</td></tr>`;
       }
       if (c.kind === 'bool') {
-        const vals = c.values.filter(v => typeof v === 'boolean');
+        const vals = visibleValues(c).filter(v => typeof v === 'boolean');
         const nTrue = vals.filter(Boolean).length;
         const pct = vals.length ? (nTrue / vals.length * 100).toFixed(0) + '%' : '–';
         return `<tr><td>${label}</td><td colspan="7" class="us-aggregate-note">${vals.length} Umläufe: ${nTrue}× wahr (${pct})</td></tr>`;
@@ -546,10 +634,10 @@
     els.statsBody.innerHTML = rows || '<tr><td colspan="8" class="cfg-empty">Keine gültigen Spalten.</td></tr>';
   }
 
-  /* ---------------- Excel-Export (immer die komplette Aufzeichnung) ---------------- */
+  /* ---------------- Excel-Export (immer die komplette, sichtbare Aufzeichnung) ---------------- */
 
   function exportValue(v) {
-    if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '';
+    if (isEmptyValue(v)) return '';
     if (typeof v === 'boolean') return v ? 'Wahr' : 'Falsch';
     return v;
   }
@@ -564,21 +652,26 @@
       return [label, s.n, round1(s.mean), round1(s.median), round1(s.sd), round1(s.min), round1(s.max), round1(s.p85)];
     }
     if (c.kind === 'bool') {
-      const vals = c.values.filter(v => typeof v === 'boolean');
+      const vals = visibleValues(c).filter(v => typeof v === 'boolean');
       const nTrue = vals.filter(Boolean).length;
       return [label, vals.length, nTrue, vals.length - nTrue, vals.length ? round1(nTrue / vals.length * 100) + '%' : '', '', '', ''];
     }
-    return [label, c.values.filter(v => v != null).length, '(Text)', '', '', '', '', ''];
+    return [label, visibleValues(c).filter(v => v != null).length, '(Text)', '', '', '', '', ''];
   }
 
   function exportXlsx() {
     const validCols = currentValidCols();
     if (!validCols.length || !ctxAll) return;
 
-    const header = ['#', 'Start', 'SPL', 'TU', 'TX'].concat(validCols.map(c => c.col.label || '(ohne Bezeichnung)'));
-    const rows = ctxAll.cycles.map((cyc, i) => {
-      const base = [i + 1, fmtTs(new Date(cyc.start)), cyc.SPL, cyc.TU, cyc.TX];
-      validCols.forEach(c => base.push(exportValue(c.values[i])));
+    const header = ['#', 'Start', 'SPL', 'TU', 'TX', 'Ereignis'].concat(validCols.map(c => c.col.label || '(ohne Bezeichnung)'));
+    const rows = visibleIdx.map((realIdx, i) => {
+      const cyc = ctxAll.cycles[realIdx];
+      // Ereignis: plain Zahl statt "1/3" (siehe renderResultsTable) - hier
+      // ohne "-"-Sonderfall für den Normalfall, da im Export jede Zeile für
+      // sich lesbar bleiben soll, ohne Nachbarzeilen zum Verständnis
+      // heranziehen zu müssen.
+      const base = [i + 1, fmtTs(new Date(cyc.start)), cyc.SPL, cyc.TU, cyc.TX, cyc.eventIdx + 1];
+      validCols.forEach(c => base.push(exportValue(c.values[realIdx])));
       return base;
     });
     const statsHeader = ['Spalte', 'n', 'Ø', 'Median', 'StdAbw', 'Min', 'Max', 'P85'];
