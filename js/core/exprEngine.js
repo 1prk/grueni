@@ -354,6 +354,21 @@
     { name: 'Ueberschneidung', params: ['sgAbwurf', 'sgAnwurf'], desc: 'ist sgAnwurf schon grün, bevor sgAbwurf rot wird (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen)' }
   ];
 
+  // Zeichenbereich des ERSTEN Parameters innerhalb von "name(argList)"
+  // (relativ zum Anfang, d.h. inkl. "name(" - Offset) - von formulaBuilder.js/
+  // umlaufstatistiken.js beim Einfügen eines Funktionsaufrufs aus Autover-
+  // vollständigung/Palette genutzt, um ihn direkt als Platzhalter zu
+  // selektieren (z.B. "DauerSeit(sg, GRUEN)" mit "sg" selektiert).
+  function argRangesFor(name, params) {
+    const prefix = name.length + 1; // "name(".length
+    let pos = 0;
+    return params.map((p, i) => {
+      const r = { start: prefix + pos, end: prefix + pos + p.length };
+      pos += p.length + (i < params.length - 1 ? 2 : 0); // ", "
+      return r;
+    });
+  }
+
   // extraKatTokens: wie KAT_TOKENS, aber NUR für diesen einen tokenize()-
   // Aufruf aktiv statt global reserviert (siehe Datei-Kopfkommentar zu
   // KAT_TOKENS) - damit z.B. oepnvQa.js eigene Zustands-Konstanten (QSV-
@@ -694,5 +709,5 @@
   // formulaBuilder.js Syntax-Highlighting/Autovervollständigung/Funktions-
   // Palette auf demselben Lexer/derselben Primitiven-Liste aufbaut statt sie
   // in der UI-Schicht zu duplizieren (Single Source of Truth).
-  GZ.exprEngine = { compile, compileValue, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS };
+  GZ.exprEngine = { compile, compileValue, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS, argRangesFor };
 })(window.GZ = window.GZ || {});

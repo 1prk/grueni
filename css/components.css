@@ -346,63 +346,16 @@ tr.oe-hidden{ display:none; }
 .up-func-status.ok{ color:var(--sig-green); }
 .up-func-status.err{ color:var(--sig-red); }
 
-/* ---------- Umlaufprüfung: Formel-Builder Layout (Hauptbereich + Symbol-
-   Übersicht) ---------- */
-.formula-layout{ display:flex; align-items:flex-start; gap:18px; padding:16px; }
-.formula-main{ flex:1; min-width:0; padding:0; }
-/* Feste Höhenobergrenze (statt an der Viewporthöhe zu hängen): die Seiten-
-   leiste sitzt in einem flex-Container neben .formula-main - ohne harte
-   Kappung bestimmt bei vielen Objekten/Variablen SIE die Panelhöhe und
-   streckt den ganzen Tab. Zusätzlich scrollt jede Sektion INTERN (siehe
-   .fsb-section-body), damit eine einzelne lange Liste nicht die übrigen
-   Abschnitte unerreichbar weit nach unten schiebt. */
-.formula-sidebar{
-  width:230px; flex-shrink:0; position:sticky; top:12px;
-  border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-surface-2);
-  max-height:400px; overflow-y:auto;
-}
-@media (max-width:900px){
-  .formula-layout{ flex-direction:column; }
-  .formula-sidebar{ width:100%; position:static; max-height:260px; }
-}
-.fsb-section{ border-bottom:1px solid var(--border); padding:9px 11px; }
-.fsb-section-body{ max-height:132px; overflow-y:auto; }
-.fsb-section:last-child{ border-bottom:none; }
-.fsb-section-title{ font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); margin-bottom:6px; }
-.fsb-empty{ font-size:11px; color:var(--text-faint); font-style:italic; }
-.fsb-item{
-  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
-  padding:3px 5px; margin:0 -5px; border-radius:var(--radius-sm); cursor:pointer;
-  font-family:var(--mono); font-size:11.5px;
-}
-.fsb-item:hover{ background:var(--accent-bg); }
-/* Name (+ optional Farbpunkt, siehe .fsb-item-dot) als EIN Flex-Kind, damit
-   justify-content:space-between auf .fsb-item nur zwischen Name UND Meta
-   Platz verteilt - nicht zusätzlich zwischen Punkt und Name auseinanderzieht. */
-.fsb-item-label{ display:flex; align-items:center; gap:5px; min-width:0; }
-/* Identitätsfarbe einer Formel (siehe formulaColorFor() in formulaBuilder.js)
-   - dieselbe Farbe wie ihr Referenz-Chip in anderen Formeln und ihr
-   Hervorhebungsband auf einer Objekt-Spur. */
-.fsb-item-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.25); }
-.fsb-item-name{ font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.fsb-item-meta{ color:var(--text-faint); font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.fsb-item.fsb-item-muted .fsb-item-name{ color:var(--text-muted); font-weight:400; }
-.fsb-chips{ display:flex; flex-wrap:wrap; gap:5px; }
-.fsb-chip{
-  font-family:var(--mono); font-size:11px; font-weight:600; padding:2px 7px; border-radius:10px;
-  background:var(--formula-on); color:#fff; cursor:pointer; opacity:.88;
-}
-.fsb-chip:hover{ opacity:1; }
-.fsb-chip.fsb-chip-det{ background:var(--accent); }
+/* ---------- Umlaufprüfung: Formel-Builder Layout ---------- */
+.formula-layout{ padding:16px; }
 
-/* ---------- Umlaufprüfung: Ausdrucks-Editor (echte, interaktive Chips,
-   Fehler-Markierung, Autovervollständigung, Funktions-Palette) ----------
-   contenteditable statt <input> - siehe formulaBuilder.js Kopfkommentar
-   beim "Ausdrucks-Editor"-Abschnitt für die Begründung (der frühere
-   Overlay-Trick mit unsichtbarem <input> über farbigem <div> hatte einen
-   strukturellen Makel: Textauswahl wurde von manchen Browsern trotz
-   color:transparent sichtbar gerendert und überlappte mit dem Highlight
-   darunter). */
+/* ---------- Umlaufprüfung: Ausdrucks-Editor (Fehler-Markierung,
+   Autovervollständigung, Funktions-Palette) ---------- contenteditable
+   statt <input>, um Token live einzufärben - siehe js/core/exprEditor.js
+   Kopfkommentar (ein früherer Overlay-Trick mit unsichtbarem <input> über
+   farbigem <div> hatte einen strukturellen Makel: Textauswahl wurde von
+   manchen Browsern trotz color:transparent sichtbar gerendert und
+   überlappte mit dem Highlight darunter). */
 .expr-input-wrap{ position:relative; display:flex; align-items:flex-start; gap:4px; }
 .expr-editor{
   flex:1; min-width:0; box-sizing:border-box; border:1px solid var(--border-strong);
@@ -432,51 +385,23 @@ tr.oe-hidden{ display:none; }
 .expr-ac-label{ font-weight:700; color:var(--text); }
 .expr-ac-hint{ color:var(--text-faint); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-/* Nur-Text-Token (Zahlen/Operatoren/Klammern/AND-OR-NOT sowie noch nicht
-   eingerastete, gerade getippte Bezeichner) - "freier Text für Werte etc." */
+/* Eingefärbter Text je Token-Art (Zahlen/Operatoren/Klammern/AND-OR-NOT/
+   Zustände/Funktionsnamen/Bezeichner). */
 .expr-tok-num{ color:var(--accent-strong); }
 .expr-tok-kw{ color:var(--text-muted); font-weight:700; }
 .expr-tok-op{ color:var(--text); }
 .expr-tok-punc{ color:var(--text-faint); }
 .expr-tok-err{ text-decoration:underline wavy var(--sig-red); text-decoration-thickness:1.5px; text-underline-offset:2px; }
-/* Zustand/Funktionsname/Variable, SOLANGE noch nicht zum Chip eingerastet
-   (Cursor berührt das Token noch, siehe "touching" in formulaBuilder.js) -
-   schon farblich erkennbar, aber noch normaler, frei weitertippbarer Text. */
 .expr-tok-kat{ color:var(--formula-on); font-weight:600; }
 .expr-tok-func{ color:var(--req-marker); font-weight:600; }
 .expr-tok-var{ color:var(--accent); }
-/* Text-Literal ("..."/'...') - z.B. für den ÖPNV-Zeilenfilter (SPL-
-   Vergleich). Bleibt immer nur eingefärbter Text, nie Chip (siehe
-   isChipToken() in js/core/exprEditor.js). */
+/* Text-Literal ("..."/'...') - z.B. für den ÖPNV-Zeilenfilter (SPL-Vergleich). */
 .expr-tok-text{ color:var(--sig-redyellow); font-weight:600; }
-
-/* Echte, entfernbare Chips (contenteditable="false", MUI-artig) - siehe
-   buildChipEl()/isChipToken() in formulaBuilder.js. */
-.expr-chip{
-  display:inline-flex; align-items:center; gap:2px; margin:1px 3px 1px 0;
-  padding:1px 3px 1px 9px; border-radius:11px; font-weight:600; font-size:12px;
-  cursor:pointer; vertical-align:middle; white-space:nowrap;
-}
-/* Chips sind austauschbar (Klick öffnet die gefilterte Auswahlliste, siehe
-   gz-chip-replace in exprEditor.js) - das darf man ihnen ansehen. */
-.expr-chip:hover{ box-shadow:0 0 0 2px var(--accent-bg-strong); }
-.expr-chip-label{ line-height:1.6; }
-.expr-chip-remove{
-  display:inline-flex; align-items:center; justify-content:center;
-  width:15px; height:15px; margin-left:1px; border-radius:50%; border:none;
-  background:rgba(255,255,255,.3); color:inherit; font-size:12px; line-height:1;
-  cursor:pointer; padding:0;
-}
-.expr-chip-remove:hover{ background:rgba(255,255,255,.6); }
-.expr-chip.expr-tok-kat{ background:var(--formula-on); color:#fff; }
-.expr-chip.expr-tok-func{ background:var(--req-marker); color:#fff; }
-.expr-chip.expr-tok-var{ background:var(--accent); color:#fff; }
-/* Formel-Referenz-Chip (siehe chipColorFor()-Hook in exprEditor.js): eigene,
-   je Formel zugeteilte Farbe statt der generischen Variablen-Farbe - dieselbe
-   Farbe wie in der Formel-Liste (Farbpunkt) und ggf. der Zeitstrahl-
-   Hervorhebung, damit eine referenzierte Formel überall wiedererkennbar ist. */
-.expr-chip.expr-tok-var.expr-chip-accent{ background:var(--chip-accent); }
-.expr-chip.expr-chip-err{ box-shadow:0 0 0 2px var(--sig-red); }
+/* Bekannter Bezeichner mit individueller Akzentfarbe (identColorFor()-Hook
+   in js/core/exprEditor.js) statt der generischen Variablenfarbe - z.B. eine
+   referenzierte Formel trägt dieselbe Farbe wie ihre eigene Zeile in
+   formulaBuilder.js (siehe formulaColorFor()). */
+.expr-tok-accent{ box-shadow:inset 0 -2px 0 0 var(--ident-accent); border-radius:2px; }
 
 /* ---------- Umlaufprüfung ---------- */
 .up-rows{ padding:6px 16px 16px; }
@@ -521,18 +446,8 @@ table.static-rows tbody tr{ cursor:default; }
 .us-col-label{ flex:1; font-weight:700; }
 .us-row-remove{ font-size:11px; padding:4px 9px; color:var(--sig-red); border-color:var(--sig-red); flex-shrink:0; }
 .us-row-remove:hover{ background:var(--crit-bg); }
-.us-expr-wrap{ position:relative; padding:10px 12px; }
-.us-col-expr{ width:100%; font-family:var(--mono); font-size:12.5px; }
+.us-col-row .expr-input-wrap{ padding:10px 12px; }
 .us-col-expr.invalid{ border-color:var(--sig-red); background:var(--crit-bg); }
-.us-autocomplete{
-  position:absolute; left:12px; right:12px; top:100%; margin-top:2px; z-index:20;
-  background:var(--bg-surface); border:1px solid var(--border-strong); border-radius:var(--radius-sm);
-  box-shadow:var(--shadow-md); list-style:none; padding:4px; margin-left:0; margin-right:0;
-  max-height:220px; overflow-y:auto;
-}
-.us-autocomplete li{ padding:6px 9px; font-size:12px; font-family:var(--mono); border-radius:var(--radius-sm); cursor:pointer; display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
-.us-autocomplete li .us-ac-kind{ font-family:var(--sans); font-size:9.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-faint); white-space:nowrap; }
-.us-autocomplete li:hover, .us-autocomplete li.active{ background:var(--accent-bg); }
 .us-col-error{ margin:0 12px 12px; padding:9px 11px; border-radius:var(--radius-sm); background:var(--crit-bg); border:1px solid var(--sig-red); }
 .us-col-error-msg{ font-size:12px; color:var(--crit-text); }
 .us-col-error-snippet{ margin-top:5px; font-size:11.5px; font-family:var(--mono); color:var(--text-muted); white-space:pre-wrap; word-break:break-word; }

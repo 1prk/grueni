@@ -44,16 +44,17 @@
 
    Jede Formel trägt außerdem eine feste Identitätsfarbe (formulaColorFor(),
    Position in der formulas-Liste) - dieselbe Farbe erscheint als Farbpunkt
-   in der Formel-Zeile, als Akzentfarbe ihres Referenz-Chips in ANDEREN
-   Formeln (chipColorFor-Hook von GZ.exprEditor) und als Hervorhebungsfarbe
-   auf einer Objekt-Spur, falls ein Hervorhebungsziel gesetzt ist (siehe
-   getFormulaHighlights()) - eine Formel bleibt so überall wiedererkennbar. */
+   in der Formel-Zeile, als Akzent unter ihrem Namen, wo immer sie in einer
+   ANDEREN Formel referenziert wird (identColorFor-Hook von GZ.exprEditor),
+   und als Hervorhebungsfarbe auf einer Objekt-Spur, falls ein
+   Hervorhebungsziel gesetzt ist (siehe getFormulaHighlights()) - eine
+   Formel bleibt so überall wiedererkennbar. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
   const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
-  const { compile, compileFunctionDef } = GZ.exprEngine;
+  const { compile, compileFunctionDef, argRangesFor } = GZ.exprEngine;
   const { wzIstBelegt } = GZ.wartezeitLogic;
 
   const SYNTH_INDEX_BASE = 1000000; // weit jenseits jedes realen Spaltenindex
@@ -91,12 +92,13 @@
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
 
-  // ---------- Ausdrucks-Editor: der eigentliche Chip-Editor (contenteditable,
-  // DOM/Caret-Mechanik, Dropdown/Palette, Debounce) lebt jetzt in
+  // ---------- Ausdrucks-Editor: die eigentliche Editor-Mechanik
+  // (contenteditable, Caret-Mechanik, Dropdown/Palette, Undo/Redo) lebt in
   // GZ.exprEditor (siehe dort für das volle Modell) - wiederverwendet von
-  // oepnvQa.js für den ÖPNV-Zeilenfilter. Hier bleibt nur das, was WIRKLICH
-  // formulaBuilder-spezifisch ist: exprCandidates() (Kandidatenliste) und die
-  // beiden setup()-Aufrufe in renderFuncRows()/renderFormulaRows().
+  // oepnvQa.js (ÖPNV-Zeilenfilter) und umlaufstatistiken.js. Hier bleibt nur,
+  // was WIRKLICH formulaBuilder-spezifisch ist: exprCandidates()
+  // (Kandidatenliste) und die beiden setup()-Aufrufe in
+  // renderFuncRows()/renderFormulaRows().
 
   // Vergleichs-/Rechenoperatoren für die Palette (siehe exprCandidates()) -
   // mit umgebenden Leerzeichen eingefügt, damit ein reiner Klickweg lesbaren
@@ -115,35 +117,15 @@
     { label: '( )', insert: '()', hint: 'Klammern', desc: 'Klammern zum Gruppieren', caret: 1 } // Cursor ZWISCHEN die Klammern
   ];
 
-  // Zeichenbereiche ALLER Parameter innerhalb von "name(argList)" (relativ
-  // zum Anfang des insertText, d.h. inkl. "name(" - Offset), parallel zur
-  // ", "-Verkettung von params.join(', '). Erlaubt es GZ.exprEditor, nach
-  // dem Ausfüllen EINES Platzhalters automatisch zum nächsten zu springen
-  // (Tabstop-Kette, siehe dortiger Kopfkommentar zu argRanges) - bei einem
-  // einzigen Parameter ergibt sich daraus dieselbe einfache Selektion wie
-  // zuvor, nur eben immer über argRanges[0] statt fest verdrahteter Werte.
-  function argRangesFor(name, params) {
-    const prefix = name.length + 1; // "name(".length
-    let pos = 0;
-    return params.map((p, i) => {
-      const r = { start: prefix + pos, end: prefix + pos + p.length };
-      pos += p.length + (i < params.length - 1 ? 2 : 0); // ", "
-      return r;
-    });
-  }
-
   // Kandidaten für Autovervollständigung + Funktions-Palette: Primitiven
   // (GZ.exprEngine.PRIMITIVE_INFO), aktuell definierte Funktionen/Variablen
   // (Modul-State), Zustands-Konstanten (GZ.exprEngine.KAT_TOKENS), TX,
   // AND/OR/NOT. insertText/selStart/selEnd beschreiben, was beim Einfügen an
   // der Cursorposition eingesetzt wird und welcher Teilbereich davon
   // anschließend als Platzhalter selektiert wird, damit man ihn direkt
-  // überschreiben kann (z.B. "Zustand(objekt)" mit "objekt" selektiert) -
-  // argRanges (Primitiven/eigene Funktionen mit >1 Parameter) lässt
-  // GZ.exprEditor nach dem Ausfüllen automatisch zum nächsten Platzhalter
-  // weiterspringen (siehe argRangesFor() oben). TX wird bewusst NICHT in die
-  // eingefügten Primitiven-/Funktionsaufrufe aufgenommen (siehe GZ.exprEngine
-  // PRIMITIVE_INFO) - es bleibt implizit.
+  // überschreiben kann (z.B. "Zustand(objekt)" mit "objekt" selektiert). TX
+  // wird bewusst NICHT in die eingefügten Primitiven-/Funktionsaufrufe
+  // aufgenommen (siehe GZ.exprEngine PRIMITIVE_INFO) - es bleibt implizit.
   function exprCandidates() {
     const items = [];
     GZ.exprEngine.PRIMITIVE_INFO.forEach(p => {
@@ -152,7 +134,7 @@
       items.push({
         group: 'Primitiven', label: p.name, hint: `(${argList})`, desc: p.desc,
         insertText: `${p.name}(${argList})`,
-        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges, kind: 'func'
+        selStart: ranges[0].start, selEnd: ranges[0].end, kind: 'func'
       });
     });
     funcs.forEach(f => {
@@ -164,7 +146,7 @@
       items.push({
         group: 'Eigene Funktionen', label: name, hint: `(${argList})`, desc: f.bodyText,
         insertText: `${name}(${argList})`,
-        selStart: ranges[0].start, selEnd: ranges[0].end, argRanges: ranges, kind: 'func'
+        selStart: ranges[0].start, selEnd: ranges[0].end, kind: 'func'
       });
     });
     Object.entries(GZ.exprEngine.KAT_TOKENS).forEach(([tok, katType]) => {
@@ -193,10 +175,9 @@
     // Andere Formeln sind wie Variablen per bloßem Namen referenzierbar
     // (siehe Datei-Kopfkommentar zu Formel-Referenzen) - kind:'var', damit
     // sie sich nahtlos in dieselbe Kandidatenliste einreihen (Autovervoll-
-    // ständigung, Palette, Chip-Austausch per Klick). Bewusst OHNE Ausschluss
-    // der gerade bearbeiteten Formel selbst - eine Selbstreferenz chippt
-    // dann zwar mit ein, wird aber beim Berechnen als zyklisch erkannt und
-    // klar gemeldet, statt sie hier stillschweigend zu verstecken.
+    // ständigung/Palette). Bewusst OHNE Ausschluss der gerade bearbeiteten
+    // Formel selbst - eine Selbstreferenz wird beim Berechnen als zyklisch
+    // erkannt und klar gemeldet, statt sie hier stillschweigend zu verstecken.
     formulas.forEach(f => {
       const name = f.name.trim();
       if (!name) return;
@@ -233,7 +214,6 @@
       helpBtn: root.querySelector('#upFormulaHelpBtn'),
       helpModal: root.querySelector('#upFormulaHelpModal'),
       helpClose: root.querySelector('#upFormulaHelpClose'),
-      sidebar: root.querySelector('#upFormulaSidebar'),
       bausteinPanel: root.querySelector('#upBausteinPanel'),
       bausteinPanelHead: root.querySelector('#upBausteinPanelHead'),
       bausteinPanelSummary: root.querySelector('#upBausteinPanelSummary')
@@ -548,15 +528,15 @@
   // Feste Identitätsfarbe JEDER Formel (siehe HIGHLIGHT_PALETTE oben) -
   // Position in der GESAMTEN formulas-Liste, nicht nur unter den aktuell
   // hervorhebenden. Eine Formel behält so dieselbe Farbe überall, wo sie
-  // auftaucht: eigener Farbpunkt in der Liste, Referenz-Chip in ANDEREN
-  // Formeln (siehe chipColorFor unten) UND ihr Hervorhebungs-Band auf einer
+  // auftaucht: eigener Farbpunkt in der Liste, Referenz-Akzent in ANDEREN
+  // Formeln (siehe identColorFor unten) UND ihr Hervorhebungs-Band auf einer
   // Objekt-Spur (siehe getFormulaHighlights()) - unabhängig davon, ob/wie
   // viele andere Formeln gerade ein Hervorhebungsziel gesetzt haben.
   function formulaColorFor(f) {
     const idx = formulas.findIndex(x => x.id === f.id);
     return idx === -1 ? null : HIGHLIGHT_PALETTE[idx % HIGHLIGHT_PALETTE.length];
   }
-  // Für chipColorFor(): Farbe der Formel MIT DIESEM NAMEN (falls vorhanden) -
+  // Für identColorFor(): Farbe der Formel MIT DIESEM NAMEN (falls vorhanden) -
   // eine Formel-Referenz in einer ANDEREN Formel trägt dieselbe Farbe wie die
   // referenzierte Formel selbst.
   function formulaColorByName(name) {
@@ -578,7 +558,7 @@
       return `
       <div class="up-formula-row" data-id="${f.id}">
         <div class="up-formula-head">
-          <span class="up-formula-color-dot" style="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Chip in anderen Formeln und als Hervorhebungs-Farbe"></span>
+          <span class="up-formula-color-dot" style="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Akzent in anderen Formeln und als Hervorhebungs-Farbe"></span>
           <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
           <span class="up-formula-status"></span>
           <span class="up-formula-head-spacer"></span>
@@ -651,20 +631,19 @@
         // Andere Formeln sind wie Variablen per bloßem Namen referenzierbar
         // (siehe currentVarTypes()/Datei-Kopfkommentar zu Formel-Referenzen) -
         // daher hier ebenfalls als "bekannt" gemeldet, damit ihr Name beim
-        // Tippen zum Chip einrastet. Der eigene Name bleibt bewusst mit drin
-        // (keine Sonderbehandlung für Selbstreferenz) - eine versehentliche
-        // Selbstreferenz chippt dann zwar auch, wird aber beim Berechnen als
-        // zyklisch erkannt und klar gemeldet (siehe berechnen()).
+        // Tippen die Referenz-Akzentfarbe bekommt (siehe identColorFor unten).
+        // Der eigene Name bleibt bewusst mit drin (keine Sonderbehandlung für
+        // Selbstreferenz) - eine versehentliche Selbstreferenz wird beim
+        // Berechnen als zyklisch erkannt und klar gemeldet (siehe berechnen()).
         knownNames: () => new Set([
           ...vars.map(v => v.alias.trim()).filter(Boolean),
           ...formulas.map(x => x.name.trim()).filter(Boolean)
         ]),
         getCandidates: exprCandidates,
         // Eine referenzierte Formel trägt ihre eigene Identitätsfarbe (siehe
-        // formulaColorFor()) statt der generischen Variablen-Chip-Farbe -
-        // macht auf einen Blick sichtbar, DASS und WELCHE andere Formel hier
-        // eingeflossen ist.
-        chipColorFor: formulaColorByName,
+        // formulaColorFor()) statt der generischen Variablenfarbe - macht auf
+        // einen Blick sichtbar, DASS und WELCHE andere Formel hier eingeflossen ist.
+        identColorFor: formulaColorByName,
         onRevalidate: () => validateFormulaRow(rowEl, f)
       });
       validateFormulaRow(rowEl, f);
@@ -788,7 +767,6 @@
       statusEl.title = msg || 'Gültig';
     });
     renderBausteinSummary();
-    renderSidebar();
   }
 
   // Ein-Zeilen-Zusammenfassung im (standardmäßig eingeklappten) Bausteine-
@@ -802,126 +780,6 @@
       ...funcs.filter(f => f.name.trim()).map(f => f.name.trim() + '()')
     ];
     els.bausteinPanelSummary.textContent = parts.length ? parts.join(', ') : 'Keine Variablen/Funktionen definiert';
-  }
-
-  // Live-Symbolübersicht ("IDE-Gefühl") neben Variablen/Funktionen/Formeln -
-  // rein lesend/anzeigend, außer: Klick auf einen Eintrag fügt ihn in das
-  // GERADE FOKUSSIERTE Ausdrucksfeld ein (siehe insertTextAtInput()). Wird
-  // aus validateAllInline() heraus bei jeder Variablen-/Funktionsänderung
-  // neu aufgebaut (Formeln selbst tauchen hier nicht auf, sie beeinflussen
-  // die Symbolliste nicht).
-  function renderSidebar() {
-    if (!els.sidebar) return;
-    const cols = sourceCols();
-    const boundIdx = new Set(vars.map(v => v.colIndex));
-    const unboundCols = cols.filter(c => !boundIdx.has(c.index));
-
-    // argRanges (Primitiven/eigene Funktionen): ermöglicht auch beim Einfügen
-    // AUS DER SEITENLEISTE die Tabstop-Kette - ohne sie sprang die Auswahl
-    // nach dem ersten Platzhalter nicht weiter und der nächste Klick landete
-    // am Cursor statt im nächsten Argument ("DauerSeit(K1GRUEN, zustand)").
-    // color (optional): Farbpunkt vor dem Namen - für Formeln (siehe unten),
-    // dieselbe Identitätsfarbe wie ihr Referenz-Chip/Hervorhebungsband
-    // (formulaColorFor()).
-    const item = (name, meta, insertText, selStart, selEnd, muted, argRanges, color) =>
-      `<div class="fsb-item${muted ? ' fsb-item-muted' : ''}" data-insert="${esc(insertText)}" data-sel-start="${selStart}" data-sel-end="${selEnd}"${argRanges ? ` data-arg-ranges="${esc(JSON.stringify(argRanges))}"` : ''} title="${esc(meta)}">
-        <span class="fsb-item-label">${color ? `<span class="fsb-item-dot" style="background:${color}"></span>` : ''}<span class="fsb-item-name">${esc(name)}</span></span><span class="fsb-item-meta">${esc(meta)}</span>
-      </div>`;
-    // .fsb-section-body kapselt die Einträge in einen eigenen Scrollbereich
-    // (siehe components.css) - eine lange Objekt-/Variablenliste schiebt so
-    // nicht die nachfolgenden Abschnitte aus dem Blickfeld.
-    const section = (title, inner) => `<div class="fsb-section"><div class="fsb-section-title">${esc(title)}</div><div class="fsb-section-body">${inner || '<div class="fsb-empty">–</div>'}</div></div>`;
-
-    const varsHtml = vars.filter(v => v.alias.trim()).map(v => {
-      const alias = v.alias.trim();
-      const col = cols.find(c => c.index === v.colIndex);
-      return item(alias, col ? `${col.kuerzel} ${col.name}` : '?', alias, alias.length, alias.length);
-    }).join('');
-
-    const formulasHtml = formulas.filter(f => f.name.trim()).map(f => {
-      const name = f.name.trim();
-      return item(name, 'Formel', name, name.length, name.length, false, null, formulaColorFor(f));
-    }).join('');
-
-    const funcsHtml = funcs.filter(f => f.name.trim()).map(f => {
-      const name = f.name.trim();
-      const params = f.params.map(p => p.trim()).filter(Boolean);
-      const argList = params.join(', ');
-      const ranges = params.length ? argRangesFor(name, params) : [{ start: name.length + 1, end: name.length + 1 }];
-      return item(name, `(${argList})`, `${name}(${argList})`, ranges[0].start, ranges[0].end, false, ranges);
-    }).join('');
-
-    const primHtml = GZ.exprEngine.PRIMITIVE_INFO.map(p => {
-      const argList = p.params.join(', ');
-      const ranges = argRangesFor(p.name, p.params);
-      return item(p.name, `(${argList})`, `${p.name}(${argList})`, ranges[0].start, ranges[0].end, false, ranges);
-    }).join('');
-
-    const katChips = Object.entries(GZ.exprEngine.KAT_TOKENS).map(([tok, katType]) =>
-      `<span class="fsb-chip${katType === 'KAT_DET' ? ' fsb-chip-det' : ''}" data-insert="${esc(tok)}" data-sel-start="${tok.length}" data-sel-end="${tok.length}" title="${katType === 'KAT_SG' ? 'Signalgruppen-Zustand' : 'Detektor-Zustand'}">${esc(tok)}</span>`
-    ).join('');
-
-    const objHtml = unboundCols.map(c =>
-      `<div class="fsb-item fsb-item-muted" data-col-index="${c.index}" title="${esc(c.kuerzel)}">
-        <span class="fsb-item-name">${esc(c.name)}</span><span class="fsb-item-meta">${esc(c.kuerzel)}</span>
-      </div>`
-    ).join('');
-
-    els.sidebar.innerHTML = [
-      section('Variablen', varsHtml),
-      section('Formeln', formulasHtml),
-      section('Funktionen', funcsHtml),
-      section('Primitiven', primHtml),
-      section('Zustände', `<div class="fsb-chips">${katChips}</div>`),
-      section('Objekte (ohne Variable)', objHtml)
-    ].join('');
-
-    els.sidebar.querySelectorAll('[data-insert]').forEach(el => {
-      el.onmousedown = ev => {
-        ev.preventDefault(); // Fokus im Ausdrucksfeld erhalten (siehe insertTextAtFocused())
-        let ranges = null;
-        try { ranges = el.dataset.argRanges ? JSON.parse(el.dataset.argRanges) : null; } catch (e) { ranges = null; }
-        insertTextAtFocused(el.dataset.insert, Number(el.dataset.selStart), Number(el.dataset.selEnd), ranges);
-      };
-    });
-    els.sidebar.querySelectorAll('[data-col-index]').forEach(el => {
-      el.onmousedown = ev => {
-        ev.preventDefault();
-        // Erst prüfen, OB überhaupt eingefügt werden kann - sonst würde ein
-        // Klick ohne fokussiertes Feld still (nur mit Hinweis, aber ohne
-        // sichtbaren Effekt) trotzdem eine Variable anlegen, was wie ein
-        // Bug wirkt (Seiteneffekt ohne Ergebnis).
-        if (!activeExprWrap()) {
-          if (GZ.snackbar) GZ.snackbar.show('Kein Eingabefeld aktiv', { type: 'info', description: 'Zuerst in ein Funktions- oder Formelfeld klicken, dann aus der Übersicht auswählen.' });
-          return;
-        }
-        const col = cols.find(c => c.index === Number(el.dataset.colIndex));
-        if (!col) return;
-        const alias = resolveOrCreateVarForCol(col);
-        insertTextAtFocused(alias, alias.length, alias.length);
-      };
-    });
-  }
-
-  // Liefert den .expr-input-wrap des aktuell fokussierten Ausdrucksfelds
-  // (document.activeElement bleibt dank preventDefault auf mousedown der
-  // Sidebar-Klicks das zuvor fokussierte Feld, siehe renderSidebar()) oder
-  // null. Der wrap trägt __exprInsertAt (siehe GZ.exprEditor.setup()), über den
-  // die Sidebar einfügt, ohne Modell-Interna der jeweiligen Zeile zu kennen.
-  function activeExprWrap() {
-    const el = document.activeElement;
-    if (!el || !el.classList || !el.classList.contains('expr-editor')) return null;
-    return el.closest('.expr-input-wrap');
-  }
-
-  // Fügt Text in das aktuell fokussierte Ausdrucksfeld ein - no-op mit
-  // Hinweis, wenn gerade keins fokussiert ist (siehe activeExprWrap()).
-  function insertTextAtFocused(text, selStart, selEnd, argRanges) {
-    const wrap = activeExprWrap();
-    const ok = wrap && wrap.__exprInsertAt && wrap.__exprInsertAt(text, selStart, selEnd, argRanges);
-    if (!ok && GZ.snackbar) {
-      GZ.snackbar.show('Kein Eingabefeld aktiv', { type: 'info', description: 'Zuerst in ein Funktions- oder Formelfeld klicken, dann aus der Übersicht auswählen.' });
-    }
   }
 
   // Baut für eine SG-/DET-Variable EINMAL (nicht pro Zeile) ihre Segmente +
@@ -1117,8 +975,8 @@
     });
 
     // ---------- 5) Ergebnis in ORIGINALER Reihenfolge zusammenstellen ----------
-    // (nicht Auswertungsreihenfolge - die Objekt-/Sidebar-Liste soll stabil
-    // in der vom Nutzer angelegten Formel-Reihenfolge bleiben.)
+    // (nicht Auswertungsreihenfolge - die Objekt-Liste in umlaufpruefung.js
+    // soll stabil in der vom Nutzer angelegten Formel-Reihenfolge bleiben.)
     const computed = [];
     const skippedList = []; // {name, message} - für Hint-Zeile UND Snackbar
     formulas.forEach(f => {

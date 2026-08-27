@@ -46,10 +46,6 @@
   let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, incomplete, values, spans, kind, skip}
   let windowCount = 25, windowStartIdx = 0, showAll = false;
 
-  // Aktueller Autocomplete-Zustand - es ist immer höchstens ein Dropdown
-  // gleichzeitig offen (das des fokussierten Ausdrucksfelds).
-  let acItems = [], acActive = -1, acRange = null;
-
   const SG_ARG_FNS = new Set(['An', 'Ab', 'TF', 'RG', 'GE', 'Versatz', 'Ueberschneidung']);
   const DET_ARG_FNS = new Set(['Ausgeloest', 'AnzahlAusloesungen']);
   const US_FUNCTIONS = ['Versatz', 'Ueberschneidung', 'An', 'Ab', 'TF', 'RG', 'GE', 'Ausgeloest', 'AnzahlAusloesungen', 'MOD'];
@@ -191,46 +187,32 @@
           <input type="text" class="us-col-label" placeholder="Bezeichnung, z. B. Versatz S1→S2" value="${esc(col.label)}">
           <button type="button" class="us-row-remove">✕ entfernen</button>
         </div>
-        <div class="us-expr-wrap">
-          <input type="text" class="us-col-expr" placeholder="z. B. Versatz(S1, S2)" value="${esc(col.expr)}" autocomplete="off" spellcheck="false">
-          <ul class="us-autocomplete" hidden></ul>
-        </div>
+        <span class="expr-input-wrap">
+          <div class="us-col-expr expr-editor mono-input" contenteditable="true" spellcheck="false" data-placeholder="z. B. Versatz(S1, S2)" role="textbox" aria-multiline="false"></div>
+          <button type="button" class="expr-palette-btn" title="Funktionen/Signalgruppen/Detektoren einfügen">ƒ</button>
+          <div class="expr-autocomplete" hidden></div>
+        </span>
         <div class="us-col-error" hidden><div class="us-col-error-msg"></div><div class="us-col-error-snippet"></div></div>
       </div>`).join('')
       : '<div class="cfg-empty" style="margin:12px 16px 0;">Keine Spalte definiert – „+ Spalte hinzufügen“ klicken.</div>';
 
     els.colRows.querySelectorAll('.us-col-row').forEach(rowEl => {
       const id = rowEl.dataset.colId;
+      const col = GZ.state.data.umlaufSpalten.find(c => String(c.id) === id);
+      if (!col) return;
       const labelInput = rowEl.querySelector('.us-col-label');
-      const exprInput = rowEl.querySelector('.us-col-expr');
-      const listEl = rowEl.querySelector('.us-autocomplete');
-      const findCol = () => GZ.state.data.umlaufSpalten.find(c => String(c.id) === id);
       let debounceTimer = null;
       const scheduleRecompute = () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(recompute, 300); };
 
-      labelInput.addEventListener('input', () => { const c = findCol(); if (c) c.label = labelInput.value; scheduleRecompute(); });
+      labelInput.addEventListener('input', () => { col.label = labelInput.value; scheduleRecompute(); });
       labelInput.addEventListener('blur', () => { clearTimeout(debounceTimer); recompute(); });
 
-      exprInput.addEventListener('input', () => {
-        const c = findCol(); if (c) c.expr = exprInput.value;
-        showAutocomplete(exprInput, listEl);
-        scheduleRecompute();
-      });
-      exprInput.addEventListener('focus', () => showAutocomplete(exprInput, listEl));
-      exprInput.addEventListener('blur', () => {
-        // Verzögert schließen, damit ein Klick auf einen Vorschlag (mousedown
-        // feuert vor blur) noch als solcher ankommt, bevor die Liste weg ist.
-        setTimeout(() => { listEl.hidden = true; }, 150);
-        clearTimeout(debounceTimer);
-        recompute();
-      });
-      wireExprKeyboard(exprInput, listEl);
-      listEl.addEventListener('mousedown', e => {
-        const li = e.target.closest('li');
-        if (!li) return;
-        e.preventDefault();
-        clearTimeout(debounceTimer);
-        acceptSuggestion(exprInput, listEl, acItems[Number(li.dataset.idx)]);
+      GZ.exprEditor.setup(rowEl, {
+        getText: () => col.expr,
+        setText: v => { col.expr = v; },
+        knownNames: () => new Set(),
+        getCandidates: candidatesFor(col),
+        onRevalidate: recompute
       });
 
       rowEl.querySelector('.us-row-remove').addEventListener('click', () => {
@@ -242,28 +224,24 @@
   }
 
   /* ---------------- Autocomplete ---------------- */
+  // Nutzt den mit formulaBuilder.js/oepnvQa.js geteilten GZ.exprEditor
+  // (siehe dort) - hier bleibt nur die Kandidatenliste, kontextsensitiv nach
+  // der Funktion, in der der Cursor gerade steht: innerhalb An(/Ab(/TF(/RG(/
+  // GE(/Versatz(/Ueberschneidung( -> Signalgruppennamen, innerhalb
+  // Ausgeloest(/AnzahlAusloesungen( -> Detektor-/APW-Namen, sonst Funktionen
+  // + skalare Bezeichner (TU/TU_MED/SPL).
+  const US_PRIMITIVE_INFO = GZ.exprEngine.PRIMITIVE_INFO.filter(p => US_FUNCTIONS.includes(p.name));
 
-  const AC_KIND_LABEL = { fn: 'Funktion', sg: 'Signalgruppe', det: 'Detektor/Wert', scalar: 'Bezeichner' };
-
-  // Kontextsensitiv: innerhalb An(/Ab(/TF(/RG(/GE( -> Signalgruppennamen,
-  // innerhalb Ausgeloest(/AnzahlAusloesungen( -> Detektor-/APW-Namen, sonst
-  // Funktionen + skalare Bezeichner (TU/TU_MED/SPL). tokenize() liefert bei
-  // einem (seltenen, während des Tippens meist irrelevanten) Lexer-Fehler
-  // keine Teil-Token-Liste - in dem Fall werden schlicht keine Vorschläge
-  // gezeigt, statt eine unvollständige Liste zu raten.
-  function suggestAt(text, cursorPos, index) {
+  // Name der Funktion, deren Argumentliste caretPos gerade umschließt, oder
+  // null (Top-Level bzw. Lexer-Fehler - während des Tippens meist
+  // irrelevant, dann schlicht keine kontextsensitive Einschränkung).
+  function ownerFnAt(text, caretPos) {
     let tokens;
-    try { tokens = GZ.exprEngine.tokenize(text); }
-    catch (e) { return { replaceStart: cursorPos, replaceEnd: cursorPos, items: [] }; }
-
-    let replaceStart = cursorPos, replaceEnd = cursorPos, partial = '';
-    const cur = tokens.find(t => t.type === 'IDENT' && t.pos <= cursorPos && cursorPos <= t.end);
-    if (cur) { replaceStart = cur.pos; replaceEnd = cur.end; partial = text.slice(cur.pos, cursorPos); }
-
+    try { tokens = GZ.exprEngine.tokenize(text); } catch (e) { return null; }
     const stack = [];
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
-      if (t.pos >= replaceStart) break;
+      if (t.pos >= caretPos) break;
       if (t.type === '(') {
         const prevTok = tokens[i - 1];
         stack.push(prevTok && prevTok.type === 'IDENT' && prevTok.end === t.pos ? prevTok.value : null);
@@ -271,68 +249,32 @@
         stack.pop();
       }
     }
-    const owner = stack.length ? stack[stack.length - 1] : null;
-
-    let candidates;
-    if (owner && SG_ARG_FNS.has(owner)) candidates = index.sgList.map(n => ({ value: n, label: n, kind: 'sg' }));
-    else if (owner && DET_ARG_FNS.has(owner)) candidates = index.detList.map(n => ({ value: n, label: n, kind: 'det' }));
-    else candidates = US_FUNCTIONS.map(n => ({ value: n, label: n + '(…)', kind: 'fn' }))
-      .concat(US_SCALARS.map(n => ({ value: n, label: n, kind: 'scalar' })));
-
-    const p = partial.toLowerCase();
-    const items = candidates.filter(c => c.value.toLowerCase().startsWith(p)).slice(0, 8);
-    return { replaceStart, replaceEnd, items };
+    return stack.length ? stack[stack.length - 1] : null;
   }
 
-  function showAutocomplete(input, listEl) {
-    if (!ctxAll) { listEl.hidden = true; return; }
-    const s = suggestAt(input.value, input.selectionStart, ctxAll.index);
-    acRange = { start: s.replaceStart, end: s.replaceEnd };
-    acItems = s.items;
-    acActive = -1;
-    if (!acItems.length) { listEl.hidden = true; return; }
-    listEl.innerHTML = acItems.map((it, idx) =>
-      `<li data-idx="${idx}"><span>${esc(it.label)}</span><span class="us-ac-kind">${esc(AC_KIND_LABEL[it.kind] || '')}</span></li>`
-    ).join('');
-    listEl.hidden = false;
-  }
-
-  function highlightActive(listEl) {
-    [...listEl.children].forEach((li, idx) => li.classList.toggle('active', idx === acActive));
-  }
-
-  function wireExprKeyboard(input, listEl) {
-    input.addEventListener('keydown', e => {
-      if (!listEl.hidden && acItems.length) {
-        if (e.key === 'ArrowDown') { e.preventDefault(); acActive = (acActive + 1) % acItems.length; highlightActive(listEl); return; }
-        if (e.key === 'ArrowUp') { e.preventDefault(); acActive = (acActive - 1 + acItems.length) % acItems.length; highlightActive(listEl); return; }
-        if (e.key === 'Enter' || e.key === 'Tab') {
-          e.preventDefault();
-          acceptSuggestion(input, listEl, acItems[acActive >= 0 ? acActive : 0]);
-          return;
-        }
-        if (e.key === 'Escape') { listEl.hidden = true; return; }
+  // Liefert die getCandidates()-Funktion für EINE Spaltenzeile (siehe
+  // GZ.exprEditor Kopfkommentar - caretPos wird von dort durchgereicht).
+  function candidatesFor(col) {
+    return caretPos => {
+      const text = col.expr || '';
+      const owner = ctxAll ? ownerFnAt(text, caretPos == null ? text.length : caretPos) : null;
+      if (owner && SG_ARG_FNS.has(owner)) {
+        return ctxAll.index.sgList.map(n => ({ group: 'Signalgruppen', label: n, insertText: n, selStart: n.length, selEnd: n.length, kind: 'sg' }));
       }
-      if (e.key === 'Enter') input.blur();
-    });
-  }
-
-  function acceptSuggestion(input, listEl, item) {
-    if (!item || !acRange) return;
-    const val = input.value;
-    const insertText = item.kind === 'fn' ? item.value + '(' : item.value;
-    const before = val.slice(0, acRange.start);
-    const after = val.slice(acRange.end);
-    input.value = before + insertText + after;
-    const cursor = before.length + insertText.length;
-    listEl.hidden = true;
-    acItems = []; acActive = -1; acRange = null;
-    input.focus();
-    input.setSelectionRange(cursor, cursor);
-    const rowEl = input.closest('.us-col-row');
-    const col = GZ.state.data.umlaufSpalten.find(c => String(c.id) === rowEl.dataset.colId);
-    if (col) col.expr = input.value;
-    recompute();
+      if (owner && DET_ARG_FNS.has(owner)) {
+        return ctxAll.index.detList.map(n => ({ group: 'Detektor-/APW-Werte', label: n, insertText: n, selStart: n.length, selEnd: n.length, kind: 'det' }));
+      }
+      const items = US_PRIMITIVE_INFO.map(p => {
+        const argList = p.params.join(', ');
+        const ranges = GZ.exprEngine.argRangesFor(p.name, p.params);
+        return {
+          group: 'Funktionen', label: p.name, hint: `(${argList})`, desc: p.desc,
+          insertText: `${p.name}(${argList})`, selStart: ranges[0].start, selEnd: ranges[0].end, kind: 'fn'
+        };
+      });
+      US_SCALARS.forEach(s => items.push({ group: 'Bezeichner', label: s, insertText: s, selStart: s.length, selEnd: s.length, kind: 'scalar' }));
+      return items;
+    };
   }
 
   /* ---------------- Auswertung ---------------- */
@@ -358,20 +300,23 @@
 
   function renderColumnError(rowEl, entry) {
     const errBox = rowEl.querySelector('.us-col-error');
-    const exprInput = rowEl.querySelector('.us-col-expr');
+    const exprEl = rowEl.querySelector('.us-col-expr');
+    const wrap = rowEl.querySelector('.expr-input-wrap');
     // "incomplete" = mitten im Tippen ein für sich unfertiger, aber kein
     // wirklich falscher Ausdruck (siehe ExprError.incomplete in
     // exprEngine.js) - bewusst NICHT als roter Fehler markiert, sonst
     // blinkt bei jedem Tastendruck eine Fehlermeldung auf.
     if (!entry || !entry.error || entry.incomplete) {
       errBox.hidden = true;
-      exprInput.classList.remove('invalid');
+      exprEl.classList.remove('invalid');
+      if (wrap && wrap.__exprRefreshHighlight) wrap.__exprRefreshHighlight(null);
       return;
     }
-    exprInput.classList.add('invalid');
+    exprEl.classList.add('invalid');
     errBox.hidden = false;
     errBox.querySelector('.us-col-error-msg').textContent = entry.error.message;
-    errBox.querySelector('.us-col-error-snippet').innerHTML = renderErrorSnippet(exprInput.value, entry.error.pos);
+    errBox.querySelector('.us-col-error-snippet').innerHTML = renderErrorSnippet(entry.col.expr, entry.error.pos);
+    if (wrap && wrap.__exprRefreshHighlight) wrap.__exprRefreshHighlight(entry.error.pos);
   }
 
   function findPerRowOnlyUsage(text) {
