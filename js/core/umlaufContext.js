@@ -66,7 +66,16 @@
       const l = col.name.toLowerCase();
       if (!det.has(l)) { det.set(l, col.name); detList.push(col.name); }
     });
-    const varTypes = { TU: 'NUM', TU_MED: 'NUM', SPL: 'TEXT' };
+    // EREIGNIS: 1-basierte Zeilennummer INNERHALB des Umlaufs (siehe
+    // cyc.eventIdx/eventCount in buildAll()) - dieselbe Zahl, die die
+    // Tabelle in der Spalte "Ereignis" anzeigt. Erlaubt Formeln, die
+    // ansonsten je Umlauf mehrfach wiederholte "gar kein Ereignis"-Zeilen
+    // (siehe ISTLEER()) auf die JEWEILS ERSTE Zeile des Umlaufs begrenzen,
+    // z.B. WENN(EREIGNIS > 1 AND ISTLEER(An(X)), LEER, ...) - ohne das würde
+    // ein UNBETEILIGTES Objekt, das in diesem Umlauf mehrfach auslöst (und
+    // damit die Zeilenanzahl des Umlaufs hochtreibt), dieselbe "kein
+    // Ereignis von X"-Aussage einmal je seiner eigenen Vorkommen wiederholen.
+    const varTypes = { TU: 'NUM', TU_MED: 'NUM', SPL: 'TEXT', EREIGNIS: 'NUM' };
     sgList.forEach(n => { varTypes[n] = 'SG'; });
     detList.forEach(n => { varTypes[n] = 'DET'; });
     return { sg, det, sgList, detList, varTypes };
@@ -180,7 +189,7 @@
         // handle.rawSample()/handle.durationAt() umzurechnen. Gilt für ALLE
         // Zeilen desselben Umlaufs gleich (der Umlauf selbst wird ja nicht
         // aufgeteilt, nur die pro Zeile sichtbaren Ereignisse).
-        const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, __cycleStart: start };
+        const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, EREIGNIS: e + 1, __cycleStart: start };
         index.sgList.forEach(name => {
           const evs = eventsByName.get(name)[i];
           scope[name] = { class: 'SG', cycleMetrics: sgCycleMetricsForRow(evs, e), rawSample: rawSamplerByName.get(name), durationAt: durationAtByName.get(name) };
