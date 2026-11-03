@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grünzeitanalyse – Entwurf</title>
+<style>
+/* Tokens 1:1 aus css/tokens.css */
+:root{
+  --bg-app:#eef1f4; --bg-header:#141d27; --bg-header-2:#1c2733;
+  --bg-surface:#fff; --bg-surface-2:#f6f8fa; --bg-surface-3:#eef2f5;
+  --border:#dde3e9; --border-strong:#c2ccd6;
+  --text:#182430; --text-muted:#5a6774; --text-faint:#8996a3;
+  --text-on-dark:#eef2f6;
+  --accent:#2f6fa3; --accent-strong:#1f5580; --accent-bg:#e8f1f8;
+  --sig-red:#c0272b; --sig-redyellow:#c17a1f; --sig-yellow:#e0a721; --sig-green:#1f8a4c; --sig-dark:#4b5563;
+  --req-marker:#7c4fd1;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Courier New", monospace;
+
+  /* neu, nur für diese Ansicht */
+  --va-tint: rgba(47,111,163,.085);   /* Hintergrund: verkehrsabhängiger Betrieb */
+  --fz-tint: rgba(24,36,48,.05);      /* Hintergrund: Festzeit */
+  --spl-a:#1f8a4c;                    /* Grünzeit, 1. Signalzeitenplan */
+  --spl-b:#9bd2b1;                    /* Grünzeit, 2. Signalzeitenplan */
+  --spl-c:#d8cf8a;
+}
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+body{ background:var(--bg-app); color:var(--text); font-family:var(--sans); font-size:13.5px; line-height:1.45; -webkit-font-smoothing:antialiased; }
+button{ font-family:inherit; }
+
+/* ---------- App-Rahmen (unverändert gegenüber heute) ---------- */
+.topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  background:linear-gradient(180deg,var(--bg-header-2),var(--bg-header)); color:var(--text-on-dark); padding:10px 24px; }
+.brand{ display:flex; align-items:center; gap:11px; }
+.brand-badge{ width:28px; height:28px; border-radius:6px; overflow:hidden; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; box-shadow:0 0 0 1px rgba(255,255,255,.15); }
+.brand-badge .b1{ background:var(--sig-red);} .brand-badge .b2{ background:var(--sig-yellow);} .brand-badge .b3{ background:var(--sig-green);} .brand-badge .b4{ background:var(--sig-dark);}
+.brand-title{ font-size:14.5px; font-weight:700; letter-spacing:.01em; }
+.toolbar{ display:flex; gap:8px; }
+.topbar button{ font-size:12.5px; font-weight:600; padding:7px 13px; border-radius:4px; cursor:default;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18); color:var(--text-on-dark); }
+.topbar button.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.data-panel{ background:#fff; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; padding:10px 24px; }
+.data-panel h2{ margin:0; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
+.data-panel .sum{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); }
+.data-panel .sum .ok{ color:var(--sig-green); font-weight:700; }
+.data-panel .tg{ font-size:11px; color:var(--accent); font-weight:600; }
+.tabbar{ display:flex; gap:6px; flex-wrap:wrap; padding:10px 24px; background:#fff; border-bottom:1px solid var(--border); }
+.tab-btn{ border:1px solid transparent; background:transparent; color:var(--text-muted); font:inherit; font-size:12.5px; font-weight:600; padding:7px 16px; border-radius:999px; }
+.tab-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+
+/* ---------- Grünzeitanalyse: ein durchgehender Bericht statt Karten ---------- */
+.sheet{ background:var(--bg-surface); }
+.page{ padding:18px 32px 56px; max-width:1560px; }
+
+.page-head{ display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; padding-bottom:14px; border-bottom:1px solid var(--border-strong); }
+.ctx{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); }
+.ctx b{ color:var(--text); font-weight:600; }
+.head-tools{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.seg{ display:flex; gap:2px; }
+.seg button{ font-size:11.5px; font-weight:600; padding:4px 11px; border:1px solid var(--border-strong); background:#fff; color:var(--text); border-radius:4px; cursor:pointer; }
+.seg button.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.chk{ font-size:11.5px; color:var(--text-muted); display:flex; align-items:center; gap:6px; cursor:pointer; }
+
+.sec{ padding:26px 0 30px; border-bottom:1px solid var(--border-strong); }
+.sec:last-of-type{ border-bottom:none; }
+.sec-label{ display:flex; align-items:baseline; gap:10px; font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
+.sec-no{ font-family:var(--mono); color:var(--text-faint); font-weight:600; }
+.claim{ font-size:19px; line-height:1.35; font-weight:600; margin:7px 0 18px; max-width:92ch; letter-spacing:-.005em; }
+.claim .dim{ color:var(--text-muted); font-weight:500; }
+.claim.plain{ margin-bottom:10px; }
+#claim3,#claim4{ font-size:15px; line-height:1.6; }
+
+.fig-title{ display:flex; justify-content:space-between; align-items:baseline; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); margin:2px 0 4px; }
+.fig-title b{ color:var(--text); font-weight:600; }
+.legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--text-muted); }
+.legend .it{ display:inline-flex; align-items:center; gap:6px; }
+.sw{ width:14px; height:10px; display:inline-block; border:1px solid rgba(0,0,0,.18); }
+.sw.va{ background:var(--va-tint); border-color:rgba(47,111,163,.35); }
+.sw.fz{ background:var(--fz-tint); border-color:rgba(24,36,48,.25); }
+
+.params{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); margin:16px 0 10px; }
+.params input{ width:52px; font:inherit; font-family:var(--mono); font-size:12px; padding:3px 6px; border:1px solid var(--border-strong); border-radius:4px; background:#fff; color:var(--text); text-align:right; }
+
+/* Tabellen: nur Haarlinien, Zahlen rechtsbündig in Mono */
+.tscroll{ overflow-x:auto; }
+table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+th,td{ padding:7px 12px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:middle; }
+th:first-child,td:first-child{ text-align:left; padding-left:0; }
+th{ font-size:10.5px; letter-spacing:.03em; text-transform:uppercase; color:var(--text-muted); font-weight:700; border-bottom:1px solid var(--border-strong); vertical-align:bottom; }
+td{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
+td:first-child{ font-family:var(--sans); }
+td.l,th.l{ text-align:left; }
+td.ch,th.ch{ padding:5px 12px; text-align:left; }
+tbody tr[data-sg]{ cursor:pointer; }
+tbody tr[data-sg]:hover td{ background:var(--bg-surface-2); }
+tbody tr.sel td:first-child .nm{ box-shadow:inset 0 -2px 0 var(--accent); }
+tr.grp td{ background:var(--bg-surface-2); font-family:var(--sans); font-size:11px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--text-muted);
+  border-top:2px solid var(--border-strong); padding:6px 0 6px 10px; text-align:left; cursor:default; }
+tr.grp td .r{ font-weight:600; text-transform:none; letter-spacing:0; margin-left:10px; color:var(--text); }
+.nm{ font-family:var(--mono); font-weight:700; font-size:12.5px; display:inline-block; }
+.sub{ display:block; }
+.sub{ font-size:10.5px; color:var(--text-muted); font-family:var(--sans); }
+.v{ font-family:var(--sans); font-weight:700; font-size:12.5px; }
+.v.va{ color:var(--accent-strong); }
+.v.fz{ color:var(--text); }
+.v.na{ color:var(--text-faint); font-weight:500; }
+.dim{ color:var(--text-faint); }
+.note{ font-size:11.5px; color:var(--text-muted); margin-top:10px; max-width:110ch; line-height:1.5; }
+.note b{ color:var(--text); font-weight:600; }
+
+/* Trend */
+.trend-tools{ display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin:2px 0 10px; }
+.sgpick{ display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; }
+.sgpick label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
+.sgpick .nm{ font-size:12.5px; }
+.tblock + .tblock{ margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
+.thead{ display:flex; align-items:baseline; gap:10px; margin-bottom:2px; }
+.tcap{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); margin-top:4px; }
+.host{ width:100%; }
+.host svg{ display:block; }
+svg text{ font-family:var(--mono); font-size:10px; fill:var(--text-muted); text-transform:none; letter-spacing:0; }
+th.nocase{ text-transform:none; }
+svg .lab{ font-size:10.5px; }
+
+#tip{ position:fixed; z-index:99; pointer-events:none; display:none; background:var(--bg-header-2); color:var(--text-on-dark);
+  font-family:var(--mono); font-size:11px; line-height:1.5; padding:6px 9px; border-radius:4px; white-space:nowrap; }
+
+/* Entwurfsanmerkungen: gehören nicht zum Produkt */
+.mk{ font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.02em; text-transform:none; color:var(--accent-strong);
+  border:1px dashed var(--accent); padding:0 5px; border-radius:2px; margin-left:4px; }
+.drafts-off .mk, .drafts-off .draft{ display:none; }
+.draft{ margin:14px 0 4px; padding:10px 14px; background:var(--bg-surface-2); border:1px dashed var(--border-strong); font-family:var(--mono); font-size:11.5px; line-height:1.7; color:var(--text-muted); }
+.draft b{ color:var(--text); font-family:var(--sans); }
+</style>
+</head>
+<body>
+<div id="app">
+
+<header class="topbar">
+  <div class="brand"><div class="brand-badge"><span class="b1"></span><span class="b2"></span><span class="b3"></span><span class="b4"></span></div>
+    <div class="brand-title">Grünzeitanalyse</div></div>
+  <div class="toolbar"><button>Beispieldaten laden</button><button>Datei öffnen …</button><button class="primary">Analysieren</button><button>Kennzahlen als CSV</button></div>
+</header>
+<section class="data-panel">
+  <h2>Rohdaten</h2>
+  <span class="sum"><span class="ok">OK</span> · 4 Signalgruppe(n) · 06:00–10:00</span>
+  <span class="tg">Bearbeiten</span>
+</section>
+<nav class="tabbar">
+  <button class="tab-btn active">Grünzeitanalyse</button><button class="tab-btn">Stammdaten LSA</button><button class="tab-btn">Phasenauswertung</button>
+  <button class="tab-btn">Wartezeit ab Anforderung</button><button class="tab-btn">ÖPNV — Anmeldung/Abmeldung</button><button class="tab-btn">Umlaufprüfung</button><button class="tab-btn">Umlaufstatistiken</button>
+</nav>
+
+<main class="sheet"><div class="page">
+
+  <div class="page-head">
+    <div class="ctx" id="ctx"></div>
+    <div class="head-tools">
+      <label class="chk"><input type="checkbox" id="mkToggle" checked> Entwurfsmarker</label>
+      <div class="seg" id="scopeSeg">
+        <button type="button" data-scope="total" class="active">Gesamter Mitschnitt</button>
+        <button type="button" data-scope="spl">Je Signalzeitenplan</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="draft">
+    <b>Entwurf – Änderungen gegenüber heute</b><br>
+    entfällt: Signalgruppen-Leiste links · Signalzeitendiagramm samt Fenster-Steuerung und Phasen-Overlay · „n auffällige Zyklen“ · eigene Kennzahlen-Tabelle (steckt jetzt in 1)<br>
+    bleibt: Grünzeit-Trend je Zyklus (2) · Umschalter Gesamt / je Signalzeitenplan · CSV-Export · Dunkel-/Abschaltzeiträume (erscheinen unten, nur wenn vorhanden; hier keine)
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <section class="sec" id="s1">
+    <div class="sec-label"><span class="sec-no">1</span>Lief die Anlage in Festzeit oder verkehrsabhängig?<span class="mk">neu</span></div>
+    <div class="claim" id="claim1"></div>
+
+    <div class="fig-title">
+      <span><b>Umlaufzeit</b> je Umlauf</span>
+      <span class="legend"><span class="it"><span class="sw va"></span>verkehrsabhängig</span><span class="it"><span class="sw fz"></span>Festzeit</span></span>
+    </div>
+    <div class="host" id="tuChart"></div>
+
+    <div class="params">
+      Festzeit, wenn mindestens
+      <input type="number" id="pThr" value="95" min="50" max="100" step="1"> %
+      der Grünzeiten innerhalb Median ±
+      <input type="number" id="pTol" value="1" min="0" max="5" step="1"> s liegen.
+      <span class="dim">Aufzeichnungsraster: 1 s</span>
+    </div>
+    <div class="tscroll"><table id="t1"></table></div>
+    <div class="note" id="note1"></div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="sec" id="s2">
+    <div class="sec-label"><span class="sec-no">2</span>Grünzeit-Trend je Zyklus<span class="mk">bleibt · ohne „auffällige Zyklen“</span></div>
+    <div class="trend-tools" style="margin-top:14px">
+      <div class="sgpick" id="sgpick"></div>
+      <div class="seg" id="modeSeg">
+        <button type="button" data-mode="time" class="active">Zeitverlauf</button>
+        <button type="button" data-mode="cdf">Verteilung (CDF)</button>
+      </div>
+    </div>
+    <div class="legend" style="margin-bottom:6px" id="trendLegend"></div>
+    <div id="trendStack"></div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="sec" id="s3">
+    <div class="sec-label"><span class="sec-no">3</span>Wo im Umlauf bewegt sich die Freigabe?<span class="mk">Vorschlag</span></div>
+    <div class="claim" id="claim3" style="margin-top:7px"></div>
+    <div class="tscroll"><table id="t3"></table></div>
+    <div class="note" id="note3"></div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="sec" id="s4">
+    <div class="sec-label"><span class="sec-no">4</span>Wie oft und wie viel Grün gibt es?<span class="mk">Vorschlag</span></div>
+    <div class="claim" id="claim4" style="margin-top:7px"></div>
+    <div class="tscroll"><table id="t4"></table></div>
+    <div class="note" id="note4"></div>
+  </section>
+
+</div></main>
+</div>
+<div id="tip"></div>
+
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================
+   Beispieldaten (deterministisch erzeugt, kein Messwert!)
+   SPL 12: verkehrsabhängig, freilaufend   |   SPL 14: Festzeit, TU 90 s
+   ===================================================================== */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd = mulberry32(231);
+const randn = () => { let u = 0; while (!u) u = rnd(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*rnd()); };
+const cl = (x,a,b) => Math.max(a, Math.min(b, x));
+
+const T0 = 6*3600, T1 = 10*3600;                       // Sekunden seit 00:00
+const splAt = t => (t >= 7.25*3600 && t < 9.25*3600) ? '14' : '12';
+const SGS = [
+  { id:'K1',  desc:'Hauptrichtung Kfz',          rg:2, ge:3 },
+  { id:'K2',  desc:'Nebenrichtung Kfz',          rg:2, ge:3 },
+  { id:'DF1', desc:'Fußgänger quer Hauptstraße', rg:0, ge:0 },
+  { id:'S1',  desc:'Bus Hauptrichtung',          rg:2, ge:3 }
+];
+const cycles = [];
+(function gen(){
+  let t = T0, fz = 0, i = 0;
+  for (;;) {
+    const spl = splAt(t); let c;
+    if (spl === '12') {
+      const g1 = cl(Math.round(36 + 9*randn()), 18, 52);
+      const dem = rnd() < 0.55;
+      let g2 = cl(Math.round(17 + 6*randn()), 10, 30); if (dem) g2 = Math.max(g2, 16);
+      const tu = Math.max(50, g1 + g2 + 10);
+      const sgv = { K1:{an:0, ab:g1}, K2:{an:g1+5, ab:g1+5+g2}, DF1:null, S1:null };
+      if (dem) sgv.DF1 = { an:g1+6, ab:g1+18 };
+      if (rnd() < 0.32) { const a = Math.floor(rnd()*6), b = Math.floor(rnd()*4); sgv.S1 = { an:a, ab:Math.max(a+8, g1-b) }; }
+      c = { spl, tu, sg:sgv };
+    } else {
+      const bad = (fz === 37);                           // einzelner Eingriff in Festzeit
+      c = { spl, tu:90, sg:{ K1:{an:0, ab:bad?22:48}, K2:{an:53, ab:75}, DF1:{an:54, ab:66}, S1:{an:2, ab:bad?20:46} } };
+      fz++;
+    }
+    if (t + c.tu > T1) break;
+    c.i = i++; c.t = t; cycles.push(c); t += c.tu;
+  }
+})();
+SGS.forEach(s => {
+  s.greens = [];
+  cycles.forEach(c => { const g = c.sg[s.id]; if (g) s.greens.push({ cyc:c, start:c.t+g.an, end:c.t+g.ab, an:g.an, ab:g.ab, g:g.ab-g.an }); });
+  s.greens.forEach((gr,k) => { gr.rot = k ? gr.start - s.rg - (s.greens[k-1].end + s.ge) : null; });
+});
+const splList = [...new Set(cycles.map(c => c.spl))].sort((a,b) => a - b);
+const splColor = spl => ['var(--spl-a)','var(--spl-b)','var(--spl-c)'][splList.indexOf(spl)] || 'var(--spl-c)';
+const runs = [];                                           // zusammenhängende SPL-Abschnitte
+cycles.forEach(c => { const r = runs[runs.length-1]; if (r && r.spl === c.spl) r.t1 = c.t + c.tu; else runs.push({ spl:c.spl, t0:c.t, t1:c.t + c.tu }); });
+runs[runs.length-1].t1 = T1;
+
+/* =====================================================================
+   Kennzahlen
+   ===================================================================== */
+const P = { thr:95, tol:1 };
+const mean = a => a.reduce((x,y)=>x+y,0)/a.length;
+const median = a => { const s=[...a].sort((x,y)=>x-y), m=s.length; return m%2 ? s[(m-1)/2] : (s[m/2-1]+s[m/2])/2; };
+const sd = a => { const m = mean(a); return Math.sqrt(mean(a.map(v => (v-m)**2))); };
+const pct = (a,p) => { const s=[...a].sort((x,y)=>x-y), n=s.length; if(!n) return NaN; if(n===1) return s[0]; const r=p/100*(n-1), lo=Math.floor(r), hi=Math.min(lo+1,n-1); return s[lo]+(r-lo)*(s[hi]-s[lo]); };
+const fmt = (v,d=0) => (v==null || Number.isNaN(v)) ? '–' : v.toFixed(d).replace('.', ',');
+const hhmm = s => String(Math.floor(s/3600)).padStart(2,'0') + ':' + String(Math.floor(s%3600/60)).padStart(2,'0');
+const hhmmss = s => hhmm(s) + ':' + String(Math.floor(s%60)).padStart(2,'0');
+const hmm = s => { const m = Math.round(s/60); return Math.floor(m/60) + ':' + String(m%60).padStart(2,'0') + ' h'; };
+const nameList = a => a.length < 3 ? a.join(' und ') : a.slice(0,-1).join(', ') + ' und ' + a[a.length-1];
+
+function sgStats(s, spl) {
+  const cyc = cycles.filter(c => !spl || c.spl === spl);
+  const gs = s.greens.filter(x => !spl || x.cyc.spl === spl);
+  const N = cyc.length, n = gs.length;
+  if (!n) return { N, n:0 };
+  const gd = gs.map(x => x.g), med = median(gd), mx = Math.max(...gd), mn = Math.min(...gd);
+  const share = gd.filter(v => Math.abs(v - med) <= P.tol).length / n;
+  const fz = share*100 >= P.thr;
+  const an = gs.map(x => x.an), ab = gs.map(x => x.ab), rot = gs.map(x => x.rot).filter(v => v != null);
+  return {
+    N, n, gs, gd, med, mn, mx, sd:sd(gd), share, fz,
+    atMax: gd.filter(v => v === mx).length / n,
+    anMed:median(an), anLo:pct(an,5), anHi:pct(an,95), anSd:sd(an),
+    abMed:median(ab), abLo:pct(ab,5), abHi:pct(ab,95), abSd:sd(ab),
+    rotMed:rot.length ? median(rot) : NaN, rotMax:rot.length ? Math.max(...rot) : NaN,
+    greenShare:median(gs.map(x => x.g / x.cyc.tu)),
+    tuMed:median(cyc.map(c => c.tu))
+  };
+}
+const scopes = () => state.scope === 'total' ? [null] : splList;
+const scopeTitle = spl => {
+  const cyc = cycles.filter(c => c.spl === spl), dur = cyc.reduce((a,c) => a + c.tu, 0);
+  const va = SGS.some(s => { const st = sgStats(s, spl); return st.n && !st.fz; });
+  return `Signalzeitenplan ${spl}<span class="r">${cyc.length} Umläufe · ${hmm(dur)} · ${va ? 'verkehrsabhängig' : 'Festzeit'}</span>`;
+};
+const plantVA = spl => SGS.some(s => { const st = sgStats(s, spl); return st.n && !st.fz; });
+
+const state = { scope:'total', mode:'time', sel:['K1'] };
+
+/* =====================================================================
+   SVG-Helfer
+   ===================================================================== */
+const NS = 'http://www.w3.org/2000/svg';
+function S(tag, attrs, parent){ const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function T(parent, x, y, txt, attrs){ const e = S('text', Object.assign({ x, y }, attrs || {}), parent); e.textContent = txt; return e; }
+const tip = document.getElementById('tip');
+function tipOn(el, html){
+  el.addEventListener('mousemove', e => { tip.innerHTML = html; tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY + 12) + 'px'; });
+  el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+function timeTicks(){ const o = []; for (let t = T0; t <= T1; t += 1800) o.push(t); return o; }
+
+/* =====================================================================
+   1 · Umlaufzeit-Band
+   ===================================================================== */
+function renderTU(){
+  const host = document.getElementById('tuChart'); host.innerHTML = '';
+  const W = host.clientWidth || 1000, H = 158, m = { l:44, r:10, t:24, b:22 };
+  const svg = S('svg', { width:W, height:H, viewBox:`0 0 ${W} ${H}` }, host);
+  const x = t => m.l + (t - T0) / (T1 - T0) * (W - m.l - m.r);
+  const y0 = 40, y1 = 100, y = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
+
+  runs.forEach(r => {
+    const va = plantVA(r.spl);
+    S('rect', { x:x(r.t0), y:m.t, width:x(r.t1) - x(r.t0), height:H - m.t - m.b, fill:va ? 'var(--va-tint)' : 'var(--fz-tint)' }, svg);
+    const tus = cycles.filter(c => c.spl === r.spl && c.t >= r.t0 && c.t < r.t1).map(c => c.tu);
+    const lo = Math.min(...tus), hi = Math.max(...tus);
+    const w = x(r.t1) - x(r.t0);
+    const long = `SPL ${r.spl} · ${va ? 'verkehrsabhängig' : 'Festzeit'} · TU ${lo === hi ? lo + ' s' : lo + '–' + hi + ' s'}`;
+    T(svg, x(r.t0) + 6, m.t - 8, w > 250 ? long : `SPL ${r.spl}`, { class:'lab', style:'fill:var(--text)' });
+    if (r.t0 > T0) S('line', { x1:x(r.t0), x2:x(r.t0), y1:m.t - 14, y2:H - m.b, stroke:'var(--req-marker)', 'stroke-dasharray':'3,2' }, svg);
+  });
+  [40,60,80,100].forEach(v => {
+    S('line', { x1:m.l, x2:W - m.r, y1:y(v), y2:y(v), stroke:'var(--border)' }, svg);
+    T(svg, m.l - 6, y(v) + 3, v + ' s', { 'text-anchor':'end' });
+  });
+  timeTicks().forEach((t,i) => { if (i % 2) return; T(svg, x(t), H - 6, hhmm(t), { 'text-anchor': t === T0 ? 'start' : (t === T1 ? 'end' : 'middle') }); });
+
+  let d = '';
+  cycles.forEach((c,k) => { d += (k ? `V${y(c.tu)}` : `M${x(c.t)},${y(c.tu)}`) + `H${x(c.t + c.tu)}`; });
+  const p = S('path', { d, fill:'none', stroke:'var(--text)', 'stroke-width':1.3 }, svg);
+  const hit = S('rect', { x:m.l, y:m.t, width:W - m.l - m.r, height:H - m.t - m.b, fill:'transparent' }, svg);
+  hit.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect(), t = T0 + (e.clientX - r.left - m.l) / (W - m.l - m.r) * (T1 - T0);
+    const c = cycles.find(c => t >= c.t && t < c.t + c.tu); if (!c) return;
+    tip.innerHTML = `Umlauf ${c.i + 1} · ${hhmmss(c.t)}<br>TU ${c.tu} s · SPL ${c.spl}`; tip.style.display = 'block';
+    tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY + 12) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+
+/* =====================================================================
+   1 · Tabelle mit Verteilung je Signalgruppe
+   ===================================================================== */
+const gdMax = Math.max(...SGS.flatMap(s => s.greens.map(x => x.g)));
+const X_MAX = Math.ceil((gdMax + 1) / 10) * 10;
+const HW = 360, HH = 52;
+
+function histSVG(st, spl){
+  const svg = S('svg', { width:HW, height:HH, viewBox:`0 0 ${HW} ${HH}` });
+  const x = v => v / X_MAX * HW, bw = x(1);
+  for (let v = 10; v < X_MAX; v += 10) S('line', { x1:x(v), x2:x(v), y1:0, y2:HH, stroke:'var(--border)' }, svg);
+  S('line', { x1:0, x2:HW, y1:HH - .5, y2:HH - .5, stroke:'var(--border-strong)' }, svg);
+  if (!st.n) return svg;
+  const keys = spl ? [spl] : splList;
+  const bins = new Map();
+  st.gs.forEach(g => { const b = Math.round(g.g), k = g.cyc.spl; if (!bins.has(b)) bins.set(b, {}); bins.get(b)[k] = (bins.get(b)[k] || 0) + 1; });
+  let top = 0; bins.forEach(o => { top = Math.max(top, Object.values(o).reduce((a,b) => a + b, 0)); });
+  bins.forEach((o, b) => {
+    let acc = 0;
+    keys.forEach(k => {
+      const c = o[k] || 0; if (!c) return;
+      const h = c / top * (HH - 3), yy = HH - 1 - acc - h; acc += h;
+      const r = S('rect', { x:x(b - .5) + .5, y:yy, width:Math.max(bw - 1, 1), height:h, fill:splColor(k) }, svg);
+      tipOn(r, `Grünzeit ${b} s${spl ? '' : ' · SPL ' + k}<br>${c} Umläufe (${fmt(c / st.n * 100, 1)} %)`);
+    });
+  });
+  return svg;
+}
+function axisSVG(w, xMax, step, h){
+  const svg = S('svg', { width:w, height:h, viewBox:`0 0 ${w} ${h}` });
+  for (let v = 0; v <= xMax; v += step) T(svg, v / xMax * w, h - 3, v + ' s', { 'text-anchor': v === 0 ? 'start' : (v === xMax ? 'end' : 'middle') });
+  return svg;
+}
+
+function row1(s, spl){
+  const st = sgStats(s, spl);
+  const tr = document.createElement('tr'); tr.dataset.sg = s.id; if (state.sel.includes(s.id)) tr.className = 'sel';
+  const name = `<td><div class="nm">${s.id}</div><div class="sub">${s.desc}</div></td>`;
+  if (!st.n) { tr.innerHTML = name + `<td class="l v na">kein Grün</td><td class="ch"></td>` + '<td class="dim">0</td>'.repeat(1) + '<td></td>'.repeat(6); return tr; }
+  tr.innerHTML = name +
+    `<td class="l"><span class="v ${st.fz ? 'fz' : 'va'}">${st.fz ? 'Festzeit' : 'verkehrsabhängig'}</span></td>` +
+    `<td class="ch"></td>` +
+    `<td>${st.n}</td><td>${fmt(st.mn)} s</td><td>${fmt(st.med)} s</td><td>${fmt(st.mx)} s</td><td>${fmt(st.sd,1)} s</td>` +
+    `<td>${fmt(st.share*100,1)} %</td>` +
+    `<td class="${st.fz ? 'dim' : ''}">${st.fz ? '–' : fmt(st.atMax*100,1) + ' %'}</td>`;
+  tr.querySelector('.ch').appendChild(histSVG(st, spl));
+  return tr;
+}
+
+function renderT1(){
+  const t = document.getElementById('t1'); t.innerHTML = '';
+  const th = document.createElement('thead');
+  th.innerHTML = `<tr><th>Signalgruppe</th><th class="l">Betriebsart</th><th class="ch"></th><th>Grünphasen</th><th>Min</th><th>Median</th><th>Max</th><th class="nocase">σ</th><th>im Median ± ${P.tol} s</th><th>bei Max</th></tr>`;
+  th.querySelector('th.ch').appendChild(axisSVG(HW, X_MAX, 10, 14));
+  t.appendChild(th);
+  const tb = document.createElement('tbody'); t.appendChild(tb);
+  scopes().forEach(spl => {
+    if (spl) { const g = document.createElement('tr'); g.className = 'grp'; g.innerHTML = `<td colspan="10">${scopeTitle(spl)}</td>`; tb.appendChild(g); }
+    SGS.forEach(s => tb.appendChild(row1(s, spl)));
+  });
+  tb.querySelectorAll('tr[data-sg]').forEach(tr => tr.addEventListener('click', () => { state.sel = [tr.dataset.sg]; renderPick(); renderTrend(); renderT1(); document.getElementById('s2').scrollIntoView({ behavior:'smooth', block:'start' }); }));
+
+  const ps = splList.map(spl => ({ spl, va:plantVA(spl), n:cycles.filter(c => c.spl === spl).length, dur:cycles.filter(c => c.spl === spl).reduce((a,c) => a + c.tu, 0) }));
+  document.getElementById('claim1').textContent =
+    ps.every(p => p.va) ? 'Die Anlage lief durchgehend verkehrsabhängig.' :
+    ps.every(p => !p.va) ? 'Die Anlage lief durchgehend in Festzeit.' :
+    'Gemischter Betrieb: ' + ps.map(p => `SPL ${p.spl} ${p.va ? 'verkehrsabhängig' : 'in Festzeit'} (${p.n} Umläufe, ${hmm(p.dur)})`).join(', ') + '.';
+
+  const legend = state.scope === 'total' && splList.length > 1
+    ? '<div class="legend" style="margin-bottom:6px"><span class="it" style="color:var(--text)">Balkenfarbe</span>' + splList.map(k => `<span class="it"><span class="sw" style="background:${splColor(k)}"></span>SPL ${k}</span>`).join('') + '</div>' : '';
+  document.getElementById('note1').innerHTML =
+    `${legend}Balken = Anteil der Grünphasen je 1-s-Klasse, Maßstab je Zeile auf die höchste Klasse normiert. Gemeinsame Zeitachse für alle Zeilen. ` +
+    `<b>Verkehrsabhängig</b> heißt: die Grünzeit streut. <b>Festzeit</b> heißt: sie streut nicht. Die Anlage gilt als verkehrsabhängig, sobald eine Signalgruppe streut. ` +
+    `„bei Max“ = Anteil der Grünphasen, die genau das beobachtete Maximum erreichen (Hinweis auf Deckelung durch die Maximalgrünzeit).`;
+}
+
+/* =====================================================================
+   2 · Trend
+   ===================================================================== */
+function renderPick(){
+  const host = document.getElementById('sgpick'); host.innerHTML = '';
+  SGS.forEach(s => {
+    const l = document.createElement('label');
+    l.innerHTML = `<input type="checkbox" value="${s.id}" ${state.sel.includes(s.id) ? 'checked' : ''}><span class="nm">${s.id}</span>`;
+    l.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) state.sel.push(s.id); else if (state.sel.length > 1) state.sel = state.sel.filter(i => i !== s.id); else e.target.checked = true;
+      state.sel.sort((a,b) => SGS.findIndex(s => s.id === a) - SGS.findIndex(s => s.id === b));
+      renderTrend(); renderT1();
+    });
+    host.appendChild(l);
+  });
+}
+
+function trendTime(host, s, h){
+  const W = host.clientWidth || 1000, m = { l:44, r:12, t:24, b:22 };
+  const svg = S('svg', { width:W, height:h, viewBox:`0 0 ${W} ${h}` }, host);
+  const all = sgStats(s, null);
+  const yMax = Math.max(20, Math.ceil(all.mx * 1.1 / 10) * 10), x = t => m.l + (t - T0) / (T1 - T0) * (W - m.l - m.r), y = v => h - m.b - v / yMax * (h - m.t - m.b);
+  const step = yMax <= 30 ? 5 : 10;
+
+  runs.forEach(r => {
+    const st = sgStats(s, r.spl);
+    S('rect', { x:x(r.t0), y:m.t, width:x(r.t1) - x(r.t0), height:h - m.t - m.b, fill: !st.n ? 'none' : (st.fz ? 'var(--fz-tint)' : 'var(--va-tint)') }, svg);
+    T(svg, x(r.t0) + 6, m.t - 8, `SPL ${r.spl}` + (st.n ? ` · ${st.fz ? 'Festzeit' : 'verkehrsabhängig'}` : ''), { class:'lab', style:'fill:var(--text)' });
+    if (r.t0 > T0) S('line', { x1:x(r.t0), x2:x(r.t0), y1:m.t - 14, y2:h - m.b, stroke:'var(--req-marker)', 'stroke-dasharray':'3,2' }, svg);
+  });
+  for (let v = 0; v <= yMax; v += step) {
+    S('line', { x1:m.l, x2:W - m.r, y1:y(v), y2:y(v), stroke:'var(--border)' }, svg);
+    T(svg, m.l - 6, y(v) + 3, v + ' s', { 'text-anchor':'end' });
+  }
+  timeTicks().forEach((t,i) => { if (i % 2) return; T(svg, x(t), h - 6, hhmm(t), { 'text-anchor': t === T0 ? 'start' : (t === T1 ? 'end' : 'middle') }); });
+
+  // Referenz: Streuband P5–P95 und Median (gesamt oder je SPL-Abschnitt)
+  const wins = state.scope === 'total' ? [{ t0:T0, t1:T1, st:all }] : runs.map(r => ({ t0:r.t0, t1:r.t1, st:sgStats(s, r.spl) }));
+  wins.forEach(w => {
+    if (!w.st.n) return;
+    const lo = pct(w.st.gd, 5), hi = pct(w.st.gd, 95);
+    if (hi - lo > 0) S('rect', { x:x(w.t0), y:y(hi), width:x(w.t1) - x(w.t0), height:y(lo) - y(hi), fill:'var(--accent)', opacity:.13 }, svg);
+    S('line', { x1:x(w.t0), x2:x(w.t1), y1:y(w.st.med), y2:y(w.st.med), stroke:'var(--accent)', 'stroke-width':1.4 }, svg);
+    T(svg, x(w.t1) - 4, y(w.st.med) - 4, `Median ${fmt(w.st.med)} s`, { 'text-anchor':'end', style:'fill:var(--accent-strong)' });
+  });
+
+  cycles.forEach(c => {
+    const g = c.sg[s.id], cx = x(c.t + c.tu / 2);
+    if (!g) {
+      const a = S('path', { d:`M${cx-2.5},${y(0)-5}l5,5m0,-5l-5,5`, stroke:'var(--text-faint)', 'stroke-width':1, fill:'none' }, svg);
+      tipOn(a, `Umlauf ${c.i + 1} · ${hhmmss(c.t)}<br>kein Grün · SPL ${c.spl}`);
+      return;
+    }
+    const v = g.ab - g.an, st = wins.find(w => c.t >= w.t0 && c.t < w.t1 + 1).st;
+    const d = S('circle', { cx:x(c.t + g.an), cy:y(v), r:2.6, fill:'var(--text)', stroke:'#fff', 'stroke-width':.8 }, svg);
+    tipOn(d, `Umlauf ${c.i + 1} · ${hhmmss(c.t + g.an)}<br>Grünzeit ${v} s (${v - st.med >= 0 ? '+' : '−'}${Math.abs(v - st.med)} s zum Median)<br>SPL ${c.spl}`);
+  });
+}
+
+function trendCdf(host, s, h){
+  const W = host.clientWidth || 1000, m = { l:44, r:12, t:20, b:22 };
+  const svg = S('svg', { width:W, height:h, viewBox:`0 0 ${W} ${h}` }, host);
+  const st = sgStats(s, null), gd = [...st.gd].sort((a,b) => a - b), n = gd.length;
+  let lo = Math.floor(st.mn) - 1, hi = Math.ceil(st.mx) + 1; if (hi - lo < 10) { const c = (hi + lo) / 2; lo = Math.floor(c - 5); hi = lo + 10; }
+  const x = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r), y = f => h - m.b - f * (h - m.t - m.b);
+  [0,.25,.5,.75,1].forEach(f => { S('line', { x1:m.l, x2:W - m.r, y1:y(f), y2:y(f), stroke:'var(--border)' }, svg); T(svg, m.l - 6, y(f) + 3, Math.round(f*100) + ' %', { 'text-anchor':'end' }); });
+  const ticks = 6; for (let i = 0; i <= ticks; i++) { const v = lo + (hi - lo) * i / ticks; T(svg, x(v), h - 6, fmt(v) + ' s', { 'text-anchor': i === 0 ? 'start' : (i === ticks ? 'end' : 'middle') }); }
+  [50,85,95].forEach(p => { const v = pct(gd, p); S('line', { x1:x(v), x2:x(v), y1:m.t, y2:h - m.b, stroke:'var(--text-faint)', 'stroke-dasharray':'2,2' }, svg); T(svg, x(v) + 3, m.t - 6, `P${p} ${fmt(v)} s`); });
+  let d = `M${x(lo)},${y(0)}`; gd.forEach((v,i) => { d += `H${x(v)}V${y((i+1)/n)}`; }); d += `H${x(hi)}`;
+  S('path', { d, fill:'none', stroke:'var(--sig-green)', 'stroke-width':1.9 }, svg);
+  S('path', { d:d + `V${y(0)}Z`, fill:'var(--sig-green)', opacity:.09 }, svg);
+}
+
+function renderTrend(){
+  const stack = document.getElementById('trendStack'); stack.innerHTML = '';
+  const h = state.sel.length === 1 ? 250 : 175;
+  document.getElementById('trendLegend').innerHTML = state.mode === 'time'
+    ? `<span class="it"><span class="sw" style="width:8px;height:8px;border-radius:50%;background:var(--text);border:none"></span>Grünzeit je Zyklus</span>
+       <span class="it"><span style="width:14px;border-top:1.4px solid var(--accent);display:inline-block"></span>Median</span>
+       <span class="it"><span class="sw" style="background:rgba(47,111,163,.13);border:none"></span>P5–P95</span>
+       <span class="it"><span style="color:var(--text-faint)">×</span>Zyklus ohne Grün</span>
+       <span class="it"><span class="sw va"></span>verkehrsabhängig</span><span class="it"><span class="sw fz"></span>Festzeit</span>
+       <span class="it"><span style="display:inline-block;height:9px;border-left:1px dashed var(--req-marker)"></span>Signalprogrammwechsel</span>`
+    : `<span class="it"><span style="width:14px;border-top:1.9px solid var(--sig-green);display:inline-block"></span>Anteil der Zyklen mit höchstens dieser Grünzeit</span>`;
+  state.sel.forEach(id => {
+    const s = SGS.find(x => x.id === id), st = sgStats(s, null);
+    const b = document.createElement('div'); b.className = 'tblock';
+    b.innerHTML = `<div class="thead"><span class="nm">${s.id}</span><span class="sub">${s.desc}</span></div><div class="host"></div><div class="tcap"></div>`;
+    stack.appendChild(b);
+    const host = b.querySelector('.host');
+    (state.mode === 'time' ? trendTime : trendCdf)(host, s, h);
+    b.querySelector('.tcap').textContent = `n = ${st.n} Grünphasen in ${st.N} Umläufen · Median ${fmt(st.med)} s · P5–P95 ${fmt(pct(st.gd,5))}–${fmt(pct(st.gd,95))} s · Min ${fmt(st.mn)} s · Max ${fmt(st.mx)} s · σ ${fmt(st.sd,1)} s`;
+  });
+}
+
+/* =====================================================================
+   3 · Lage im Umlauf
+   ===================================================================== */
+const LW = 380, LH = 30;
+const TU_MAX = Math.ceil(Math.max(...cycles.map(c => c.tu)) / 10) * 10;
+function behaviour(st){
+  // robust über P5–P95 (ein einzelner Eingriff soll „fest“ nicht kippen)
+  const fixA = st.anHi - st.anLo <= .5, fixB = st.abHi - st.abLo <= .5, fixG = pct(st.gd, 95) - pct(st.gd, 5) <= .5;
+  if (fixA && fixB) return 'Beginn und Ende fest';
+  if (fixA) return 'Beginn fest · Ende variabel';
+  if (fixG) return 'Lage variabel · Dauer fest';
+  return 'Beginn und Ende variabel';
+}
+function laneSVG(st){
+  const svg = S('svg', { width:LW, height:LH, viewBox:`0 0 ${LW} ${LH}` });
+  const x = v => v / TU_MAX * LW, cy = LH / 2;
+  for (let v = 10; v < TU_MAX; v += 10) S('line', { x1:x(v), x2:x(v), y1:0, y2:LH, stroke:'var(--border)' }, svg);
+  S('line', { x1:0, x2:LW, y1:LH - .5, y2:LH - .5, stroke:'var(--border-strong)' }, svg);
+  S('line', { x1:x(st.tuMed), x2:x(st.tuMed), y1:0, y2:LH, stroke:'var(--text-faint)', 'stroke-dasharray':'3,2' }, svg);
+  const bar = S('rect', { x:x(st.anMed), y:cy - 6, width:Math.max(x(st.abMed) - x(st.anMed), 1), height:12, fill:'var(--sig-green)', opacity:.35 }, svg);
+  const edge = (m, lo, hi) => {
+    S('line', { x1:x(lo), x2:x(hi), y1:cy, y2:cy, stroke:'var(--text)', 'stroke-width':1.3 }, svg);
+    if (hi > lo) { S('line', { x1:x(lo), x2:x(lo), y1:cy - 5, y2:cy + 5, stroke:'var(--text)', 'stroke-width':1.3 }, svg); S('line', { x1:x(hi), x2:x(hi), y1:cy - 5, y2:cy + 5, stroke:'var(--text)', 'stroke-width':1.3 }, svg); }
+    S('line', { x1:x(m), x2:x(m), y1:cy - 8, y2:cy + 8, stroke:'var(--sig-green)', 'stroke-width':2.4 }, svg);
+  };
+  edge(st.anMed, st.anLo, st.anHi); edge(st.abMed, st.abLo, st.abHi);
+  tipOn(bar, `An ${fmt(st.anMed)} s [${fmt(st.anLo)}–${fmt(st.anHi)}]<br>Ab ${fmt(st.abMed)} s [${fmt(st.abLo)}–${fmt(st.abHi)}]`);
+  return svg;
+}
+function rng(lo, hi){ return Math.abs(hi - lo) < .5 ? '–' : `${fmt(lo)}–${fmt(hi)} s`; }
+
+function renderT3(){
+  const t = document.getElementById('t3'); t.innerHTML = '';
+  const th = document.createElement('thead');
+  th.innerHTML = `<tr><th>Signalgruppe</th><th class="l">Verhalten</th><th class="ch"></th><th>An · Median</th><th>An · P5–P95</th><th>Ab · Median</th><th>Ab · P5–P95</th></tr>`;
+  th.querySelector('th.ch').appendChild(axisSVG(LW, TU_MAX, 10, 14));
+  t.appendChild(th);
+  const tb = document.createElement('tbody'); t.appendChild(tb);
+  const groups = [];
+  scopes().forEach(spl => {
+    if (spl) { const g = document.createElement('tr'); g.className = 'grp'; g.innerHTML = `<td colspan="7">${scopeTitle(spl)}</td>`; tb.appendChild(g); }
+    const by = {};
+    SGS.forEach(s => {
+      const st = sgStats(s, spl), tr = document.createElement('tr');
+      tr.innerHTML = `<td><div class="nm">${s.id}</div><div class="sub">${s.desc}</div></td>`;
+      if (!st.n) { tr.innerHTML += `<td class="l v na">kein Grün</td>` + '<td></td>'.repeat(5); tb.appendChild(tr); return; }
+      const b = behaviour(st); (by[b] = by[b] || []).push(s.id);
+      tr.innerHTML += `<td class="l">${b}</td><td class="ch"></td><td>${fmt(st.anMed)} s</td><td>${rng(st.anLo, st.anHi)}</td><td>${fmt(st.abMed)} s</td><td>${rng(st.abLo, st.abHi)}</td>`;
+      tr.querySelector('.ch').appendChild(laneSVG(st));
+      tb.appendChild(tr);
+    });
+    groups.push({ spl, by });
+  });
+  document.getElementById('claim3').innerHTML = groups.map(g => {
+    const txt = Object.entries(g.by).map(([b, ids]) => `<div>${b}: <span style="font-family:var(--mono)">${ids.join(', ')}</span></div>`).join('');
+    return g.spl ? `<div style="margin-bottom:6px"><div class="dim" style="font-size:12px;font-weight:700">SPL ${g.spl}</div>${txt}</div>` : txt;
+  }).join('');
+  document.getElementById('note3').innerHTML =
+    '<b>An / Ab</b> = Sekunden seit Umlaufbeginn (TX = 0) bis Grünbeginn bzw. Grünende. Hellgrüner Balken = Median-Grünfenster; Strich mit Kappen = P5–P95 des jeweiligen Rands; gestrichelte Linie = Median-Umlaufzeit. ' +
+    'Zeigt, welcher Rand der Grünzeit sich bewegt – die Grünzeit selbst steht in 1.';
+}
+
+/* =====================================================================
+   4 · Häufigkeit und Anteil
+   ===================================================================== */
+function shareSVG(f){
+  const w = 130, svg = S('svg', { width:w, height:12, viewBox:`0 0 ${w} 12` });
+  S('rect', { x:0, y:2, width:w, height:8, fill:'var(--bg-surface-3)' }, svg);
+  S('rect', { x:0, y:2, width:w * f, height:8, fill:'var(--sig-green)' }, svg);
+  return svg;
+}
+function renderT4(){
+  const t = document.getElementById('t4'); t.innerHTML = '';
+  t.innerHTML = `<thead><tr><th>Signalgruppe</th><th class="ch">Umläufe mit Grün</th><th>Anteil</th><th>Grünanteil am Umlauf</th><th>Rot · Median</th><th>Rot · Max</th><th>Rot-Gelb · Gelb</th></tr></thead>`;
+  const tb = document.createElement('tbody'); t.appendChild(tb);
+  const lines = [];
+  scopes().forEach(spl => {
+    if (spl) { const g = document.createElement('tr'); g.className = 'grp'; g.innerHTML = `<td colspan="7">${scopeTitle(spl)}</td>`; tb.appendChild(g); }
+    const every = [], some = [];
+    SGS.forEach(s => {
+      const st = sgStats(s, spl), tr = document.createElement('tr');
+      tr.innerHTML = `<td><div class="nm">${s.id}</div><div class="sub">${s.desc}</div></td>`;
+      if (!st.n) { tr.innerHTML += `<td class="ch dim">0 von ${st.N}</td>` + '<td></td>'.repeat(5); tb.appendChild(tr); some.push(`${s.id} (0 %)`); return; }
+      const f = st.n / st.N; (f > .995 ? every : some).push(f > .995 ? s.id : `${s.id} (${fmt(f*100)} %)`);
+      tr.innerHTML += `<td class="ch"><span style="display:inline-flex;align-items:center;gap:10px"><span class="sv"></span><span style="font-family:var(--mono)">${st.n} von ${st.N}</span></span></td>` +
+        `<td>${fmt(f*100,1)} %</td><td>${fmt(st.greenShare*100)} %</td><td>${fmt(st.rotMed)} s</td><td>${fmt(st.rotMax)} s</td><td>${s.rg || s.ge ? s.rg + ' · ' + s.ge + ' s' : '–'}</td>`;
+      tr.querySelector('.sv').appendChild(shareSVG(f));
+      tb.appendChild(tr);
+    });
+    lines.push({ spl, every, some });
+  });
+  document.getElementById('claim4').innerHTML = lines.map(l => {
+    const a = l.every.length ? `Grün in jedem Umlauf: ${l.every.join(', ')}.` : '';
+    const b = l.some.length ? ` Nur auf Anforderung: ${l.some.join(', ')}.` : '';
+    return `<div>${l.spl ? `<span class="dim" style="font-size:12px;font-weight:700">SPL ${l.spl}&nbsp;&nbsp;</span>` : ''}${a}${b}</div>`;
+  }).join('');
+  document.getElementById('note4').innerHTML =
+    '<b>Umläufe mit Grün</b> = Umläufe, in denen die Signalgruppe mindestens einmal Grün zeigt. <b>Grünanteil</b> = Median von Grünzeit ÷ Umlaufzeit. ' +
+    '<b>Rot</b> = Dauer des Rot-Zustands zwischen zwei Grünphasen (ohne Rot-Gelb und Gelb); Umläufe ohne Grün verlängern sie. Rot ist nicht die Wartezeit eines Fahrzeugs – die steht im Tab „Wartezeit ab Anforderung“.';
+}
+
+/* =====================================================================
+   Steuerung
+   ===================================================================== */
+function renderAll(){
+  renderTU(); renderT1(); renderTrend(); renderT3(); renderT4();
+}
+document.getElementById('ctx').innerHTML =
+  `<b>Knoten 231 – Bahnhofstr./Ringstr.</b> · 08.07.2026 · ${hhmm(T0)}–${hhmm(T1)} · ${cycles.length} Umläufe · ${SGS.length} Signalgruppen · SPL ${splList.join(', ')}`;
+document.getElementById('scopeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button[data-scope]'); if (!b) return;
+  state.scope = b.dataset.scope;
+  document.querySelectorAll('#scopeSeg button').forEach(x => x.classList.toggle('active', x === b));
+  renderAll();
+});
+document.getElementById('modeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button[data-mode]'); if (!b) return;
+  state.mode = b.dataset.mode;
+  document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('active', x === b));
+  renderTrend();
+});
+['pThr','pTol'].forEach(id => document.getElementById(id).addEventListener('input', e => {
+  const v = Number(e.target.value); if (!Number.isFinite(v)) return;
+  if (id === 'pThr') P.thr = v; else P.tol = v;
+  renderAll();
+}));
+document.getElementById('mkToggle').addEventListener('change', e => document.getElementById('app').classList.toggle('drafts-off', !e.target.checked));
+let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { renderTU(); renderTrend(); }, 120); });
+
+renderPick();
+renderAll();
+})();
+</script>
+</body>
+</html>
