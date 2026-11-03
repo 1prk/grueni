@@ -162,6 +162,7 @@ svg .lab{ font-size:10.5px; }
       <div class="seg" id="scopeSeg">
         <button type="button" data-scope="total" class="active">Gesamter Mitschnitt</button>
         <button type="button" data-scope="spl">Je Signalzeitenplan</button>
+        <button type="button" data-scope="hour">Je volle Stunde</button>
       </div>
     </div>
   </div>
@@ -169,7 +170,8 @@ svg .lab{ font-size:10.5px; }
   <div class="draft">
     <b>Entwurf – Änderungen gegenüber heute</b><br>
     entfällt: Signalgruppen-Leiste links · Signalzeitendiagramm samt Fenster-Steuerung und Phasen-Overlay · „n auffällige Zyklen“ · eigene Kennzahlen-Tabelle (steckt jetzt in 1)<br>
-    bleibt: Grünzeit-Trend je Zyklus (2) · Umschalter Gesamt / je Signalzeitenplan · CSV-Export · Dunkel-/Abschaltzeiträume (erscheinen unten, nur wenn vorhanden; hier keine)
+    neu: „Je volle Stunde“ als dritter Umschalter (Tabellen 1/3/4, Trend: Stundenmedian + P5–P95 im Zeitverlauf, je Stunde eine Kurve im CDF-Overlay)<br>
+    bleibt: Grünzeit-Trend je Zyklus (2) inkl. CDF · Umschalter Gesamt / je Signalzeitenplan · CSV-Export · Dunkel-/Abschaltzeiträume (erscheinen unten, nur wenn vorhanden; hier keine)
   </div>
 
   <!-- ============ 1 ============ -->
@@ -246,7 +248,7 @@ const splAt = t => (t >= 7.25*3600 && t < 9.25*3600) ? '14' : '12';
 const SGS = [
   { id:'K1',  desc:'Hauptrichtung Kfz',          rg:2, ge:3 },
   { id:'K2',  desc:'Nebenrichtung Kfz',          rg:2, ge:3 },
-  { id:'DF1', desc:'Fußgänger quer Hauptstraße', rg:0, ge:0 },
+  { id:'F1', desc:'Fußgänger quer Hauptstraße', rg:0, ge:0 },
   { id:'S1',  desc:'Bus Hauptrichtung',          rg:2, ge:3 }
 ];
 const cycles = [];
@@ -259,13 +261,13 @@ const cycles = [];
       const dem = rnd() < 0.55;
       let g2 = cl(Math.round(17 + 6*randn()), 10, 30); if (dem) g2 = Math.max(g2, 16);
       const tu = Math.max(50, g1 + g2 + 10);
-      const sgv = { K1:{an:0, ab:g1}, K2:{an:g1+5, ab:g1+5+g2}, DF1:null, S1:null };
-      if (dem) sgv.DF1 = { an:g1+6, ab:g1+18 };
+      const sgv = { K1:{an:0, ab:g1}, K2:{an:g1+5, ab:g1+5+g2}, F1:null, S1:null };
+      if (dem) sgv.F1 = { an:g1+6, ab:g1+18 };
       if (rnd() < 0.32) { const a = Math.floor(rnd()*6), b = Math.floor(rnd()*4); sgv.S1 = { an:a, ab:Math.max(a+8, g1-b) }; }
       c = { spl, tu, sg:sgv };
     } else {
       const bad = (fz === 37);                           // einzelner Eingriff in Festzeit
-      c = { spl, tu:90, sg:{ K1:{an:0, ab:bad?22:48}, K2:{an:53, ab:75}, DF1:{an:54, ab:66}, S1:{an:2, ab:bad?20:46} } };
+      c = { spl, tu:90, sg:{ K1:{an:0, ab:bad?22:48}, K2:{an:53, ab:75}, F1:{an:54, ab:66}, S1:{an:2, ab:bad?20:46} } };
       fz++;
     }
     if (t + c.tu > T1) break;
@@ -297,9 +299,15 @@ const hhmmss = s => hhmm(s) + ':' + String(Math.floor(s%60)).padStart(2,'0');
 const hmm = s => { const m = Math.round(s/60); return Math.floor(m/60) + ':' + String(m%60).padStart(2,'0') + ' h'; };
 const nameList = a => a.length < 3 ? a.join(' und ') : a.slice(0,-1).join(', ') + ' und ' + a[a.length-1];
 
+/* Auswertungs-Scheibe (key): null = alles · '12' = Signalzeitenplan · 'H7' = volle Stunde 07:00–08:00 (Zuordnung nach Umlaufbeginn) */
+const inS = (c, key) => key == null || (key[0] === 'H' ? Math.floor(c.t / 3600) === Number(key.slice(1)) : c.spl === key);
+const hourKeys = []; for (let h = T0 / 3600; h < T1 / 3600; h++) hourKeys.push('H' + h);
+const HOUR_RAMP = ['#a9d8bd', '#62b586', '#1f8a4c', '#0d4a28'];
+const keyColor = k => k[0] === 'H' ? HOUR_RAMP[hourKeys.indexOf(k) % 4] : splColor(k);
+const scopeLabel = k => k[0] === 'H' ? `${hhmm(+k.slice(1) * 3600)}–${hhmm((+k.slice(1) + 1) * 3600)}` : `SPL ${k}`;
 function sgStats(s, spl) {
-  const cyc = cycles.filter(c => !spl || c.spl === spl);
-  const gs = s.greens.filter(x => !spl || x.cyc.spl === spl);
+  const cyc = cycles.filter(c => inS(c, spl));
+  const gs = s.greens.filter(x => inS(x.cyc, spl));
   const N = cyc.length, n = gs.length;
   if (!n) return { N, n:0 };
   const gd = gs.map(x => x.g), med = median(gd), mx = Math.max(...gd), mn = Math.min(...gd);
@@ -316,11 +324,14 @@ function sgStats(s, spl) {
     tuMed:median(cyc.map(c => c.tu))
   };
 }
-const scopes = () => state.scope === 'total' ? [null] : splList;
-const scopeTitle = spl => {
-  const cyc = cycles.filter(c => c.spl === spl), dur = cyc.reduce((a,c) => a + c.tu, 0);
-  const va = SGS.some(s => { const st = sgStats(s, spl); return st.n && !st.fz; });
-  return `Signalzeitenplan ${spl}<span class="r">${cyc.length} Umläufe · ${hmm(dur)} · ${va ? 'verkehrsabhängig' : 'Festzeit'}</span>`;
+const scopes = () => state.scope === 'total' ? [null] : (state.scope === 'spl' ? splList : hourKeys);
+const scopeTitle = key => {
+  const cyc = cycles.filter(c => inS(c, key)), dur = cyc.reduce((a,c) => a + c.tu, 0);
+  const va = SGS.some(s => { const st = sgStats(s, key); return st.n && !st.fz; });
+  const spls = [...new Set(cyc.map(c => c.spl))];
+  const head = key[0] === 'H' ? `${scopeLabel(key)} Uhr` : `Signalzeitenplan ${key}`;
+  const plan = key[0] === 'H' ? ` · SPL ${spls.join(' → ')}` : '';
+  return `${head}<span class="r">${cyc.length} Umläufe${plan} · ${va ? 'verkehrsabhängig' : 'Festzeit'}</span>`;
 };
 const plantVA = spl => SGS.some(s => { const st = sgStats(s, spl); return st.n && !st.fz; });
 
@@ -393,14 +404,14 @@ function histSVG(st, spl){
   if (!st.n) return svg;
   const keys = spl ? [spl] : splList;
   const bins = new Map();
-  st.gs.forEach(g => { const b = Math.round(g.g), k = g.cyc.spl; if (!bins.has(b)) bins.set(b, {}); bins.get(b)[k] = (bins.get(b)[k] || 0) + 1; });
+  st.gs.forEach(g => { const b = Math.round(g.g), k = spl ? spl : g.cyc.spl; if (!bins.has(b)) bins.set(b, {}); bins.get(b)[k] = (bins.get(b)[k] || 0) + 1; });
   let top = 0; bins.forEach(o => { top = Math.max(top, Object.values(o).reduce((a,b) => a + b, 0)); });
   bins.forEach((o, b) => {
     let acc = 0;
     keys.forEach(k => {
       const c = o[k] || 0; if (!c) return;
       const h = c / top * (HH - 3), yy = HH - 1 - acc - h; acc += h;
-      const r = S('rect', { x:x(b - .5) + .5, y:yy, width:Math.max(bw - 1, 1), height:h, fill:splColor(k) }, svg);
+      const r = S('rect', { x:x(b - .5) + .5, y:yy, width:Math.max(bw - 1, 1), height:h, fill:keyColor(k) }, svg);
       tipOn(r, `Grünzeit ${b} s${spl ? '' : ' · SPL ' + k}<br>${c} Umläufe (${fmt(c / st.n * 100, 1)} %)`);
     });
   });
@@ -471,6 +482,7 @@ function renderPick(){
   });
 }
 
+function hourBands(){ return hourKeys.map(k => ({ key:k, t0:+k.slice(1) * 3600, t1:(+k.slice(1) + 1) * 3600 })); }
 function trendTime(host, s, h){
   const W = host.clientWidth || 1000, m = { l:44, r:12, t:24, b:22 };
   const svg = S('svg', { width:W, height:h, viewBox:`0 0 ${W} ${h}` }, host);
@@ -478,20 +490,23 @@ function trendTime(host, s, h){
   const yMax = Math.max(20, Math.ceil(all.mx * 1.1 / 10) * 10), x = t => m.l + (t - T0) / (T1 - T0) * (W - m.l - m.r), y = v => h - m.b - v / yMax * (h - m.t - m.b);
   const step = yMax <= 30 ? 5 : 10;
 
-  runs.forEach(r => {
-    const st = sgStats(s, r.spl);
-    S('rect', { x:x(r.t0), y:m.t, width:x(r.t1) - x(r.t0), height:h - m.t - m.b, fill: !st.n ? 'none' : (st.fz ? 'var(--fz-tint)' : 'var(--va-tint)') }, svg);
-    T(svg, x(r.t0) + 6, m.t - 8, `SPL ${r.spl}` + (st.n ? ` · ${st.fz ? 'Festzeit' : 'verkehrsabhängig'}` : ''), { class:'lab', style:'fill:var(--text)' });
-    if (r.t0 > T0) S('line', { x1:x(r.t0), x2:x(r.t0), y1:m.t - 14, y2:h - m.b, stroke:'var(--req-marker)', 'stroke-dasharray':'3,2' }, svg);
+  const bands = state.scope === 'hour' ? hourBands() : runs.map(r => ({ key:r.spl, t0:r.t0, t1:r.t1 }));
+  bands.forEach(b => {
+    const st = sgStats(s, b.key);
+    S('rect', { x:x(b.t0), y:m.t, width:x(b.t1) - x(b.t0), height:h - m.t - m.b, fill: !st.n ? 'none' : (st.fz ? 'var(--fz-tint)' : 'var(--va-tint)') }, svg);
+    const lab = (state.scope === 'hour' ? scopeLabel(b.key) : `SPL ${b.key}`) + (st.n ? ` · ${st.fz ? 'Festzeit' : 'verkehrsabhängig'}` : '');
+    T(svg, x(b.t0) + 6, m.t - 8, (x(b.t1) - x(b.t0)) > 200 ? lab : lab.split(' ·')[0], { class:'lab', style:'fill:var(--text)' });
+    if (state.scope === 'hour' && b.t0 > T0) S('line', { x1:x(b.t0), x2:x(b.t0), y1:m.t - 14, y2:h - m.b, stroke:'var(--border-strong)' }, svg);
   });
+  runs.forEach(r => { if (r.t0 > T0) S('line', { x1:x(r.t0), x2:x(r.t0), y1:m.t - 14, y2:h - m.b, stroke:'var(--req-marker)', 'stroke-dasharray':'3,2' }, svg); });
   for (let v = 0; v <= yMax; v += step) {
     S('line', { x1:m.l, x2:W - m.r, y1:y(v), y2:y(v), stroke:'var(--border)' }, svg);
     T(svg, m.l - 6, y(v) + 3, v + ' s', { 'text-anchor':'end' });
   }
   timeTicks().forEach((t,i) => { if (i % 2) return; T(svg, x(t), h - 6, hhmm(t), { 'text-anchor': t === T0 ? 'start' : (t === T1 ? 'end' : 'middle') }); });
 
-  // Referenz: Streuband P5–P95 und Median (gesamt oder je SPL-Abschnitt)
-  const wins = state.scope === 'total' ? [{ t0:T0, t1:T1, st:all }] : runs.map(r => ({ t0:r.t0, t1:r.t1, st:sgStats(s, r.spl) }));
+  // Referenz: Streuband P5–P95 und Median (gesamt, je SPL-Abschnitt oder je Stunde)
+  const wins = state.scope === 'total' ? [{ t0:T0, t1:T1, st:all }] : bands.map(b => ({ t0:b.t0, t1:b.t1, st:sgStats(s, b.key) }));
   wins.forEach(w => {
     if (!w.st.n) return;
     const lo = pct(w.st.gd, 5), hi = pct(w.st.gd, 95);
@@ -513,18 +528,34 @@ function trendTime(host, s, h){
   });
 }
 
+const sliceKeys = () => state.scope === 'total' ? [] : (state.scope === 'spl' ? splList : hourKeys);
+function cdfPath(gd, x, y, lo, hi){
+  const a = [...gd].sort((p,q) => p - q), n = a.length;
+  let d = `M${x(lo)},${y(0)}`; a.forEach((v,i) => { d += `H${x(v)}V${y((i+1)/n)}`; }); return d + `H${x(hi)}`;
+}
 function trendCdf(host, s, h){
   const W = host.clientWidth || 1000, m = { l:44, r:12, t:20, b:22 };
   const svg = S('svg', { width:W, height:h, viewBox:`0 0 ${W} ${h}` }, host);
-  const st = sgStats(s, null), gd = [...st.gd].sort((a,b) => a - b), n = gd.length;
+  const st = sgStats(s, null), gd = [...st.gd].sort((a,b) => a - b);
   let lo = Math.floor(st.mn) - 1, hi = Math.ceil(st.mx) + 1; if (hi - lo < 10) { const c = (hi + lo) / 2; lo = Math.floor(c - 5); hi = lo + 10; }
   const x = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r), y = f => h - m.b - f * (h - m.t - m.b);
   [0,.25,.5,.75,1].forEach(f => { S('line', { x1:m.l, x2:W - m.r, y1:y(f), y2:y(f), stroke:'var(--border)' }, svg); T(svg, m.l - 6, y(f) + 3, Math.round(f*100) + ' %', { 'text-anchor':'end' }); });
   const ticks = 6; for (let i = 0; i <= ticks; i++) { const v = lo + (hi - lo) * i / ticks; T(svg, x(v), h - 6, fmt(v) + ' s', { 'text-anchor': i === 0 ? 'start' : (i === ticks ? 'end' : 'middle') }); }
-  [50,85,95].forEach(p => { const v = pct(gd, p); S('line', { x1:x(v), x2:x(v), y1:m.t, y2:h - m.b, stroke:'var(--text-faint)', 'stroke-dasharray':'2,2' }, svg); T(svg, x(v) + 3, m.t - 6, `P${p} ${fmt(v)} s`); });
-  let d = `M${x(lo)},${y(0)}`; gd.forEach((v,i) => { d += `H${x(v)}V${y((i+1)/n)}`; }); d += `H${x(hi)}`;
-  S('path', { d, fill:'none', stroke:'var(--sig-green)', 'stroke-width':1.9 }, svg);
-  S('path', { d:d + `V${y(0)}Z`, fill:'var(--sig-green)', opacity:.09 }, svg);
+  const keys = sliceKeys();
+  if (!keys.length) {
+    [50,85,95].forEach(p => { const v = pct(gd, p); S('line', { x1:x(v), x2:x(v), y1:m.t, y2:h - m.b, stroke:'var(--text-faint)', 'stroke-dasharray':'2,2' }, svg); T(svg, x(v) + 3, m.t - 6, `P${p} ${fmt(v)} s`); });
+    const d = cdfPath(gd, x, y, lo, hi);
+    S('path', { d, fill:'none', stroke:'var(--sig-green)', 'stroke-width':1.9 }, svg);
+    S('path', { d:d + `V${y(0)}Z`, fill:'var(--sig-green)', opacity:.09 }, svg);
+  } else {
+    [50,85,95].forEach(f => S('line', { x1:m.l, x2:W - m.r, y1:y(f/100), y2:y(f/100), stroke:'var(--text-faint)', 'stroke-dasharray':'2,2' }, svg));
+    S('path', { d:cdfPath(gd, x, y, lo, hi), fill:'none', stroke:'var(--text-faint)', 'stroke-width':1.2, 'stroke-dasharray':'4,3' }, svg);   // gesamt
+    keys.forEach(k => {
+      const ks = sgStats(s, k); if (!ks.n) return;
+      const p = S('path', { d:cdfPath(ks.gd, x, y, lo, hi), fill:'none', stroke:keyColor(k), 'stroke-width':2 }, svg);
+      tipOn(p, `${scopeLabel(k)} · n = ${ks.n}<br>P50 ${fmt(pct(ks.gd,50))} s · P85 ${fmt(pct(ks.gd,85))} s · P95 ${fmt(pct(ks.gd,95))} s`);
+    });
+  }
 }
 
 function renderTrend(){
@@ -537,7 +568,9 @@ function renderTrend(){
        <span class="it"><span style="color:var(--text-faint)">×</span>Zyklus ohne Grün</span>
        <span class="it"><span class="sw va"></span>verkehrsabhängig</span><span class="it"><span class="sw fz"></span>Festzeit</span>
        <span class="it"><span style="display:inline-block;height:9px;border-left:1px dashed var(--req-marker)"></span>Signalprogrammwechsel</span>`
-    : `<span class="it"><span style="width:14px;border-top:1.9px solid var(--sig-green);display:inline-block"></span>Anteil der Zyklen mit höchstens dieser Grünzeit</span>`;
+    : (sliceKeys().length
+        ? `<span class="it">Anteil der Zyklen mit höchstens dieser Grünzeit</span>` + sliceKeys().map(k => `<span class="it"><span style="width:14px;border-top:2px solid ${keyColor(k)};display:inline-block"></span>${scopeLabel(k)}</span>`).join('') + `<span class="it"><span style="width:14px;border-top:1.2px dashed var(--text-faint);display:inline-block"></span>gesamt</span>`
+        : `<span class="it"><span style="width:14px;border-top:1.9px solid var(--sig-green);display:inline-block"></span>Anteil der Zyklen mit höchstens dieser Grünzeit</span>`);
   state.sel.forEach(id => {
     const s = SGS.find(x => x.id === id), st = sgStats(s, null);
     const b = document.createElement('div'); b.className = 'tblock';
@@ -545,7 +578,10 @@ function renderTrend(){
     stack.appendChild(b);
     const host = b.querySelector('.host');
     (state.mode === 'time' ? trendTime : trendCdf)(host, s, h);
-    b.querySelector('.tcap').textContent = `n = ${st.n} Grünphasen in ${st.N} Umläufen · Median ${fmt(st.med)} s · P5–P95 ${fmt(pct(st.gd,5))}–${fmt(pct(st.gd,95))} s · Min ${fmt(st.mn)} s · Max ${fmt(st.mx)} s · σ ${fmt(st.sd,1)} s`;
+    const perSlice = (state.mode === 'cdf' && sliceKeys().length)
+      ? '\nP50 / P95: ' + sliceKeys().map(k => { const ks = sgStats(s, k); return ks.n ? `${scopeLabel(k)} ${fmt(pct(ks.gd,50))} / ${fmt(pct(ks.gd,95))} s` : null; }).filter(Boolean).join(' · ') : '';
+    b.querySelector('.tcap').style.whiteSpace = 'pre-line';
+    b.querySelector('.tcap').textContent = `n = ${st.n} Grünphasen in ${st.N} Umläufen · Median ${fmt(st.med)} s · P5–P95 ${fmt(pct(st.gd,5))}–${fmt(pct(st.gd,95))} s · Min ${fmt(st.mn)} s · Max ${fmt(st.mx)} s · σ ${fmt(st.sd,1)} s` + perSlice;
   });
 }
 
@@ -604,7 +640,7 @@ function renderT3(){
   });
   document.getElementById('claim3').innerHTML = groups.map(g => {
     const txt = Object.entries(g.by).map(([b, ids]) => `<div>${b}: <span style="font-family:var(--mono)">${ids.join(', ')}</span></div>`).join('');
-    return g.spl ? `<div style="margin-bottom:6px"><div class="dim" style="font-size:12px;font-weight:700">SPL ${g.spl}</div>${txt}</div>` : txt;
+    return g.spl ? `<div style="margin-bottom:6px"><div class="dim" style="font-size:12px;font-weight:700">${scopeLabel(g.spl)}</div>${txt}</div>` : txt;
   }).join('');
   document.getElementById('note3').innerHTML =
     '<b>An / Ab</b> = Sekunden seit Umlaufbeginn (TX = 0) bis Grünbeginn bzw. Grünende. Hellgrüner Balken = Median-Grünfenster; Strich mit Kappen = P5–P95 des jeweiligen Rands; gestrichelte Linie = Median-Umlaufzeit. ' +
@@ -643,7 +679,7 @@ function renderT4(){
   document.getElementById('claim4').innerHTML = lines.map(l => {
     const a = l.every.length ? `Grün in jedem Umlauf: ${l.every.join(', ')}.` : '';
     const b = l.some.length ? ` Nur auf Anforderung: ${l.some.join(', ')}.` : '';
-    return `<div>${l.spl ? `<span class="dim" style="font-size:12px;font-weight:700">SPL ${l.spl}&nbsp;&nbsp;</span>` : ''}${a}${b}</div>`;
+    return `<div>${l.spl ? `<span class="dim" style="font-size:12px;font-weight:700">${scopeLabel(l.spl)}&nbsp;&nbsp;</span>` : ''}${a}${b}</div>`;
   }).join('');
   document.getElementById('note4').innerHTML =
     '<b>Umläufe mit Grün</b> = Umläufe, in denen die Signalgruppe mindestens einmal Grün zeigt. <b>Grünanteil</b> = Median von Grünzeit ÷ Umlaufzeit. ' +
