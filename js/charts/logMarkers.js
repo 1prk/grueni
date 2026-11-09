@@ -7,9 +7,9 @@
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
 
-  const SEVERITY_RANK = { error: 4, warning: 3, info: 2, other: 1, debug: 0 };
+  const SEVERITY_RANK = { critical: 5, error: 4, warning: 3, info: 2, other: 1, debug: 0 };
   const SEVERITY_COLOR = {
-    error: 'var(--sig-red)', warning: 'var(--sig-redyellow)', info: 'var(--accent)',
+    critical: 'var(--log-critical)', error: 'var(--sig-red)', warning: 'var(--sig-redyellow)', info: 'var(--accent)',
     other: 'var(--req-marker)', debug: 'var(--text-faint)'
   };
   const CLUSTER_PX = 6;
@@ -53,6 +53,30 @@
     });
   }
 
+  // Thin marker strip for one time window (one row per cycle in the cycle check).
+  // svgEl: target <svg>. o = { wMin, wMax, width, height, entries }
+  function drawStrip(svgEl, o) {
+    const kit = GZ.charts.kit;
+    while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+    svgEl.setAttribute('viewBox', `0 0 ${o.width} ${o.height}`);
+    svgEl.setAttribute('preserveAspectRatio', 'none');
+    const x = t => (t - o.wMin) / (o.wMax - o.wMin) * o.width;
+    const clusters = [];
+    o.entries.forEach(e => {
+      const px = x(e.t), last = clusters[clusters.length - 1];
+      if (last && px - last.px < CLUSTER_PX) last.entries.push(e); else clusters.push({ px, entries: [e] });
+    });
+    kit.el('line', { x1: 0, x2: o.width, y1: o.height - .5, y2: o.height - .5, stroke: 'var(--border)' }, svgEl);
+    clusters.forEach(c => {
+      const top = c.entries.reduce((a, e) => SEVERITY_RANK[e.severity] > SEVERITY_RANK[a] ? e.severity : a, c.entries[0].severity);
+      const color = SEVERITY_COLOR[top] || SEVERITY_COLOR.other, h = Math.min(o.height - 1, 10);
+      kit.el('path', { d: `M${c.px - 3.5},${o.height - 1} L${c.px + 3.5},${o.height - 1} L${c.px},${o.height - 1 - h} Z`, fill: color }, svgEl);
+      if (c.entries.length > 1) kit.text(svgEl, c.px + 5, o.height - 2, String(c.entries.length), { style: `fill:${color}`, class: 'log-count' });
+      const hit = kit.el('rect', { x: c.px - 5, y: 0, width: 10, height: o.height, fill: 'transparent' }, svgEl);
+      kit.attachTooltip(hit, tooltipHtml(c), true);
+    });
+  }
+
   GZ.charts = GZ.charts || {};
-  GZ.charts.logMarkers = { draw, SEVERITY_COLOR };
+  GZ.charts.logMarkers = { draw, drawStrip, SEVERITY_COLOR };
 })(window.GZ = window.GZ || {});

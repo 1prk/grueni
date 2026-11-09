@@ -387,7 +387,8 @@
           const near = GZ.logs.around(e.reqTime, e.greenTime, LOG_MARGIN_MS);
           const full = near.map(x => `${fmtTimeShort(x.t)} ${x.level} ${x.text}`).join('\n');
           const first = near[0];
-          logCell = `<td class="left sans log-cell" title="${esc(full)}">${near.length ? `<span class="log-count-badge">${near.length}</span> ${esc(first.text.length > 48 ? first.text.slice(0, 47) + '…' : first.text)}` : '<span class="dim">–</span>'}</td>`;
+          const hasCritical = near.some(x => x.severity === 'critical'), hasError = near.some(x => x.severity === 'error');
+          logCell = `<td class="left sans log-cell${hasCritical ? ' has-critical' : hasError ? ' has-error' : ''}" title="${esc(full)}">${near.length ? `<span class="log-count-badge">${near.length}</span> ${esc(first.text.length > 48 ? first.text.slice(0, 47) + '…' : first.text)}` : '<span class="dim">–</span>'}</td>`;
         }
         return `<tr class="${g === 'crit' ? 'event-crit' : g === 'warn' ? 'event-warn' : ''}"><td>${e.nr}</td><td>${esc(fmtTs(new Date(e.reqTime)))}</td><td>${tx ?? '–'}</td><td>${esc(fmtTs(new Date(e.greenTime)))}</td><td>${esc(e.spl)}</td><td>${fmtNum(e.waitSec, 1)} s</td><td class="left sans">${g === 'crit' ? 'Grenzwert überschritten' : g === 'warn' ? 'Warnung' : 'OK'}</td><td class="left">${esc(e.detector)}</td>${logCell}</tr>`;
       }).join('') + '</tbody>';

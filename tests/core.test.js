@@ -41,9 +41,28 @@ test('log: header line is not an error; broken lines are counted', () => {
   assert.strictEqual(r.entries.length, 1);
   assert.strictEqual(r.skipped, 1);
 });
-test('log: semicolon, quotes, ISO date and BOM', () => {
-  const r = GZ.logs.parse('﻿Warning;03.11.2026 06:05:00;a; b\n"Error","03.11.2026, 06:10:00","q, t"\nInfo,2026-11-03 06:15:00,iso');
-  same(r.entries.map(e => [e.severity, e.text]), [['warning', 'a; b'], ['error', 'q, t'], ['info', 'iso']]);
+test('log: semicolon file uses only the first three columns', () => {
+  const r = GZ.logs.parse('\uFEFFStufe;Zeit;Text;Quelle;Nr\nWarnung;03.11.2026, 06:05:00;text one;Steuergerät;1001\nFehler;03.11.2026, 06:10:00;"quoted; text";x;y\nInfo;03.11.2026, 06:15:00;;only level and time');
+  same(r.entries.map(e => [e.level, e.severity, e.text]), [['Warnung', 'warning', 'text one'], ['Fehler', 'error', 'quoted; text'], ['Info', 'info', '']]);
+  assert.strictEqual(r.skipped, 0);
+});
+test('log: comma separated file and ISO date still work (timestamp search)', () => {
+  const r = GZ.logs.parse('"Error","03.11.2026, 06:10:00","q, t"\nInfo,2026-11-03 06:15:00,iso');
+  same(r.entries.map(e => [e.severity, e.text]), [['error', 'q, t'], ['info', 'iso']]);
+});
+test('log: levels "Fehler" and "Schwerer Fehler" are different severities', () => {
+  const r = GZ.logs.parse('Fehler;03.11.2026, 06:00:00;a\nSchwerer Fehler;03.11.2026, 06:00:01;b\nWarnung;03.11.2026, 06:00:02;c');
+  same(r.entries.map(e => e.severity), ['error', 'critical', 'warning']);
+});
+test('log: visible() filters by range, severity and text', () => {
+  GZ.logs.load('Info;03.11.2026, 06:00:00;a b\nFehler;03.11.2026, 06:10:00;c\nInfo;03.11.2026, 06:20:00;d', 'x');
+  const t = h => new Date(2026, 10, 3, 6, h).getTime();
+  assert.strictEqual(GZ.logs.visible(t(5), t(15)).length, 1);
+  GZ.logs.state().hiddenSeverities.add('error');
+  assert.strictEqual(GZ.logs.visible().length, 2);
+  GZ.logs.state().search = 'D';
+  assert.strictEqual(GZ.logs.visible().length, 1);
+  GZ.logs.clear();
 });
 test('log: entries are sorted by time', () => {
   const r = GZ.logs.parse('Info\t03.11.2026, 06:10:00\tlate\nInfo\t03.11.2026, 06:00:00\tearly');

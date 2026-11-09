@@ -1311,9 +1311,24 @@
       }).join('');
     };
 
+    // Log markers: a thin row at the top of every cycle that has log entries.
+    // The row has no "up-sub-row" class, because the code below finds the lane
+    // rows of a group by that class (in DOM order).
+    const logRowHtml = r => {
+      r.logs = GZ.logs.hasEntries() ? GZ.logs.visible(r.start, r.end) : [];
+      if (!r.logs.length) return '';
+      return `
+        <div class="lane-row up-log-row">
+          <div class="lane-name" title="Log-Einträge in diesem Umlauf">Log (${r.logs.length})</div>
+          <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
+          <div class="lane-track up-sub-track"><svg></svg></div>
+        </div>`;
+    };
+
     els.rows.innerHTML = rowData.map(r => `
       <div class="up-group">
         <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">${fmtTimeShort(r.start)} · SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
+        ${logRowHtml(r)}
         ${laneRowsHtml(r)}
       </div>`).join('');
 
@@ -1486,6 +1501,11 @@
         }
       });
 
+      if (r.logs.length) {
+        GZ.charts.logMarkers.drawStrip(group.querySelector('.up-log-row .lane-track svg'), {
+          wMin: r.start, wMax: r.end, width: subSize.width, height: subSize.height, entries: r.logs
+        });
+      }
       wireCrosshair(group, r.start, r.end);
     });
 

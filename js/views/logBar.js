@@ -33,8 +33,8 @@
       box.style.display = '';
       const chips = GZ.logs.SEVERITY.concat([{ id: 'other', label: 'Sonstige' }])
         .filter(s => counts[s.id])
-        .map(s => `<label class="log-chip"><input type="checkbox" data-severity="${s.id}" ${st.hiddenSeverities.has(s.id) ? '' : 'checked'}>
-          <span class="log-swatch" style="background:${GZ.charts.logMarkers.SEVERITY_COLOR[s.id]}"></span>${esc(s.label)} <span class="dim">${counts[s.id]}</span></label>`).join('');
+        .map(s => `<label class="log-chip log-chip-${s.id}"><input type="checkbox" data-severity="${s.id}" ${st.hiddenSeverities.has(s.id) ? '' : 'checked'}>
+          <span class="log-swatch" style="border-bottom-color:${GZ.charts.logMarkers.SEVERITY_COLOR[s.id]}"></span>${esc(s.label)} <span class="dim">${counts[s.id]}</span></label>`).join('');
       box.innerHTML = `<span class="log-summary">${summaryText()}</span>${chips}
         <input type="search" class="log-search" placeholder="Log durchsuchen …" value="${esc(st.search)}">
         <button type="button" data-log-clear>Log entfernen</button>`;

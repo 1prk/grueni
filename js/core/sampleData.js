@@ -175,7 +175,7 @@
     return lines.join('\n');
   }
 
-  // Synthetic log lines for the same period: level <TAB> timestamp <TAB> text.
+  // Synthetic log lines for the same period: level; timestamp; text; two extra columns.
   function generateSampleLog() {
     const sc = buildScenario();
     const intervention = sc.cycles.find(c => c.intervention);
@@ -184,14 +184,16 @@
       [1, 'Info', 'Signalprogramm 12 aktiv (Tagesplan)'],
       [30 * 60, 'Info', 'Verbindung zur Zentrale geprüft'],
       [PLAN_CHANGE_1_S, 'Info', 'Signalprogrammwechsel 12 → 14 (Zeitplan)'],
-      [PLAN_CHANGE_1_S + 311, 'Warning', 'Detektor RD2: Belegungsdauer über 60 s'],
-      [intervention ? intervention.t + 4 : 2 * 3600, 'Error', 'Eingriff: Freigabe K1 vorzeitig beendet'],
+      [PLAN_CHANGE_1_S + 311, 'Warnung', 'Detektor RD2: Belegungsdauer über 60 s'],
+      [intervention ? intervention.t + 4 : 2 * 3600, 'Fehler', 'Eingriff: Freigabe K1 vorzeitig beendet'],
+      [intervention ? intervention.t + 6 : 2 * 3600 + 1, 'Schwerer Fehler', 'Freigabezeit K1 unter Mindestgrün'],
       [2 * 3600 + 30 * 60, 'Info', 'Verbindung zur Zentrale geprüft'],
       [PLAN_CHANGE_2_S, 'Info', 'Signalprogrammwechsel 14 → 12 (Zeitplan)'],
-      [PLAN_CHANGE_2_S + 1500, 'Warning', 'Fußgängertaster FT1: Dauerbelegung'],
+      [PLAN_CHANGE_2_S + 1500, 'Warnung', 'Fußgängertaster FT1: Dauerbelegung'],
       [3 * 3600 + 45 * 60, 'Debug', 'Speicherstand geprüft']
     ];
-    return ['Stufe\tZeit\tText'].concat(rows.map(r => `${r[1]}\t${stamp(r[0])}\t${r[2]}`)).join('\n');
+    // Semicolon separated. The last two columns are extra columns, they are ignored on import.
+    return ['Stufe;Zeit;Text;Quelle;Nr'].concat(rows.map((r, i) => `${r[1]};${stamp(r[0])};${r[2]};Steuergerät;${1000 + i}`)).join('\n');
   }
 
   GZ.sampleData = { generateSampleText, generateSampleLog };

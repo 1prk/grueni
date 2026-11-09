@@ -12,6 +12,7 @@
   --plan-b:#9bd2b1;
   --plan-c:#d8cf8a;
   --plan-d:#b9b3d6;
+  --log-critical:#7a0d12;                  /* log level "Schwerer Fehler": deep red ("Fehler" is --sig-red) */
 }
 
 .report{ background:var(--bg-surface); padding:18px 32px 56px; min-height:60vh; }
@@ -126,18 +127,29 @@ button.action{ font-size:11.5px; font-weight:600; color:var(--accent-strong); pa
 .log-bar .log-summary b{ color:var(--text); }
 .log-chip{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
 .log-swatch{ width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent; border-bottom:8px solid currentColor; display:inline-block; background:none !important; }
-.log-chip .log-swatch{ border-bottom-color:var(--text-faint); }
+.log-chip-error{ color:var(--sig-red); font-weight:700; }
+.log-chip-critical{ color:var(--log-critical); font-weight:700; }
+.log-chip-error .dim, .log-chip-critical .dim{ font-weight:400; }
 .log-search{ width:200px; font-size:12px; padding:4px 8px; }
 .log-count-badge{ display:inline-block; min-width:16px; padding:0 4px; margin-right:4px; text-align:center; font-family:var(--mono); font-size:10.5px; background:var(--bg-surface-3); border-radius:8px; }
 .log-cell{ max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+.log-cell.has-error{ color:var(--sig-red); font-weight:600; }
+.log-cell.has-critical{ color:var(--log-critical); font-weight:700; }
 
 /* Tooltip shared by the report charts */
 #gzTooltip{ position:fixed; z-index:99; pointer-events:none; display:none; background:var(--bg-header-2); color:var(--text-on-dark); font-family:var(--mono); font-size:11px; line-height:1.5; padding:6px 9px; border-radius:4px; white-space:nowrap; box-shadow:0 4px 14px rgba(0,0,0,.35); }
 #gzTooltip.wide{ white-space:normal; max-width:480px; font-family:var(--sans); }
 #gzTooltip .log-line{ margin:2px 0; }
 #gzTooltip .log-time{ font-family:var(--mono); color:#c7d1db; }
-#gzTooltip .log-error{ color:#ff9a9a; } #gzTooltip .log-warning{ color:#ffd75e; } #gzTooltip .log-info{ color:#9cc7ea; }
+#gzTooltip .log-critical{ color:#ff5c5c; font-weight:800; } #gzTooltip .log-error{ color:#ff9a9a; } #gzTooltip .log-warning{ color:#ffd75e; } #gzTooltip .log-info{ color:#9cc7ea; }
 #gzTooltip .dim{ color:#c7d1db; }
 
 /* Label buttons in a panel head must look like the buttons next to them (the head is upper case). */
 .panel-head-actions label.btn{ text-transform:none; letter-spacing:0; font-weight:600; }
+
+/* Cycle check: log marker row of one cycle (only shown for cycles with log entries). */
+.up-log-row{ margin-top:4px; margin-bottom:0; }
+.up-log-row .lane-name{ width:118px; font-size:10.5px; font-weight:600; color:var(--text-muted); }
+.up-log-row .lane-num{ width:36px; }
+.up-log-row .lane-track{ background:var(--bg-surface-2); }
+.up-log-row svg text.log-count{ font-family:var(--mono); font-size:9px; font-weight:700; }
