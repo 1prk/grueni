@@ -432,6 +432,16 @@
               <label>Filtern <span class="cfg-field-hint">(separat von der Objekt-Auswahl/Reihenfolge oben – zeigt nur Umläufe, die ALLE folgenden Bedingungen erfüllen, z.&nbsp;B. Signalgruppe = GRUEN, APW-Wert &gt; 10, Detektor/Formel = BELEGT)</span></label>
               <div id="upFilterRows" class="up-filter-rows"></div>
               <button type="button" id="upAddFilterBtn" class="btn">+ Filterbedingung hinzufügen</button>
+              <div class="up-log-filter">
+                <label class="det-check"><input type="checkbox" id="upLogFilter" disabled> Nur Umläufe mit Log-Einträgen</label>
+                <select id="upLogFilterLevel" disabled>
+                  <option value="0">alle Stufen</option>
+                  <option value="3">ab Warnung</option>
+                  <option value="4">ab Fehler</option>
+                  <option value="5">nur Schwerer Fehler</option>
+                </select>
+                <span class="cfg-field-hint" id="upLogFilterHint">Log-Datei laden („Log öffnen …“), um nach Umläufen mit Log-Einträgen zu filtern. Gilt zusätzlich zu den Bedingungen oben und zu den Stufen-/Textfiltern der Log-Leiste.</span>
+              </div>
             </div>
           </div>
           <div id="upHint" class="hint"></div>

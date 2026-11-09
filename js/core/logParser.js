@@ -27,6 +27,9 @@
     { id: 'info', label: 'Info', re: /^(i|info|information|hinweis)$/i },
     { id: 'debug', label: 'Debug', re: /^(d|debug|trace|verbose)$/i }
   ];
+  // Rank of a severity, for "this level and worse" filters.
+  const RANK = { debug: 0, other: 1, info: 2, warning: 3, error: 4, critical: 5 };
+
   function severityOf(level) {
     const hit = SEVERITY.find(s => s.re.test(level));
     return hit ? hit.id : 'other';
@@ -159,5 +162,5 @@
     return counts;
   }
 
-  GZ.logs = { SEVERITY, severityOf, parseStamp, parse, state, load, clear, hasEntries, visible, around, severityCounts };
+  GZ.logs = { SEVERITY, RANK, severityOf, parseStamp, parse, state, load, clear, hasEntries, visible, around, severityCounts };
 })(window.GZ = window.GZ || {});

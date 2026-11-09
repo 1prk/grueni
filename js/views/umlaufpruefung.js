@@ -47,6 +47,9 @@
   let expandedCycles = new Set();
   // Set by jumpTo(); handled in the next render().
   let pendingJump = null;
+  // Cycles whose log ribbon shows all entries (otherwise the first few).
+  let expandedLogs = new Set();
+  const RIBBON_LINES = 4;
   const CROP_FACTOR = 1.5; // shortened cycles show the first 1.5 x median cycle time
   let lastEffectiveCount = 0; // Anzahl Umläufe nach aktuellem Filter (für Fenster-Navigation)
 
@@ -109,13 +112,25 @@
       winSize: root.querySelector('#upWinSize'),
       btnWinAll: root.querySelector('#upBtnWinAll'),
       configSaveBtn: root.querySelector('#upConfigSaveBtn'),
-      configLoadInput: root.querySelector('#upConfigLoadInput')
+      configLoadInput: root.querySelector('#upConfigLoadInput'),
+      logFilter: root.querySelector('#upLogFilter'),
+      logFilterLevel: root.querySelector('#upLogFilterLevel'),
+      logFilterHint: root.querySelector('#upLogFilterHint')
     };
+    els.logFilter.addEventListener('change', render);
+    els.logFilterLevel.addEventListener('change', render);
 
     // Buttons inside the cycle list: expand / shorten an irregular cycle, close a jump note.
     els.rows.addEventListener('click', e => {
       const close = e.target.closest('button.up-jump-close');
       if (close) { close.closest('.up-jump-note').remove(); return; }
+      const more = e.target.closest('button.up-log-more');
+      if (more) {
+        const ci = Number(more.dataset.cycle);
+        if (expandedLogs.has(ci)) expandedLogs.delete(ci); else expandedLogs.add(ci);
+        render();
+        return;
+      }
       const b = e.target.closest('button.up-expand');
       if (!b) return;
       const i = Number(b.dataset.cycle);
@@ -822,7 +837,9 @@
     windowStartIdx = 0;
     showAll = false;
     expandedCycles = new Set();
+    expandedLogs = new Set();
     pendingJump = null;
+    els.logFilter.checked = false;
     els.btnWinAll.textContent = 'Alle anzeigen';
     els.btnWinAll.classList.remove('primary');
 
@@ -1208,7 +1225,25 @@
     });
 
     const n = cycleStarts.length;
-    const matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
+    let matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
+
+    // Log filter: only cycles that contain at least one log entry (respecting the log bar filters
+    // and the level chosen here). The controls are disabled while no log is loaded.
+    const hasLog = GZ.logs.hasEntries();
+    els.logFilter.disabled = !hasLog;
+    els.logFilterLevel.disabled = !hasLog;
+    els.logFilterHint.style.display = hasLog ? 'none' : '';
+    if (hasLog && els.logFilter.checked) {
+      const minRank = Number(els.logFilterLevel.value);
+      const withLog = new Set();
+      GZ.logs.visible(a.tMin, a.tMax).forEach(e => {
+        if (GZ.logs.RANK[e.severity] < minRank) return;
+        const ci = cycleIndexAt(cycleStarts, e.t);
+        if (ci >= 0) withLog.add(ci);
+      });
+      const base = matchingCycles || Array.from({ length: n }, (_, i) => i);
+      matchingCycles = base.filter(i => withLog.has(i));
+    }
     // A jump (from the log list, for example) shows the cycle that contains the time.
     // It does not change the selection, the filter or "Alle anzeigen". With a window,
     // the window moves to the cycle. A cycle hidden by the filter is shown anyway ("pinned").
@@ -1381,15 +1416,33 @@
     // rows of a group by that class (in DOM order).
     const logRowHtml = r => {
       const all = GZ.logs.hasEntries() ? GZ.logs.visible(r.start, r.fullEnd) : [];
+      r.logs = all;
       r.logsInView = all.filter(e => e.t <= r.end);
       r.logsBeyond = all.filter(e => e.t > r.end);
       if (!all.length) return '';
-      return `
+      return `${logRibbonHtml(r)}
         <div class="lane-row up-log-row">
           <div class="lane-name" title="Log-Einträge in diesem Umlauf">Log (${all.length})</div>
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
         </div>`;
+    };
+    // Ribbon with the log entries of the cycle: time, level, text, seconds after the cycle start.
+    // The colour follows the most severe entry. Only the first lines are shown, unless the
+    // cycle is expanded or an entry that was opened from the log list is among the hidden ones.
+    const jumpedEntry = jump ? jump.entry : null;
+    const logRibbonHtml = r => {
+      const rank = GZ.logs.RANK;
+      const worst = r.logs.reduce((w, e) => rank[e.severity] > rank[w] ? e.severity : w, r.logs[0].severity);
+      const showAll = expandedLogs.has(r.i) || (jumpedEntry && r.logs.includes(jumpedEntry)) || r.logs.length <= RIBBON_LINES;
+      const shown = showAll ? r.logs : r.logs.slice(0, RIBBON_LINES);
+      const lines = shown.map(e => {
+        const offset = Math.round((e.t - r.start) / 1000);
+        return `<div class="up-log-line" data-i="${r.logs.indexOf(e)}"><span class="log-time">${esc(fmtTimeShort(e.t))}</span> <b class="log-sev log-sev-${esc(e.severity)}">${esc(e.level || '–')}</b> <span class="up-log-text">${esc(e.text)}</span> <span class="dim">${offset >= 0 ? '+' + offset + ' s' : ''}${e.t > r.end ? ' · hinter dem Ausschnitt' : ''}</span></div>`;
+      }).join('');
+      const more = r.logs.length > RIBBON_LINES
+        ? `<button type="button" class="up-log-more" data-cycle="${r.i}">${showAll ? 'weniger anzeigen' : `alle ${r.logs.length} anzeigen`}</button>` : '';
+      return `<div class="up-log-ribbon sev-${esc(worst)}"><div class="up-log-label">${r.logs.length === 1 ? 'Log-Eintrag' : `Log-Einträge (${r.logs.length})`}</div><div class="up-log-lines">${lines}${more}</div></div>`;
     };
 
     // Caption of an irregular cycle: explains the length and offers full length / shortened view.
@@ -1594,26 +1647,27 @@
   }
 
   /* ---------------- Jump from a log entry (or any time) ---------------- */
-  // Highlights the target cycle and puts a note INSIDE it (under the caption), so it is
-  // in view after the scroll: what was clicked, where in the cycle, and why it is shown.
+  // Highlights the target cycle. When a log entry was opened, its line in the ribbon is marked
+  // and gets the extra hints (why the cycle is shown, entry behind the drawn part). A jump to a
+  // time without log entry gets a note under the caption instead.
   function showJumpTarget(jump, rowData) {
     const group = els.rows.querySelector(`.up-group[data-cycle="${jump.cycle}"]`);
     if (!group) return;
     const r = rowData.find(x => x.i === jump.cycle);
-    const e = jump.entry;
-    const offset = Math.round((jump.t - r.start) / 1000);
-    const parts = [];
-    if (e) parts.push(`<b>Log-Eintrag</b> <span class="log-time">${esc(fmtTimeShort(e.t))}</span> <b class="log-sev log-sev-${esc(e.severity)}">${esc(e.level || '–')}</b> ${esc(e.text)}`);
-    else parts.push(`<b>Sprung zu</b> <span class="log-time">${esc(fmtTimeShort(jump.t))}</span>`);
-    parts.push(offset < 0 ? '<span class="dim">· vor dem ersten erkannten Umlaufbeginn</span>' : `<span class="dim">· ${offset} s nach Umlaufbeginn</span>`);
-    if (r.cropped && jump.t > r.end) {
-      parts.push(`<span class="up-warn-text">– liegt hinter dem dargestellten Ausschnitt</span> <button type="button" class="up-expand" data-cycle="${r.i}">volle Länge anzeigen</button>`);
+    const extras = [];
+    if (r.cropped && jump.t > r.end) extras.push(`<span class="up-warn-text">liegt hinter dem dargestellten Ausschnitt</span> <button type="button" class="up-expand" data-cycle="${r.i}">volle Länge anzeigen</button>`);
+    if (jump.pinned) extras.push('<span class="dim">angezeigt trotz Filter/Fenster</span>');
+    if (jump.t < r.start) extras.push('<span class="dim">vor dem ersten erkannten Umlaufbeginn</span>');
+    const line = jump.entry ? group.querySelector(`.up-log-line[data-i="${r.logs ? r.logs.indexOf(jump.entry) : -1}"]`) : null;
+    if (line) {
+      line.classList.add('active');
+      if (extras.length) line.insertAdjacentHTML('beforeend', ' <span class="up-log-extra">' + extras.join(' · ') + '</span>');
+    } else {
+      const note = document.createElement('div');
+      note.className = 'up-jump-note';
+      note.innerHTML = `<b>Sprung zu</b> <span class="log-time">${esc(fmtTimeShort(jump.t))}</span> <span class="dim">· ${Math.round((jump.t - r.start) / 1000)} s nach Umlaufbeginn</span> ${extras.join(' · ')}<button type="button" class="up-jump-close" title="Schließen">✕</button>`;
+      group.querySelector('.up-group-caption').after(note);
     }
-    if (jump.pinned) parts.push('<span class="dim">· angezeigt trotz Filter/Fenster</span>');
-    const note = document.createElement('div');
-    note.className = 'up-jump-note';
-    note.innerHTML = parts.join(' ') + '<button type="button" class="up-jump-close" title="Schließen">✕</button>';
-    group.querySelector('.up-group-caption').after(note);
     group.classList.add('jump-target');
     group.scrollIntoView({ block: 'center' });
   }

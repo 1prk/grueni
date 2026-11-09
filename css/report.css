@@ -195,3 +195,21 @@ button.up-expand{ margin-left:8px; padding:1px 8px; font-size:11px; }
 .log-list tbody tr.outside td{ color:var(--text-faint); font-weight:400; }
 .log-list tbody tr.outside{ cursor:not-allowed; }
 .log-list-head .inline-check{ margin-left:12px; font-size:11.5px; }
+
+/* Log ribbon in every cycle that has log entries (colour = most severe entry) */
+.up-log-ribbon{ --ribbon: var(--accent); display:flex; gap:14px; align-items:flex-start; margin:4px 0 6px; padding:6px 12px; border-left:3px solid var(--ribbon); background:color-mix(in srgb, var(--ribbon) 9%, #fff); font-size:12px; }
+.up-log-ribbon.sev-critical{ --ribbon: var(--log-critical); }
+.up-log-ribbon.sev-error{ --ribbon: var(--sig-red); }
+.up-log-ribbon.sev-warning{ --ribbon: var(--sig-redyellow); }
+.up-log-ribbon.sev-debug, .up-log-ribbon.sev-other{ --ribbon: var(--text-faint); }
+.up-log-label{ flex:0 0 118px; font-weight:700; color:var(--text); }
+.up-log-lines{ flex:1; min-width:0; }
+.up-log-line{ display:flex; gap:8px; align-items:baseline; padding:1px 4px; }
+.up-log-line .log-time{ font-family:var(--mono); color:var(--text-muted); }
+.up-log-line .up-log-text{ flex:0 1 auto; min-width:0; }
+.up-log-line .dim{ color:var(--text-faint); font-family:var(--mono); font-size:11px; white-space:nowrap; }
+.up-log-line.active{ background:color-mix(in srgb, var(--ribbon) 18%, #fff); outline:1px solid var(--ribbon); }
+.up-log-extra{ font-size:11.5px; }
+.up-log-extra .up-warn-text{ color:var(--warn-text); font-weight:600; }
+button.up-log-more{ margin-top:3px; padding:1px 8px; font-size:11px; }
+.up-log-filter{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; }
