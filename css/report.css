@@ -191,3 +191,7 @@ button.up-expand{ margin-left:8px; padding:1px 8px; font-size:11px; }
 /* The highlight is drawn left of the group, so it does not cover the lane names. */
 .up-group.jump-target{ background:var(--bg-surface-2); box-shadow:-3px 0 0 var(--accent); animation:jump-flash 2.4s ease-out; }
 @keyframes jump-flash{ from{ background:var(--accent-bg-strong); } to{ background:var(--bg-surface-2); } }
+
+.log-list tbody tr.outside td{ color:var(--text-faint); font-weight:400; }
+.log-list tbody tr.outside{ cursor:not-allowed; }
+.log-list-head .inline-check{ margin-left:12px; font-size:11.5px; }

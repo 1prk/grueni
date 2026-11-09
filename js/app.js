@@ -26,13 +26,29 @@
     if (GZ.state.data.currentAnalysis && TAB_REFRESH[name]) TAB_REFRESH[name]();
   }
 
+  // A time outside the recording has no cycle. A jump to it is refused with a message.
+  function inRecording(t) {
+    const a = GZ.state.data.currentAnalysis;
+    return !!a && t >= a.tMin && t <= a.tMax;
+  }
+  function refuseOutside(t) {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a) { GZ.snackbar.show('Keine Aufzeichnung geladen', { type: 'warning' }); return true; }
+    if (inRecording(t)) return false;
+    const f = GZ.format.fmtTs;
+    GZ.snackbar.show('Außerhalb der Aufzeichnung', { type: 'warning', description: `${f(new Date(t))} liegt nicht im Zeitraum ${f(new Date(a.tMin))} – ${f(new Date(a.tMax))}.` });
+    return true;
+  }
+
   // Opens the cycle that contains a log entry (or any time) in the cycle check.
   function jumpToLog(entry) {
+    if (refuseOutside(entry.t)) return;
     switchTab('up');
     GZ.views.umlaufpruefung.jumpTo(entry.t, entry);
     GZ.views.logBar.markActive(entry);
   }
   function jumpToTime(t) {
+    if (refuseOutside(t)) return;
     switchTab('up');
     GZ.views.umlaufpruefung.jumpTo(t, null);
   }
@@ -178,5 +194,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', init);
-  GZ.app = { switchTab, analyze, refreshActiveTab, jumpToLog, jumpToTime };
+  GZ.app = { switchTab, analyze, refreshActiveTab, jumpToLog, jumpToTime, inRecording };
 })(window.GZ = window.GZ || {});

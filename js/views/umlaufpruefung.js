@@ -1605,7 +1605,7 @@
     const parts = [];
     if (e) parts.push(`<b>Log-Eintrag</b> <span class="log-time">${esc(fmtTimeShort(e.t))}</span> <b class="log-sev log-sev-${esc(e.severity)}">${esc(e.level || '–')}</b> ${esc(e.text)}`);
     else parts.push(`<b>Sprung zu</b> <span class="log-time">${esc(fmtTimeShort(jump.t))}</span>`);
-    parts.push(`<span class="dim">· ${offset} s nach Umlaufbeginn</span>`);
+    parts.push(offset < 0 ? '<span class="dim">· vor dem ersten erkannten Umlaufbeginn</span>' : `<span class="dim">· ${offset} s nach Umlaufbeginn</span>`);
     if (r.cropped && jump.t > r.end) {
       parts.push(`<span class="up-warn-text">– liegt hinter dem dargestellten Ausschnitt</span> <button type="button" class="up-expand" data-cycle="${r.i}">volle Länge anzeigen</button>`);
     }
@@ -1622,6 +1622,7 @@
   function jumpTo(t, entry) {
     const a = GZ.state.data.currentAnalysis;
     if (!a || !a.cycleStarts || a.cycleStarts.length < 2) return;
+    if (t < a.tMin || t > a.tMax) return;   // outside the recording: no cycle (see GZ.app.jumpToLog)
     const hasSg = [...els.objList.querySelectorAll('.obj-row input:checked')].some(cb => cb.closest('.obj-row').dataset.key.startsWith('SG|'));
     if (!hasSg) {
       els.objList.querySelectorAll('.obj-row').forEach(row => { if (row.dataset.key.startsWith('SG|')) row.querySelector('input').checked = true; });

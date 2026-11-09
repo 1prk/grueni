@@ -23,6 +23,7 @@
   let onChange = () => {};
   let listOpen = false;
   let listFilter = 'all';
+  let inRecordingOnly = true; // list: only entries inside the time range of the recording
   let active = null;  // the entry that was opened last
   let listed = [];    // entries shown in the list, same order as the rows
 
@@ -46,11 +47,13 @@
   // The list of entries that pass the filters. Click = open in the cycle check.
   function renderLists() {
     const min = LIST_FILTERS.find(f => f.id === listFilter).min;
-    const matching = listOpen ? GZ.logs.visible().filter(e => RANK[e.severity] >= min) : [];
+    const a = GZ.state.data.currentAnalysis;
+    const useRange = inRecordingOnly && !!a;
+    const matching = listOpen ? GZ.logs.visible(useRange ? a.tMin : null, useRange ? a.tMax : null).filter(e => RANK[e.severity] >= min) : [];
     listed = matching.slice(0, MAX_LIST_ROWS);
     const total = matching.length;
     const head = `<div class="log-list-head"><span>Anzeigen:</span>${LIST_FILTERS.map(f =>
-      `<button type="button" data-list-filter="${f.id}" class="${f.id === listFilter ? 'active' : ''}">${f.label}</button>`).join('')}<span class="dim">${total} Einträge</span></div>`;
+      `<button type="button" data-list-filter="${f.id}" class="${f.id === listFilter ? 'active' : ''}">${f.label}</button>`).join('')}<label class="inline-check"><input type="checkbox" data-list-range ${inRecordingOnly ? 'checked' : ''}> nur Zeitraum der Aufzeichnung</label><span class="dim">${total} Einträge</span></div>`;
     containers().forEach(box => {
       const host = box.querySelector('.log-list');
       if (!host) return;
@@ -58,7 +61,7 @@
       if (!listOpen) { host.innerHTML = ''; return; }
       host.innerHTML = head + (listed.length
         ? `<div class="log-list-scroll"><table><thead><tr><th>Zeit</th><th>Stufe</th><th>Text</th></tr></thead><tbody>${listed.map((e, i) =>
-            `<tr data-i="${i}" class="${e === active ? 'active' : ''}" title="Klick: Umlauf in der Umlaufprüfung öffnen"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
+            `<tr data-i="${i}" class="${e === active ? 'active' : ''}${a && !GZ.app.inRecording(e.t) ? ' outside' : ''}" title="${a && !GZ.app.inRecording(e.t) ? 'Außerhalb der Aufzeichnung – kein Umlauf' : 'Klick: Umlauf in der Umlaufprüfung öffnen'}"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
           + (total > listed.length ? `<div class="log-list-more">${listed.length} von ${total} Einträgen – Filter oder Suche einschränken.</div>` : '') + '</div>'
         : '<div class="log-list-more">Keine Einträge für diese Filter.</div>');
     });
@@ -99,6 +102,12 @@
       const st = GZ.logs.state();
       if (cb.checked) st.hiddenSeverities.delete(cb.dataset.severity); else st.hiddenSeverities.add(cb.dataset.severity);
       render(); onChange();
+    });
+    document.addEventListener('change', e => {
+      const cb = e.target.closest('input[data-list-range]');
+      if (!cb) return;
+      inRecordingOnly = cb.checked;
+      renderLists();
     });
     document.addEventListener('input', e => {
       const input = e.target.closest('.log-search');
