@@ -37,6 +37,7 @@
   function computeWartezeitEvents(times, sgRaw, detOccupied, splRaw, inkBlinken, gapTolSek, holdUntilGreen, exclSpl) {
     const n = times.length;
     const events = [];
+    const cancelledTimes = []; // start times of requests that ended without green
     let prevBelegt = false, inGreenPeriod = false, waitingForGreen = false;
     let requestStartIdx = -1, letzteBelegtZeit = 0, nAufgeloest = 0;
     for (let i = 0; i < n; i++) {
@@ -66,6 +67,7 @@
           letzteBelegtZeit = times[i];
         } else if ((times[i] - letzteBelegtZeit) / 1000 > gapTolSek) {
           nAufgeloest++;
+          cancelledTimes.push(times[requestStartIdx]);
           waitingForGreen = false;
         }
       }
@@ -81,7 +83,7 @@
     const unresolved = waitingForGreen
       ? { startIdx: requestStartIdx, startTime: times[requestStartIdx], durationSec: (times[n - 1] - times[requestStartIdx]) / 1000 }
       : null;
-    return { events, nAufgeloest, unresolved };
+    return { events, nAufgeloest, cancelledTimes, unresolved };
   }
 
   function qualitaetsstufe(waitSec, warnSek, grenzSek) {

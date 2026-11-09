@@ -348,19 +348,10 @@
       els.kpiPanel.style.display = 'none';
       els.chartPanel.style.display = 'none';
       els.tablePanel.style.display = 'none';
-      GZ.state.data.oepnvActivePoints = [];
-      GZ.views.gruenzeitanalyse.refreshReqPoints();
       lastModelRows = []; lastFilteredRows = [];
       if (els.filterHint) els.filterHint.textContent = '';
       return;
     }
-
-    GZ.state.data.oepnvActivePoints = results.map(r => ({
-      colIndex: r.sgEntry.col.index,
-      times: r.events.map(e => e.anTime),
-      unresolvedTime: r.unresolved ? r.unresolved.startTime : null
-    }));
-    GZ.views.gruenzeitanalyse.refreshReqPoints();
 
     els.rawPanel.style.display = 'block';
     renderRawPoints(results, a);
@@ -490,7 +481,7 @@
       const zwangsgeloeschtEvents = rowsForSg.filter(mr => mr.rawType === 'ZWANGSGELOESCHT');
       const result = GZ.charts.oepnvScatterChart.render(rowEl.querySelector('[data-chart]'), rowEl.querySelector('[data-axis] svg'), {
         tMin: a.tMin, tMax: a.tMax, abmeldungEvents, zwangsgeloeschtEvents, losBounds,
-        splTransitions, cycleStarts, onPointClick: GZ.app.jumpToGruenzeit
+        splTransitions, cycleStarts, onPointClick: null
       });
       const total = abmeldungEvents.length + zwangsgeloeschtEvents.length;
       rowEl.querySelector('[data-info]').textContent = `${total} Ereignis(se)` + (result && result.yMax ? ` · y-Achse bis ${Math.round(result.yMax)}s` : '');
@@ -585,9 +576,6 @@
     els.eventsBody.innerHTML = rowsSorted.length
       ? rowsSorted.map(r => `<tr class="${r.rowCls}" data-t="${r.clickT}" data-row-id="${r.id}">${TABLE_COLUMNS.map(c => `<td>${c.render(r)}</td>`).join('')}</tr>`).join('')
       : `<tr><td colspan="${TABLE_COLUMNS.length}">Keine Anmeldungen gefunden.</td></tr>`;
-    els.eventsBody.querySelectorAll('tr[data-t]').forEach(tr => {
-      tr.addEventListener('click', () => GZ.app.jumpToGruenzeit(Number(tr.dataset.t)));
-    });
   }
 
   function applySearch() {

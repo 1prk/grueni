@@ -29,6 +29,12 @@
     none: 'N/A'
   };
 
+  // Detector names follow a naming convention (IS = induction loop, DF = camera
+  // field, RD = radar, FT/BT/FTV = pedestrian push button, each followed by a
+  // number and an optional "_<lane>" suffix). A column without a known OCIT
+  // type name is still taken as a detector (DET) when its name matches.
+  const DETECTOR_NAME_RE = /^(IS|DF|RD|FT|BT|FTV)\d+(?:_\d+)?$/i;
+
   function looksLikeTimeOnly(s) {
     return /^\d{1,2}:\d{2}:\d{2}$/.test((s || '').trim());
   }
@@ -157,6 +163,7 @@
       // Anzeige, Beschreibung nur eine optionale Zusatzinfo.
       const name = (nameRow[c] || '').trim() || `Sp.${c + 1}`;
       const beschreibung = (beschrRow[c] || '').trim();
+      if ((kuerzel === '' || kuerzel === 'N/A') && DETECTOR_NAME_RE.test(name)) { kuerzel = 'DET'; typName = 'detector_by_name'; }
       if (kuerzel === 'SG') {
         columns.push({ index: c, typName, name, beschreibung });
       } else if (kuerzel) {
@@ -217,7 +224,7 @@
   }
 
   GZ.parser = {
-    STATE_CAT, CAT_LABEL, TYPNAME_TO_KUERZEL,
+    STATE_CAT, CAT_LABEL, TYPNAME_TO_KUERZEL, DETECTOR_NAME_RE,
     parseOcitText, parseTimestamp, looksLikeTimeOnly,
     extractLabeledValue, findColumnByLabel, estimateStep,
     categorizeSgRaw, categorizeDetRaw

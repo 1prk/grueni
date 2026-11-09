@@ -1,396 +1,407 @@
-/* GZ.views.gruenzeitanalyse — Tab "Grünzeitanalyse": Navigator, Signalzeiten-
-   diagramm mit Umlauf-Fenster, Kennzahlen-Tabelle, Dunkel-Panel und
-   Grünzeit-Trend (Zeitverlauf/CDF, einzeln oder gestapelt). */
+/* GZ.views.gruenzeitanalyse — tab "Grünzeitanalyse": quantitative green time
+   quality assessment. One report with four sections:
+   1  Fixed time or actuated?  (cycle time, green time distribution per signal group)
+   2  Green time trend per cycle (time plot or CDF)
+   3  Where in the cycle does the green window move?  (start / end)
+   4  How often and how much green? (share of cycles, share of the cycle, red time)
+   Every section can be evaluated for the whole recording, per signal plan
+   (SPL) or per clock hour. Log markers appear in the time charts. */
 (function (GZ) {
   'use strict';
-  const { esc, fmtDauer } = GZ.format;
-  const { mean, median, stdDev, detectAnomalies } = GZ.stats;
-  const {
-    computeGlobalTU, computeSplTransitions, getFlaggedAnomalies, computeAnomalyBands,
-    computeTrendSplWindows
-  } = GZ.segments;
+  const { esc, fmtNum, fmtTimeShort, fmtHoursMinutes } = GZ.format;
+  const GT = GZ.greenTime;
+  const R = GZ.charts.report;
+  const kit = GZ.charts.kit;
 
   let els = null;
-  let showPhaseOverlay = false;
+  let model = null;       // GZ.greenTime model of the current analysis
+  let slices = null;      // GZ.slices.build() of the current analysis
+  let xMaxGreen = 60;     // common x axis of the green time histograms
+  let tuMax = 100;        // common x axis of the cycle position charts
+  const state = { scope: 'total', mode: 'time', selected: [] };
+
+  const analysis = () => GZ.state.data.currentAnalysis;
+  const sgIndex = sg => sg.col.index;
 
   function init(root) {
     els = {
       root,
-      navigator: root.querySelector('#gzNavigator'),
-      diagramControls: root.querySelector('#gzDiagramControls'),
-      btnWinPrev: root.querySelector('#gzBtnWinPrev'),
-      btnWinNext: root.querySelector('#gzBtnWinNext'),
-      winLabel: root.querySelector('#gzWinLabel'),
-      winSize: root.querySelector('#gzWinSize'),
-      btnWinAll: root.querySelector('#gzBtnWinAll'),
-      timelineEl: root.querySelector('#gzTimeline'),
-      phaseOverlaySvgEl: root.querySelector('#gzPhaseOverlaySvg'),
-      phaseOverlayToggle: root.querySelector('#gzPhaseOverlayToggle'),
-      phaseOverlayCheckbox: root.querySelector('#gzShowPhaseOverlay'),
-      splBarSvgEl: root.querySelector('#gzSplBar svg'),
-      axisSvgEl: root.querySelector('#gzAxis svg'),
-      statsScopeGroup: root.querySelector('#gzStatsScopeGroup'),
-      statsBody: root.querySelector('#gzStatsBody'),
-      dunkelPanel: root.querySelector('#gzDunkelPanel'),
-      dunkelBody: root.querySelector('#gzDunkelBody'),
-      dunkelHint: root.querySelector('#gzDunkelHint'),
-      trendTarget: root.querySelector('#gzTrendTarget'),
-      trendModeGroup: root.querySelector('#gzTrendModeGroup'),
-      trendSgChecks: root.querySelector('#gzTrendSgChecks'),
-      trendChartBox: root.querySelector('#gzTrendChartBox'),
-      trendAxis: root.querySelector('#gzTrendAxis'),
-      trendHistBox: root.querySelector('#gzTrendHistBox'),
-      trendHistAxis: root.querySelector('#gzTrendHistAxis'),
-      trendCaption: root.querySelector('#gzTrendCaption'),
-      trendStackContainer: root.querySelector('#gzTrendStackContainer')
+      context: root.querySelector('#gzContext'),
+      scopeGroup: root.querySelector('#gzScopeGroup'),
+      notice: root.querySelector('#gzNotice'),
+      claim1: root.querySelector('#gzClaim1'),
+      cycleChart: root.querySelector('#gzCycleChart'),
+      paramShare: root.querySelector('#gzParamShare'),
+      paramTol: root.querySelector('#gzParamTol'),
+      table1: root.querySelector('#gzTable1'),
+      note1: root.querySelector('#gzNote1'),
+      sgPick: root.querySelector('#gzSgPick'),
+      modeGroup: root.querySelector('#gzModeGroup'),
+      trendLegend: root.querySelector('#gzTrendLegend'),
+      trendStack: root.querySelector('#gzTrendStack'),
+      claim3: root.querySelector('#gzClaim3'),
+      table3: root.querySelector('#gzTable3'),
+      note3: root.querySelector('#gzNote3'),
+      claim4: root.querySelector('#gzClaim4'),
+      table4: root.querySelector('#gzTable4'),
+      note4: root.querySelector('#gzNote4')
     };
-
-    els.btnWinPrev.addEventListener('click', () => {
-      const w = GZ.state.data.window;
-      if (w.showAll) return;
-      w.startIdx = Math.max(0, w.startIdx - 1);
-      updateDiagramWindow();
+    els.scopeGroup.addEventListener('click', e => {
+      const b = e.target.closest('button[data-scope]');
+      if (!b || b.disabled) return;
+      setScope(b.dataset.scope);
     });
-    els.btnWinNext.addEventListener('click', () => {
-      const a = GZ.state.data.currentAnalysis, w = GZ.state.data.window;
-      if (w.showAll || !a) return;
-      const maxStart = a.cycleStarts.length - 1;
-      w.startIdx = Math.min(maxStart, w.startIdx + 1);
-      updateDiagramWindow();
-    });
-    els.winSize.addEventListener('change', () => {
-      const v = parseInt(els.winSize.value, 10);
-      GZ.state.data.window.count = Number.isFinite(v) && v > 0 ? v : 5;
-      els.winSize.value = GZ.state.data.window.count;
-      updateDiagramWindow();
-    });
-    els.btnWinAll.addEventListener('click', () => {
-      const w = GZ.state.data.window;
-      w.showAll = !w.showAll;
-      els.btnWinAll.textContent = w.showAll ? 'Fenster anzeigen' : 'Alle anzeigen';
-      els.btnWinAll.classList.toggle('primary', w.showAll);
-      updateDiagramWindow();
-    });
-    els.statsScopeGroup.addEventListener('click', evt => {
-      const btn = evt.target.closest('button[data-scope]');
-      if (!btn || btn.disabled) return;
-      GZ.state.data.statsScope = btn.dataset.scope;
-      els.statsScopeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
-      const a = GZ.state.data.currentAnalysis;
-      if (!a) return;
-      a.allStats.forEach(({ stats }) => { stats._splMedCache = null; });
-      renderStats(a.allStats);
-      renderNavigatorPanel();
-      updateDiagramWindow();
+    els.modeGroup.addEventListener('click', e => {
+      const b = e.target.closest('button[data-mode]');
+      if (!b) return;
+      state.mode = b.dataset.mode;
+      els.modeGroup.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
       renderTrend();
     });
-    els.trendModeGroup.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        GZ.state.data.trendMode = btn.dataset.mode;
-        renderTrend();
-      });
-    });
-    els.phaseOverlayCheckbox.addEventListener('change', () => {
-      showPhaseOverlay = els.phaseOverlayCheckbox.checked;
-      updateDiagramWindow();
-    });
+    els.paramShare.addEventListener('input', () => { readParams(); renderAll(); });
+    els.paramTol.addEventListener('input', () => { readParams(); renderAll(); });
   }
 
-  /* ---------------- Navigator + Auswahl ---------------- */
-  function renderNavigatorPanel() {
-    const a = GZ.state.data.currentAnalysis;
-    GZ.views.navigator.render(els.navigator, a.allStats, GZ.state.data.selectedIdx, GZ.state.anomalyCtx(), selectSG);
+  function readParams() {
+    const share = Number(els.paramShare.value), tol = Number(els.paramTol.value);
+    if (Number.isFinite(share) && share > 0) GT.params.fixedShare = share;
+    if (Number.isFinite(tol) && tol >= 0) GT.params.tolerance = tol;
   }
 
-  function selectSG(idx) {
-    if (!GZ.state.data.currentAnalysis) return;
-    GZ.state.data.selectedIdx = idx;
-    GZ.state.data.trendSelected = new Set([idx]);
-    els.navigator.querySelectorAll('.nav-card').forEach(c => c.classList.toggle('active', Number(c.dataset.idx) === idx));
-    els.timelineEl.querySelectorAll('.lane-track').forEach(t => t.classList.toggle('highlight', Number(t.dataset.idx) === idx));
-    els.statsBody.querySelectorAll('tr').forEach(tr => tr.classList.toggle('selected-row', Number(tr.dataset.idx) === idx));
-    const track = els.timelineEl.querySelector(`.lane-track[data-idx="${idx}"]`);
-    if (track) track.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    syncTrendChecks();
-    renderTrend();
+  function setScope(scope) {
+    state.scope = scope;
+    GZ.state.data.statsScope = scope === 'spl' ? 'spl' : 'total';   // other tabs use it for their own flags
+    els.scopeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scope === scope));
+    renderAll();
   }
 
-  /* ---------------- Signalzeitendiagramm ---------------- */
-  function updateDiagramWindow() {
-    const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const { cycleStarts } = a;
-    const hasCycles = cycleStarts && cycleStarts.length >= 2;
-    els.diagramControls.style.display = hasCycles ? 'flex' : 'none';
-    const TU = computeGlobalTU(cycleStarts);
-    const range = hasCycles ? GZ.state.computeWindowRange() : { wMin: a.tMin, wMax: a.tMax, startIdx: 0, endIdx: 0 };
-    const wzActivePoints = GZ.state.data.wzActivePoints;
-    const anomalyCtx = GZ.state.anomalyCtx();
-
-    GZ.charts.timelineChart.render(els, {
-      allStats: a.allStats, wMin: range.wMin, wMax: range.wMax, cycleStarts, times: a.times, splValues: a.splValues, TU,
-      selectedIdx: GZ.state.data.selectedIdx,
-      anomalyBandsFor: entry => computeAnomalyBands(entry.stats, cycleStarts, a.tMin, a.tMax, anomalyCtx),
-      reqPointsFor: col => {
-        const pts = [];
-        if (wzActivePoints && wzActivePoints.colIndex === col.index) {
-          pts.push(...wzActivePoints.times.map(t => ({ t, unresolved: false })));
-          if (wzActivePoints.unresolvedTime != null) pts.push({ t: wzActivePoints.unresolvedTime, unresolved: true });
-        }
-        (GZ.state.data.oepnvActivePoints || []).filter(p => p.colIndex === col.index).forEach(p => {
-          pts.push(...p.times.map(t => ({ t, unresolved: false })));
-          if (p.unresolvedTime != null) pts.push({ t: p.unresolvedTime, unresolved: true });
-        });
-        return pts;
-      },
-      onGreenClick: () => {}
-    });
-    renderPhaseOverlay(range.wMin, range.wMax);
-
-    if (!hasCycles) return;
-    const total = cycleStarts.length;
-    const lastCycleShown = range.endIdx < (total - 1) ? range.endIdx : total;
-    els.winLabel.textContent = GZ.state.data.window.showAll
-      ? `Gesamte Aufzeichnung (${total} Umläufe erkannt)`
-      : `Umlauf ${range.startIdx + 1}–${lastCycleShown} von ${total}`;
-    els.btnWinPrev.disabled = GZ.state.data.window.showAll || range.startIdx <= 0;
-    els.btnWinNext.disabled = GZ.state.data.window.showAll || range.startIdx >= total - 1;
-    els.winSize.disabled = GZ.state.data.window.showAll;
+  /* ---------------- Slices of the current scope ---------------- */
+  // Returns [{ key, kind, label }]. The whole recording is one slice with key null.
+  function scopeSlices() {
+    return state.scope === 'total' ? [{ key: null }] : GZ.slices.forScope(slices, state.scope);
+  }
+  function sliceColor(key) {
+    if (key == null) return 'var(--sig-green)';
+    const slice = [...slices.plans, ...slices.hours].find(s => s.key === key);
+    return slice ? GZ.slices.colorOf(slices, slice) : 'var(--plan-b)';
+  }
+  function sliceLabel(key) {
+    const slice = [...slices.plans, ...slices.hours].find(s => s.key === key);
+    return slice ? slice.label : String(key);
+  }
+  function groupTitle(slice) {
+    const key = slice.key;
+    const cyc = GT.cyclesInSlice(model, key);
+    const plansHere = [...new Set(cyc.map(c => c.plan))];
+    const head = slice.kind === 'hour' ? `${slice.label} Uhr` : `Signalzeitenplan ${key}`;
+    const parts = [];
+    if (model.hasCycles) parts.push(`${cyc.length} Umläufe`);
+    if (slice.kind === 'hour' && plansHere.length) parts.push('SPL ' + plansHere.join(' → '));
+    if (GT.plantHasData(model, key)) parts.push(GT.plantActuated(model, key) ? 'verkehrsabhängig' : 'Festzeit');
+    return `${esc(head)}<span class="rest">${esc(parts.join(' · '))}</span>`;
   }
 
-  // Phasen-Overlay (siehe Tab "Stammdaten LSA"): toggelbare Klammern über dem
-  // gesamten Spuren-Stapel, unabhängig von der Signalgruppen-Aufteilung.
-  function renderPhaseOverlay(wMin, wMax) {
-    const a = GZ.state.data.currentAnalysis;
-    const phases = a ? GZ.state.data.phases : [];
-    const hasPhases = phases && phases.length > 0;
-    els.phaseOverlayToggle.style.display = hasPhases ? '' : 'none';
-    if (!hasPhases || !showPhaseOverlay) {
-      els.phaseOverlaySvgEl.style.display = 'none';
-      return;
-    }
-    els.phaseOverlaySvgEl.style.display = 'block';
-    const occEntries = phases.map((phase, i) => ({
-      ...GZ.phases.computePhaseOccurrences(phase, a.allStats),
-      color: GZ.phases.colorForIndex(i)
-    }));
-    GZ.charts.phaseOverlay.render(els.phaseOverlaySvgEl, { wMin, wMax, occEntries });
-  }
-
-  // Springt im Signalzeitendiagramm zum Umlauf, der den Zeitpunkt t enthält
-  // (aufgerufen aus Wartezeit-/Trend-Diagrammen und -Tabellen).
-  function jumpTo(t) {
-    const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const cs = a.cycleStarts;
-    if (cs && cs.length) {
-      let idx = 0;
-      for (let k = 0; k < cs.length; k++) { if (cs[k] <= t) idx = k; else break; }
-      GZ.state.data.window.showAll = false;
-      GZ.state.data.window.startIdx = Math.max(0, idx - Math.floor(GZ.state.data.window.count / 2));
-    }
-    updateDiagramWindow();
-  }
-
-  /* ---------------- Kennzahlen je Signalgruppe ---------------- */
-  function statsRowHtml(col, i, gd, cycleDurations) {
-    if (gd.length === 0) {
-      return `<tr data-idx="${i}"><td>${esc(col.name)}</td><td colspan="7">keine Grünphase erkannt</td></tr>`;
-    }
-    const flagged = detectAnomalies(gd).some(Boolean);
-    return `<tr class="${flagged ? 'flagged' : ''}" data-idx="${i}">
-      <td>${esc(col.name)}${flagged ? ' ⚠' : ''}</td>
-      <td>${gd.length}</td>
-      <td>${mean(gd).toFixed(1)}s</td>
-      <td>${median(gd).toFixed(1)}s</td>
-      <td>${Math.min(...gd).toFixed(0)}s</td>
-      <td>${Math.max(...gd).toFixed(0)}s</td>
-      <td>${stdDev(gd).toFixed(1)}s</td>
-      <td>${cycleDurations.length ? mean(cycleDurations).toFixed(1) + 's' : '–'}</td>
-    </tr>`;
-  }
-
-  function renderStats(allStats) {
-    const a = GZ.state.data.currentAnalysis;
-    if (GZ.state.data.statsScope === 'spl' && a && a.splList.length > 1) {
-      const { splList } = a;
-      let html = '';
-      splList.forEach(spl => {
-        const label = spl === '(unbekannt)' ? 'Signalzeitenplan unbekannt' : `Signalzeitenplan – SPL ${esc(spl)}`;
-        html += `<tr class="spl-group-row"><td colspan="8">${label}</td></tr>`;
-        allStats.forEach(({ col, stats }, i) => {
-          const entry = stats.bySpl.get(spl);
-          html += statsRowHtml(col, i, entry ? entry.greenDurations : [], entry ? entry.cycleDurations : []);
-        });
-      });
-      els.statsBody.innerHTML = html;
-    } else {
-      els.statsBody.innerHTML = allStats.map(({ col, stats }, i) => statsRowHtml(col, i, stats.greenDurations, stats.cycleDurations)).join('');
-    }
-    els.statsBody.querySelectorAll('tr[data-idx]').forEach(tr => {
-      tr.addEventListener('click', () => selectSG(Number(tr.dataset.idx)));
-    });
-  }
-
-  // Dunkel-/Abschaltzeiträume je Signalgruppe. Hintergrund (VwV-StVO zu § 37
-  // Abs. 2): Lichtzeichenanlagen sollen i. d. R. auch nachts in Betrieb
-  // bleiben; ein Abschalten ist nur nach Einzelfallprüfung zu verantworten.
-  function renderDunkelPanel(allStats) {
-    const rows = allStats.map(({ col, segs }) => {
-      const dunkelSegs = segs.filter(s => s.cat === 'DUNKEL');
-      const total = dunkelSegs.reduce((a, s) => a + (s.end - s.start), 0) / 1000;
-      const longest = dunkelSegs.reduce((max, s) => Math.max(max, (s.end - s.start) / 1000), 0);
-      return { col, n: dunkelSegs.length, total, longest };
-    }).filter(r => r.n > 0);
-
-    if (rows.length === 0) { els.dunkelPanel.style.display = 'none'; return; }
-    els.dunkelPanel.style.display = 'block';
-    els.dunkelBody.innerHTML = rows.map(r => `<tr>
-        <td>${esc(r.col.name)}</td><td>${fmtDauer(r.total)}</td><td>${r.n}</td><td>${fmtDauer(r.longest)}</td>
-      </tr>`).join('');
-    els.dunkelHint.textContent = 'Erkannte Zeiträume ohne Signalbild (Kategorie „Dunkel“) je Signalgruppe – z. B. Nachtabschaltung oder Programmwechsel. Ein Abschalten von Lichtzeichenanlagen ist nach VwV-StVO zu § 37 Abs. 2 nur nach eingehender Einzelfallprüfung zu verantworten.';
-  }
-
-  /* ---------------- Grünzeit-Trend ---------------- */
-  function populateTrendControls() {
-    const a = GZ.state.data.currentAnalysis;
-    els.trendSgChecks.innerHTML = a.allStats.map(({ col, stats }, i) => {
-      const disabled = stats.greenDurations.length === 0;
-      return `<label class="trend-sg-check${disabled ? ' disabled' : ''}" title="${disabled ? 'Keine Grünphasen erkannt' : ''}">
-        <input type="checkbox" value="${i}" ${GZ.state.data.trendSelected.has(i) ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
-        ${esc(col.name)}
-      </label>`;
-    }).join('');
-    els.trendSgChecks.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.onchange = () => {
-        const i = Number(cb.value);
-        const sel = GZ.state.data.trendSelected;
-        if (cb.checked) sel.add(i);
-        else if (sel.size <= 1) { cb.checked = true; return; }
-        else sel.delete(i);
-        renderTrend();
+  /* ---------------- Section 1 ---------------- */
+  function renderCycleChart() {
+    const a = analysis();
+    if (!model.hasCycles) { els.cycleChart.innerHTML = '<div class="report-empty">Keine Umlaufgrenzen (TX) erkannt – Umlaufzeit nicht darstellbar.</div>'; return; }
+    const runs = GZ.slices.planRuns(a.times, a.splValues, a.tMin, a.tMax);
+    const bands = runs.map(r => {
+      const tus = model.cycles.filter(c => c.regular && c.t >= r.t0 && c.t < r.t1).map(c => c.tu);
+      const actuated = GT.plantActuated(model, r.plan), has = GT.plantHasData(model, r.plan);
+      const range = tus.length ? (Math.min(...tus) === Math.max(...tus) ? `${fmtNum(Math.min(...tus))} s` : `${fmtNum(Math.min(...tus))}–${fmtNum(Math.max(...tus))} s`) : '–';
+      return {
+        t0: r.t0, t1: r.t1, tint: has ? (actuated ? 'actuated' : 'fixed') : null,
+        label: { long: `${GZ.slices.planLabel(r.plan)}${has ? ' · ' + (actuated ? 'verkehrsabhängig' : 'Festzeit') : ''} · TU ${range}`, short: GZ.slices.planLabel(r.plan) }
       };
     });
-  }
-
-  function syncTrendChecks() {
-    els.trendSgChecks.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.checked = GZ.state.data.trendSelected.has(Number(cb.value));
+    const regular = model.cycles.filter(c => c.regular);
+    const tus = regular.map(c => c.tu);
+    const lo = Math.min(...tus), hi = Math.max(...tus);
+    const yMin = Math.max(0, Math.floor(lo * 0.85 / 10) * 10), yMax = Math.max(yMin + 20, Math.ceil(hi * 1.1 / 10) * 10);
+    kit.timeChart(els.cycleChart, {
+      tMin: a.tMin, tMax: a.tMax, height: 158, yMin, yMax,
+      bands, dividers: runs.slice(1).map(r => r.t0),
+      steps: regular.map(c => ({ t0: c.t, t1: c.t + c.tu * 1000, y: c.tu, tip: `Umlauf ${c.i + 1} · ${fmtTimeShort(c.t)}<br>TU ${fmtNum(c.tu)} s · ${esc(GZ.slices.planLabel(c.plan))}` })),
+      logs: GZ.logs.visible(a.tMin, a.tMax)
     });
   }
 
-  function trendPointStats(stats) {
-    const gd = stats.greenDurations;
-    const med = median(gd);
-    const madVal = median(gd.map(v => Math.abs(v - med))) || 0.001;
-    return { med, madVal, threshHi: med + 3 * 1.4826 * madVal, threshLo: Math.max(0, med - 3 * 1.4826 * madVal) };
+  function histKeys() {
+    // Without a slice the bars stack by signal plan.
+    return state.scope === 'total' ? { stackKeys: slices.plans.map(p => p.key), keyOf: g => g.plan } : null;
   }
 
-  function renderTrendBlock(col, stats, chartBox, axisEl, histBox, histAxisEl, captionEl) {
-    const a = GZ.state.data.currentAnalysis;
-    const gd = stats.greenDurations, greens = stats.greens;
-    const mode = GZ.state.data.trendMode;
-    chartBox.style.display = mode === 'scatter' ? '' : 'none';
-    axisEl.style.display = mode === 'scatter' ? '' : 'none';
-    histBox.style.display = mode === 'hist' ? '' : 'none';
-    histAxisEl.style.display = mode === 'hist' ? '' : 'none';
+  function table1Row(sg, slice) {
+    const st = GT.stats(model, sg, slice.key);
+    const tr = document.createElement('tr');
+    tr.dataset.sg = sgIndex(sg);
+    if (state.selected.includes(sgIndex(sg))) tr.className = 'selected';
+    const nameCell = `<td><span class="name">${esc(sg.col.name)}</span>${sg.col.beschreibung && sg.col.beschreibung !== sg.col.name ? `<span class="sub">${esc(sg.col.beschreibung)}</span>` : ''}</td>`;
+    if (!st.n) { tr.innerHTML = nameCell + '<td class="left verdict none">kein Grün</td><td class="chart"></td>' + '<td></td>'.repeat(7); return tr; }
+    const verdict = !st.enough ? '<span class="verdict none">zu wenig Daten</span>'
+      : `<span class="verdict ${st.isFixed ? '' : 'actuated'}">${st.isFixed ? 'Festzeit' : 'verkehrsabhängig'}</span>`;
+    tr.innerHTML = nameCell + `<td class="left">${verdict}</td><td class="chart"></td>` +
+      `<td>${st.n}</td><td>${fmtNum(st.min)} s</td><td>${fmtNum(st.med)} s</td><td>${fmtNum(st.max)} s</td><td>${fmtNum(st.sd, 1)} s</td>` +
+      `<td>${fmtNum(st.share * 100, 1)} %</td><td class="${st.isFixed || !st.enough ? 'dim' : ''}">${st.isFixed || !st.enough ? '–' : fmtNum(st.atMax * 100, 1) + ' %'}</td>`;
+    const keys = histKeys();
+    tr.querySelector('.chart').appendChild(R.histogram(st, keys
+      ? { xMax: xMaxGreen, stackKeys: keys.stackKeys, keyOf: keys.keyOf, colorOf: sliceColor, tipPrefix: k => 'SPL ' + k }
+      : { xMax: xMaxGreen, stackKeys: [slice.key], keyOf: () => slice.key, colorOf: sliceColor, tipPrefix: sliceLabel }));
+    return tr;
+  }
 
-    if (gd.length === 0) {
-      captionEl.textContent = 'Keine Grünphasen für diese Signalgruppe erkannt.';
+  function renderTable1() {
+    const a = analysis();
+    els.table1.innerHTML = '';
+    const head = document.createElement('thead');
+    head.innerHTML = `<tr><th>Signalgruppe</th><th class="left">Betriebsart</th><th class="chart"></th><th>Grünphasen</th><th>Min</th><th>Median</th><th>Max</th><th class="keep-case">σ</th><th>im Median ± ${fmtNum(GT.params.tolerance)} s</th><th>bei Max</th></tr>`;
+    head.querySelector('th.chart').appendChild(R.axis(R.HIST_W, xMaxGreen, xMaxGreen > 100 ? 50 : 10, 14));
+    els.table1.appendChild(head);
+    const body = document.createElement('tbody');
+    els.table1.appendChild(body);
+    scopeSlices().forEach(slice => {
+      if (slice.key != null) { const g = document.createElement('tr'); g.className = 'group'; g.innerHTML = `<td colspan="10">${groupTitle(slice)}</td>`; body.appendChild(g); }
+      model.sgs.forEach(sg => body.appendChild(table1Row(sg, slice)));
+    });
+    body.querySelectorAll('tr[data-sg]').forEach(tr => tr.addEventListener('click', () => {
+      state.selected = [Number(tr.dataset.sg)];
+      renderPicker(); renderTrend(); renderTable1();
+      els.sgPick.closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+
+    // Claim: one statement per signal plan
+    const parts = slices.plans.filter(p => GT.plantHasData(model, p.key)).map(p => {
+      const cyc = GT.cyclesInSlice(model, p.key);
+      return { label: p.label, actuated: GT.plantActuated(model, p.key), count: cyc.length, duration: cyc.reduce((s, c) => s + c.tu, 0) };
+    });
+    const detail = p => model.hasCycles ? ` (${p.count} Umläufe, ${fmtHoursMinutes(p.duration)})` : '';
+    els.claim1.textContent = !parts.length ? 'Zu wenige Grünphasen für eine Aussage.'
+      : parts.every(p => p.actuated) ? 'Die Anlage lief durchgehend verkehrsabhängig.'
+      : parts.every(p => !p.actuated) ? 'Die Anlage lief durchgehend in Festzeit.'
+      : 'Gemischter Betrieb: ' + parts.map(p => `${p.label} ${p.actuated ? 'verkehrsabhängig' : 'in Festzeit'}${detail(p)}`).join(', ') + '.';
+
+    const legend = state.scope === 'total' && slices.plans.length > 1
+      ? '<div class="legend"><span class="item">Balkenfarbe</span>' + slices.plans.map(p => `<span class="item"><span class="swatch" style="background:${sliceColor(p.key)}"></span>${esc(p.label)}</span>`).join('') + '</div>' : '';
+    els.note1.innerHTML = `${legend}Balken = Anteil der Grünphasen je 1-s-Klasse, Maßstab je Zeile auf die höchste Klasse normiert. Gemeinsame Zeitachse für alle Zeilen. ` +
+      `<b>Verkehrsabhängig</b> heißt: die Grünzeit streut. <b>Festzeit</b> heißt: sie streut nicht. Die Anlage gilt als verkehrsabhängig, sobald eine Signalgruppe streut. ` +
+      `Signalgruppen mit weniger als ${GT.MIN_GREENS} Grünphasen werden nicht eingestuft. ` +
+      `„bei Max“ = Anteil der Grünphasen, die genau das beobachtete Maximum erreichen (Hinweis auf Deckelung durch die Maximalgrünzeit).`;
+  }
+
+  /* ---------------- Section 2: trend ---------------- */
+  function selectableSgs() { return model.sgs.filter(sg => sg.greens.length); }
+
+  function renderPicker() {
+    els.sgPick.innerHTML = '';
+    selectableSgs().forEach(sg => {
+      const label = document.createElement('label');
+      label.innerHTML = `<input type="checkbox" value="${sgIndex(sg)}" ${state.selected.includes(sgIndex(sg)) ? 'checked' : ''}><span class="name">${esc(sg.col.name)}</span>`;
+      label.querySelector('input').addEventListener('change', e => {
+        const idx = sgIndex(sg);
+        if (e.target.checked) state.selected.push(idx);
+        else if (state.selected.length > 1) state.selected = state.selected.filter(i => i !== idx);
+        else e.target.checked = true;
+        state.selected.sort((p, q) => model.sgs.findIndex(s => sgIndex(s) === p) - model.sgs.findIndex(s => sgIndex(s) === q));
+        renderTrend(); renderTable1();
+      });
+      els.sgPick.appendChild(label);
+    });
+  }
+
+  function verdictWord(st) { return !st.n || !st.enough ? '' : (st.isFixed ? 'Festzeit' : 'verkehrsabhängig'); }
+
+  function renderTimeTrend(host, sg, height) {
+    const a = analysis();
+    const all = GT.stats(model, sg, null);
+    const runs = GZ.slices.planRuns(a.times, a.splValues, a.tMin, a.tMax);
+    // Background bands: one per clock hour or one per signal plan run
+    const bandSource = state.scope === 'hour'
+      ? slices.hours.map(h => ({ key: h.key, t0: h.t0, t1: Math.min(h.t1, a.tMax), name: h.label }))
+      : runs.map(r => ({ key: r.plan, t0: r.t0, t1: r.t1, name: GZ.slices.planLabel(r.plan) }));
+    const bands = bandSource.map(b => {
+      const st = GT.stats(model, sg, b.key), word = verdictWord(st);
+      return { t0: b.t0, t1: b.t1, tint: st.n && st.enough ? (st.isFixed ? 'fixed' : 'actuated') : null, label: { long: b.name + (word ? ' · ' + word : ''), short: b.name } };
+    });
+    const windows = state.scope === 'total'
+      ? [{ t0: a.tMin, t1: a.tMax, med: all.med, lo: all.p5, hi: all.p95 }]
+      : bandSource.map(b => { const st = GT.stats(model, sg, b.key); return { t0: b.t0, t1: b.t1, med: st.n ? st.med : null, lo: st.p5, hi: st.p95 }; });
+    const windowAt = t => windows.find(w => t >= w.t0 && t < w.t1) || windows[windows.length - 1];
+    const points = sg.greens.map(g => {
+      const w = windowAt(g.t), diff = g.dur - w.med;
+      return { t: g.t, y: g.dur, tip: `${g.cycle >= 0 ? 'Umlauf ' + (g.cycle + 1) + ' · ' : ''}${fmtTimeShort(g.t)}<br>Grünzeit ${fmtNum(g.dur, 1)} s (${diff >= 0 ? '+' : '−'}${fmtNum(Math.abs(diff), 1)} s zum Median)<br>${esc(GZ.slices.planLabel(g.plan))}` };
+    });
+    const withGreen = new Set(sg.greens.map(g => g.cycle));
+    const crosses = model.hasCycles ? model.cycles.filter(c => c.regular && !withGreen.has(c.i))
+      .map(c => ({ t: c.t + c.tu * 500, tip: `Umlauf ${c.i + 1} · ${fmtTimeShort(c.t)}<br>kein Grün · ${esc(GZ.slices.planLabel(c.plan))}` })) : [];
+    const yMax = Math.max(20, Math.ceil(all.max * 1.1 / 10) * 10);
+    kit.timeChart(host, {
+      tMin: a.tMin, tMax: a.tMax, height, yMin: 0, yMax, yStep: yMax <= 30 ? 5 : (yMax > 100 ? 20 : 10),
+      bands, dividers: runs.slice(1).map(r => r.t0), hours: state.scope === 'hour' ? slices.hours.map(h => h.t0) : [],
+      windows, points, crosses, logs: GZ.logs.visible(a.tMin, a.tMax)
+    });
+  }
+
+  function renderCdfTrend(host, sg, height) {
+    const all = GT.stats(model, sg, null);
+    let lo = Math.floor(all.min) - 1, hi = Math.ceil(all.max) + 1;
+    if (hi - lo < 10) { const c = (hi + lo) / 2; lo = Math.floor(c - 5); hi = lo + 10; }
+    const slicesNow = state.scope === 'total' ? [] : scopeSlices();
+    if (!slicesNow.length) {
+      const pcts = [50, 85, 95].map(p => ({ x: GT.percentile(all.durs, p), label: `P${p}` }));
+      kit.cdfChart(host, {
+        height, xMin: lo, xMax: hi, fill: true,
+        vLines: pcts.map(p => ({ x: p.x, color: 'var(--text-faint)', dash: '2,2', label: `${p.label} ${fmtNum(p.x)} s` })),
+        series: [{ values: all.durs, color: 'var(--sig-green)' }]
+      });
       return;
     }
-    const anomalyCtx = GZ.state.anomalyCtx();
-    const anomalies = getFlaggedAnomalies(stats, anomalyCtx);
-    const { med, threshHi, threshLo } = trendPointStats(stats);
-    const useSplScope = GZ.state.data.statsScope === 'spl' && a.splList.length > 1;
-    const splWindows = useSplScope ? computeTrendSplWindows(stats, { times: a.times, splValues: a.splValues, tMin: a.tMin, tMax: a.tMax }) : null;
-    const splTransitions = computeSplTransitions(a.times, a.splValues).filter(tr => tr.t >= a.tMin && tr.t <= a.tMax);
-
-    GZ.charts.trendChart.renderScatter(chartBox, axisEl.querySelector('svg'), {
-      tMin: a.tMin, tMax: a.tMax, greens, gd, med, threshHi, threshLo, splWindows, splTransitions,
-      onPointClick: jumpTo
+    const series = [{ values: all.durs, color: 'var(--text-faint)', width: 1.2, dash: '4,3' }];
+    slicesNow.forEach(sl => {
+      const st = GT.stats(model, sg, sl.key);
+      if (!st.n) return;
+      series.push({ values: st.durs, color: sliceColor(sl.key), width: 2, tip: `${esc(sl.label)} · n = ${st.n}<br>P50 ${fmtNum(GT.percentile(st.durs, 50))} s · P85 ${fmtNum(GT.percentile(st.durs, 85))} s · P95 ${fmtNum(GT.percentile(st.durs, 95))} s` });
     });
-    GZ.charts.trendChart.renderCdf(histBox, histAxisEl.querySelector('svg'), { gd, threshHi, threshLo });
-
-    const flaggedIdx = anomalies.map((f, i) => f ? i + 1 : null).filter(x => x !== null);
-    const scopeNote = useSplScope ? ' je Signalzeitenplan' : '';
-    captionEl.innerHTML = flaggedIdx.length
-      ? `<b>${flaggedIdx.length} auffällige${flaggedIdx.length > 1 ? '' : 'r'} Zyklus/Zyklen: Nr. ${flaggedIdx.join(', ')}</b> — Grünzeit weicht${scopeNote} deutlich vom Median ab.`
-      : `Keine auffälligen Zyklen${scopeNote} — n=${gd.length}.`;
+    kit.cdfChart(host, { height, xMin: lo, xMax: hi, hLines: [.5, .85, .95], series });
   }
 
   function renderTrend() {
-    const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const idxs = [...GZ.state.data.trendSelected];
-    els.trendModeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.mode === GZ.state.data.trendMode));
+    els.trendStack.innerHTML = '';
+    const sgs = state.selected.map(i => model.sgs.find(s => sgIndex(s) === i)).filter(Boolean);
+    if (!sgs.length) { els.trendStack.innerHTML = '<div class="report-empty">Keine Signalgruppe mit Grünphasen.</div>'; els.trendLegend.innerHTML = ''; return; }
+    const height = sgs.length === 1 ? 250 : 175;
+    const keys = state.scope === 'total' ? [] : scopeSlices();
+    els.trendLegend.innerHTML = state.mode === 'time'
+      ? `<span class="item"><span class="dot" style="background:var(--text)"></span>Grünzeit je Zyklus</span>
+         <span class="item"><span class="line" style="border-top:1.4px solid var(--accent)"></span>Median</span>
+         <span class="item"><span class="swatch" style="background:rgba(47,111,163,.13);border:none"></span>P5–P95</span>
+         <span class="item"><span class="dim">×</span>Zyklus ohne Grün</span>
+         <span class="item"><span class="swatch actuated"></span>verkehrsabhängig</span><span class="item"><span class="swatch fixed"></span>Festzeit</span>
+         <span class="item"><span class="line vertical" style="border-left:1px dashed var(--req-marker)"></span>Signalprogrammwechsel</span>`
+      : (keys.length
+          ? `<span class="item">Anteil der Zyklen mit höchstens dieser Grünzeit</span>` + keys.map(k => `<span class="item"><span class="line" style="border-top:2px solid ${sliceColor(k.key)}"></span>${esc(k.label)}</span>`).join('') + `<span class="item"><span class="line" style="border-top:1.2px dashed var(--text-faint)"></span>gesamt</span>`
+          : `<span class="item"><span class="line" style="border-top:1.9px solid var(--sig-green)"></span>Anteil der Zyklen mit höchstens dieser Grünzeit</span>`);
 
-    if (idxs.length === 1) {
-      els.trendStackContainer.style.display = 'none';
-      els.trendStackContainer.innerHTML = '';
-      els.trendChartBox.style.display = '';
-      els.trendAxis.style.display = '';
-      els.trendHistBox.style.display = '';
-      els.trendHistAxis.style.display = '';
-      els.trendCaption.style.display = '';
-      const { col, stats } = a.allStats[idxs[0]];
-      els.trendTarget.textContent = col.name;
-      renderTrendBlock(col, stats, els.trendChartBox, els.trendAxis, els.trendHistBox, els.trendHistAxis, els.trendCaption);
-      return;
-    }
-
-    els.trendTarget.textContent = `${idxs.length} Signalgruppen`;
-    els.trendChartBox.style.display = 'none';
-    els.trendAxis.style.display = 'none';
-    els.trendHistBox.style.display = 'none';
-    els.trendHistAxis.style.display = 'none';
-    els.trendCaption.style.display = 'none';
-    els.trendStackContainer.style.display = '';
-    els.trendStackContainer.innerHTML = idxs.map(i => {
-      const { col } = a.allStats[i];
-      const desc = (col.beschreibung && col.beschreibung !== col.name) ? ` <span class="trend-sub-desc">${esc(col.beschreibung)}</span>` : '';
-      return `<div class="trend-sub" data-idx="${i}">
-        <div class="trend-sub-head">${esc(col.name)}${desc}</div>
-        <div class="chart-box" data-role="scatter"><svg></svg><div class="chart-tooltip"></div></div>
-        <div class="axis" data-role="scatter-axis"><svg></svg></div>
-        <div class="chart-box hoverable" data-role="hist"><svg></svg><div class="chart-tooltip"></div></div>
-        <div class="axis" data-role="hist-axis"><svg></svg></div>
-        <div class="chart-caption" data-role="caption"></div>
-      </div>`;
-    }).join('');
-    els.trendStackContainer.querySelectorAll('.trend-sub').forEach(block => {
-      const idx = Number(block.dataset.idx);
-      const { col, stats } = a.allStats[idx];
-      renderTrendBlock(
-        col, stats,
-        block.querySelector('[data-role="scatter"]'), block.querySelector('[data-role="scatter-axis"]'),
-        block.querySelector('[data-role="hist"]'), block.querySelector('[data-role="hist-axis"]'),
-        block.querySelector('[data-role="caption"]')
-      );
+    sgs.forEach(sg => {
+      const st = GT.stats(model, sg, null);
+      const block = document.createElement('div');
+      block.className = 'trend-block';
+      block.innerHTML = `<div class="trend-head"><span class="name">${esc(sg.col.name)}</span><span class="sub inline">${esc(sg.col.beschreibung && sg.col.beschreibung !== sg.col.name ? sg.col.beschreibung : '')}</span></div><div class="host"></div><div class="caption"></div>`;
+      els.trendStack.appendChild(block);
+      (state.mode === 'time' ? renderTimeTrend : renderCdfTrend)(block.querySelector('.host'), sg, height);
+      let caption = `n = ${st.n} Grünphasen${model.hasCycles ? ' in ' + st.total + ' Umläufen' : ''} · Median ${fmtNum(st.med)} s · P5–P95 ${fmtNum(st.p5)}–${fmtNum(st.p95)} s · Min ${fmtNum(st.min)} s · Max ${fmtNum(st.max)} s · σ ${fmtNum(st.sd, 1)} s`;
+      if (state.mode === 'cdf' && keys.length) {
+        caption += '\nP50 / P95: ' + keys.map(k => { const q = GT.stats(model, sg, k.key); return q.n ? `${k.label} ${fmtNum(GT.percentile(q.durs, 50))} / ${fmtNum(GT.percentile(q.durs, 95))} s` : null; }).filter(Boolean).join(' · ');
+      }
+      block.querySelector('.caption').textContent = caption;
     });
   }
 
-  /* ---------------- CSV-Export ---------------- */
-  function statsCSVRow(name, gd, cycleDurations) {
-    if (gd.length === 0) return [name, 0, '', '', '', '', '', ''];
-    return [name, gd.length, mean(gd).toFixed(1), median(gd).toFixed(1), Math.min(...gd).toFixed(0), Math.max(...gd).toFixed(0), stdDev(gd).toFixed(1), cycleDurations.length ? mean(cycleDurations).toFixed(1) : ''];
-  }
-  function exportStatsCSV() {
-    const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const rows = [['Signalgruppe', 'Zyklen', 'Ø Grün (s)', 'Median (s)', 'Min (s)', 'Max (s)', 'Sigma (s)', 'Ø Umlauf (s)']];
-    if (GZ.state.data.statsScope === 'spl' && a.splList.length > 1) {
-      rows[0] = ['Signalzeitenplan', ...rows[0]];
-      a.splList.forEach(spl => {
-        const splLabel = spl === '(unbekannt)' ? 'unbekannt' : spl;
-        a.allStats.forEach(({ col, stats }) => {
-          const entry = stats.bySpl.get(spl);
-          rows.push([splLabel, ...statsCSVRow(col.name, entry ? entry.greenDurations : [], entry ? entry.cycleDurations : [])]);
-        });
+  /* ---------------- Section 3: position in the cycle ---------------- */
+  const rangeText = (lo, hi) => Math.abs(hi - lo) < 0.5 ? '–' : `${fmtNum(lo)}–${fmtNum(hi)} s`;
+
+  function renderTable3() {
+    els.table3.innerHTML = '';
+    if (!model.hasCycles) { els.claim3.textContent = ''; els.note3.textContent = 'Diese Auswertung braucht Umlaufgrenzen (TX in der Aufzeichnung).'; return; }
+    const head = document.createElement('thead');
+    head.innerHTML = `<tr><th>Signalgruppe</th><th class="left">Verhalten</th><th class="chart"></th><th>An · Median</th><th>An · P5–P95</th><th>Ab · Median</th><th>Ab · P5–P95</th></tr>`;
+    head.querySelector('th.chart').appendChild(R.axis(R.LANE_W, tuMax, tuMax > 100 ? 50 : 10, 14));
+    els.table3.appendChild(head);
+    const body = document.createElement('tbody');
+    els.table3.appendChild(body);
+    const groups = [];
+    scopeSlices().forEach(slice => {
+      if (slice.key != null) { const g = document.createElement('tr'); g.className = 'group'; g.innerHTML = `<td colspan="7">${groupTitle(slice)}</td>`; body.appendChild(g); }
+      const byBehaviour = {};
+      model.sgs.forEach(sg => {
+        const st = GT.stats(model, sg, slice.key), tr = document.createElement('tr');
+        tr.innerHTML = `<td><span class="name">${esc(sg.col.name)}</span>${sg.col.beschreibung && sg.col.beschreibung !== sg.col.name ? `<span class="sub">${esc(sg.col.beschreibung)}</span>` : ''}</td>`;
+        if (!st.n || !st.hasCycleData) { tr.innerHTML += '<td class="left verdict none">kein Grün</td>' + '<td></td>'.repeat(5); body.appendChild(tr); return; }
+        const b = GT.behaviour(st);
+        (byBehaviour[b] = byBehaviour[b] || []).push(sg.col.name);
+        tr.innerHTML += `<td class="left">${b}</td><td class="chart"></td><td>${fmtNum(st.onMed)} s</td><td>${rangeText(st.onLo, st.onHi)}</td><td>${fmtNum(st.offMed)} s</td><td>${rangeText(st.offLo, st.offHi)}</td>`;
+        tr.querySelector('.chart').appendChild(R.lane(st, { xMax: tuMax }));
+        body.appendChild(tr);
       });
-    } else {
-      a.allStats.forEach(({ col, stats }) => rows.push(statsCSVRow(col.name, stats.greenDurations, stats.cycleDurations)));
-    }
+      groups.push({ slice, byBehaviour });
+    });
+    els.claim3.innerHTML = groups.map(g => {
+      const lines = Object.entries(g.byBehaviour).map(([b, names]) => `<div>${esc(b)}: <span class="mono">${esc(names.join(', '))}</span></div>`).join('');
+      return g.slice.key != null ? `<div class="claim-group"><div class="claim-group-label">${esc(g.slice.label)}</div>${lines}</div>` : lines;
+    }).join('');
+    els.note3.innerHTML = '<b>An / Ab</b> = Sekunden seit Umlaufbeginn (TX = 0) bis Grünbeginn bzw. Grünende. Hellgrüner Balken = Median-Grünfenster; Strich mit Kappen = P5–P95 des jeweiligen Rands; gestrichelte Linie = Median-Umlaufzeit. ' +
+      'Zeigt, welcher Rand der Grünzeit sich bewegt – die Grünzeit selbst steht in 1.';
+  }
+
+  /* ---------------- Section 4: frequency and share ---------------- */
+  function renderTable4() {
+    els.table4.innerHTML = '';
+    if (!model.hasCycles) { els.claim4.textContent = ''; els.note4.textContent = 'Diese Auswertung braucht Umlaufgrenzen (TX in der Aufzeichnung).'; return; }
+    els.table4.innerHTML = `<thead><tr><th>Signalgruppe</th><th class="chart">Umläufe mit Grün</th><th>Anteil</th><th>Grünanteil am Umlauf</th><th>Rot · Median</th><th>Rot · Max</th><th>Rot-Gelb · Gelb</th></tr></thead>`;
+    const body = document.createElement('tbody');
+    els.table4.appendChild(body);
+    const summary = [];
+    scopeSlices().forEach(slice => {
+      if (slice.key != null) { const g = document.createElement('tr'); g.className = 'group'; g.innerHTML = `<td colspan="7">${groupTitle(slice)}</td>`; body.appendChild(g); }
+      const everyCycle = [], onDemand = [];
+      model.sgs.forEach(sg => {
+        const st = GT.stats(model, sg, slice.key), tr = document.createElement('tr');
+        tr.innerHTML = `<td><span class="name">${esc(sg.col.name)}</span>${sg.col.beschreibung && sg.col.beschreibung !== sg.col.name ? `<span class="sub">${esc(sg.col.beschreibung)}</span>` : ''}</td>`;
+        if (!st.n) { tr.innerHTML += `<td class="chart dim">0 von ${st.total}</td>` + '<td></td>'.repeat(5); body.appendChild(tr); onDemand.push(`${sg.col.name} (0 %)`); return; }
+        const f = Math.min(1, st.cyclesWithGreen / st.total);
+        if (f > 0.995) everyCycle.push(sg.col.name); else onDemand.push(`${sg.col.name} (${fmtNum(f * 100)} %)`);
+        const trans = sg.redAmber || sg.amber ? `${fmtNum(sg.redAmber)} · ${fmtNum(sg.amber)} s` : '–';
+        tr.innerHTML += `<td class="chart"><span class="share-cell"><span class="bar"></span><span class="mono">${st.cyclesWithGreen} von ${st.total}</span></span></td>` +
+          `<td>${fmtNum(f * 100, 1)} %</td><td>${fmtNum(st.greenShare * 100)} %</td><td>${fmtNum(st.redMed)} s</td><td>${fmtNum(st.redMax)} s</td><td>${trans}</td>`;
+        tr.querySelector('.bar').appendChild(R.shareBar(f));
+        body.appendChild(tr);
+      });
+      summary.push({ slice, everyCycle, onDemand });
+    });
+    els.claim4.innerHTML = summary.map(l => {
+      const a = l.everyCycle.length ? `Grün in jedem Umlauf: ${esc(l.everyCycle.join(', '))}.` : '';
+      const b = l.onDemand.length ? ` Nur auf Anforderung: ${esc(l.onDemand.join(', '))}.` : '';
+      return `<div>${l.slice.key != null ? `<span class="claim-group-label inline">${esc(l.slice.label)}</span> ` : ''}${a}${b}</div>`;
+    }).join('');
+    els.note4.innerHTML = '<b>Umläufe mit Grün</b> = Umläufe, in denen die Signalgruppe mindestens einmal Grün zeigt. <b>Grünanteil</b> = Median von Grünzeit ÷ Umlaufzeit. ' +
+      '<b>Rot</b> = Dauer des Rot-Zustands zwischen zwei Grünphasen (ohne Rot-Gelb und Gelb); Umläufe ohne Grün verlängern sie. Rot ist nicht die Wartezeit eines Fahrzeugs – die steht im Tab „Wartezeit ab Anforderung“.';
+  }
+
+  /* ---------------- Whole tab ---------------- */
+  function renderContext() {
+    const a = analysis();
+    const hm = GZ.format.fmtHm;
+    els.context.innerHTML = `${a.knotenName || a.knotenNr ? `<b>${esc(a.knotenName || 'Knoten ' + a.knotenNr)}</b> · ` : ''}${new Date(a.tMin).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${hm(a.tMin)}–${hm(a.tMax)}` +
+      `${model.hasCycles ? ' · ' + model.cycles.filter(c => c.regular).length + ' Umläufe' : ''} · ${model.sgs.length} Signalgruppen · SPL ${esc(a.splList.join(', '))}`;
+  }
+
+  function renderAll() {
+    if (!model) return;
+    renderCycleChart(); renderTable1(); renderTrend(); renderTable3(); renderTable4();
+  }
+
+  // Redraw after a size change, a tab switch or a log change. Tables do not depend on the width.
+  function refresh() {
+    if (!model || !analysis()) return;
+    renderCycleChart(); renderTrend();
+  }
+
+  /* ---------------- CSV export ---------------- */
+  function exportStatsCSV() {
+    if (!model) return;
+    const head = ['Auswertung', 'Signalgruppe', 'Betriebsart', 'Grünphasen', 'Min (s)', 'Median (s)', 'Max (s)', 'Sigma (s)', 'im Median ± Toleranz (%)',
+      'An Median (s)', 'Ab Median (s)', 'Umläufe mit Grün', 'Umläufe gesamt', 'Grünanteil Median (%)', 'Rot Median (s)', 'Rot Max (s)'];
+    const rows = [head];
+    const num = (v, d = 1) => Number.isFinite(v) ? v.toFixed(d).replace('.', ',') : '';
+    scopeSlices().forEach(slice => {
+      model.sgs.forEach(sg => {
+        const st = GT.stats(model, sg, slice.key);
+        const label = slice.key == null ? 'Gesamter Mitschnitt' : slice.label;
+        if (!st.n) { rows.push([label, sg.col.name, 'kein Grün', 0]); return; }
+        rows.push([label, sg.col.name, !st.enough ? 'zu wenig Daten' : (st.isFixed ? 'Festzeit' : 'verkehrsabhängig'), st.n, num(st.min, 0), num(st.med), num(st.max, 0), num(st.sd), num(st.share * 100),
+          num(st.onMed), num(st.offMed), st.cyclesWithGreen, st.total, num(st.greenShare * 100, 0), num(st.redMed), num(st.redMax)]);
+      });
+    });
     const csv = rows.map(r => r.join(';')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -400,36 +411,40 @@
     URL.revokeObjectURL(url);
   }
 
-  /* ---------------- Einstiegspunkt nach Analyse ---------------- */
+  /* ---------------- Entry point after an analysis ---------------- */
   function onAnalyzeComplete() {
-    const a = GZ.state.data.currentAnalysis;
+    const a = analysis();
+    readParams();
+    model = GT.build(a);
+    slices = GZ.slices.build(a);
+    state.scope = 'total'; state.mode = 'time';
     GZ.state.data.statsScope = 'total';
-    const splBtn = els.statsScopeGroup.querySelector('button[data-scope="spl"]');
-    if (splBtn) splBtn.disabled = a.splList.length < 2;
-    els.statsScopeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scope === 'total'));
+    els.scopeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scope === 'total'));
+    els.modeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.mode === 'time'));
+    const hourBtn = els.scopeGroup.querySelector('button[data-scope="hour"]');
+    hourBtn.disabled = !slices.hoursAvailable;
+    hourBtn.title = slices.hoursAvailable ? '' : `Mehr als ${GZ.slices.MAX_HOUR_SLICES} Stunden – nicht darstellbar`;
+    const planBtn = els.scopeGroup.querySelector('button[data-scope="spl"]');
+    planBtn.disabled = slices.plans.length < 2;
+    planBtn.title = slices.plans.length < 2 ? 'Nur ein Signalzeitenplan in der Aufzeichnung' : '';
 
-    GZ.state.data.selectedIdx = GZ.state.pickDefaultSG(a.allStats);
-    GZ.state.data.window.startIdx = 0;
-    GZ.state.data.window.showAll = false;
-    GZ.state.data.wzActivePoints = null;
-    GZ.state.data.oepnvActivePoints = [];
-    const winSizeVal = parseInt(els.winSize.value, 10);
-    GZ.state.data.window.count = Number.isFinite(winSizeVal) && winSizeVal > 0 ? winSizeVal : 5;
-    showPhaseOverlay = false;
-    els.phaseOverlayCheckbox.checked = false;
+    const all = model.sgs.flatMap(sg => sg.greens.map(g => g.dur));
+    xMaxGreen = Math.max(20, Math.ceil(((all.length ? Math.max(...all) : 20) + 1) / 10) * 10);
+    const offs = model.sgs.flatMap(sg => sg.greens.filter(g => g.cycle >= 0).map(g => g.off));
+    const tus = model.cycles.filter(c => c.regular).map(c => c.tu);
+    tuMax = Math.max(20, Math.ceil(Math.max(...tus, ...offs, 0) / 10) * 10);
 
-    renderNavigatorPanel();
-    updateDiagramWindow();
-    renderStats(a.allStats);
-    renderDunkelPanel(a.allStats);
-    GZ.state.data.trendSelected = new Set([GZ.state.data.selectedIdx]);
-    populateTrendControls();
-    selectSG(GZ.state.data.selectedIdx);
+    // Start with the signal group whose green time varies most
+    const ranked = selectableSgs().map(sg => ({ sg, sd: GT.stats(model, sg, null).sd || 0 })).sort((p, q) => q.sd - p.sd);
+    state.selected = ranked.length ? [sgIndex(ranked[0].sg)] : [];
+
+    els.notice.style.display = model.hasCycles ? 'none' : '';
+    els.notice.textContent = model.hasCycles ? '' : 'Keine Umlaufgrenzen (TX) in der Aufzeichnung erkannt: Umlaufzeit, Lage im Umlauf und Umläufe mit Grün sind nicht verfügbar.';
+    renderContext();
+    renderPicker();
+    renderAll();
   }
 
-  // Vom Wartezeit-Tab aufgerufen: Anforderungspunkte im Diagramm auffrischen.
-  function refreshReqPoints() { updateDiagramWindow(); }
-
   GZ.views = GZ.views || {};
-  GZ.views.gruenzeitanalyse = { init, onAnalyzeComplete, refresh: updateDiagramWindow, refreshReqPoints, jumpTo, exportStatsCSV, selectSG };
+  GZ.views.gruenzeitanalyse = { init, onAnalyzeComplete, refresh, exportStatsCSV };
 })(window.GZ = window.GZ || {});

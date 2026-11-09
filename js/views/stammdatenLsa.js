@@ -107,7 +107,8 @@
         kuerzel: p.kuerzel, name: p.name,
         members: [...p.members].map(idx => sgNameByIndex.get(idx)).filter(Boolean)
       })),
-      pueOverrides
+      pueOverrides,
+      detectors: GZ.detectors.toConfig(a)
     };
     const idPart = a.knotenNr ? String(a.knotenNr).trim().replace(/[^A-Za-z0-9_-]+/g, '-') : 'unbekannt';
     GZ.configIO.downloadJson(`phasen_knoten-${idPart}.json`, cfg);
@@ -167,6 +168,10 @@
 
     GZ.state.data.phases = newPhases;
     GZ.state.data.pueOverrides = newOverrides;
+    if (cfg.detectors) {
+      GZ.detectors.fromConfig(a, cfg.detectors).forEach(msg => skipped.push(msg));
+      if (GZ.views.wartezeit) GZ.views.wartezeit.populate();
+    }
     renderTable();
     notifyChanged();
 

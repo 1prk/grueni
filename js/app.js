@@ -12,7 +12,7 @@
   const TAB_REFRESH = {
     gz: () => GZ.views.gruenzeitanalyse.refresh(),
     pa: () => GZ.views.phasenauswertung.refresh(),
-    wz: () => GZ.views.wartezeit.recompute(),
+    wz: () => GZ.views.wartezeit.refresh(),
     oe: () => GZ.views.oepnvQa.recompute(),
     up: () => GZ.views.umlaufpruefung.render(),
     us: () => GZ.views.umlaufstatistiken.recompute()
@@ -26,9 +26,19 @@
     if (GZ.state.data.currentAnalysis && TAB_REFRESH[name]) TAB_REFRESH[name]();
   }
 
-  function jumpToGruenzeit(t) {
-    switchTab('gz');
-    GZ.views.gruenzeitanalyse.jumpTo(t);
+  // Redraws the active tab (after a log change, for example).
+  function refreshActiveTab() {
+    if (GZ.state.data.currentAnalysis && TAB_REFRESH[activeTab]) TAB_REFRESH[activeTab]();
+  }
+
+  // Loads a log file. A file without any usable entry does not replace a log that is already loaded.
+  function loadLogText(text, fileName) {
+    const parsed = GZ.logs.parse(text);
+    if (!parsed.entries.length) return parsed;
+    GZ.logs.load(text, fileName);
+    GZ.views.logBar.render();
+    refreshActiveTab();
+    return parsed;
   }
 
   function showError(msg) {
@@ -87,12 +97,13 @@
     GZ.views.stammdatenLsa.onAnalyzeComplete();
     GZ.views.gruenzeitanalyse.onAnalyzeComplete();
     GZ.views.phasenauswertung.onAnalyzeComplete();
-    GZ.views.wartezeit.populateControls();
+    GZ.views.wartezeit.onAnalyzeComplete();
     GZ.views.oepnvQa.populateControls();
     GZ.views.formulaBuilder.populateControls();
     GZ.views.umlaufpruefung.populateControls();
     GZ.views.umlaufstatistiken.populateControls();
 
+    GZ.views.logBar.render();
     els.btnExport.disabled = false;
   }
 
@@ -106,6 +117,7 @@
     els.dataPanelHead = document.getElementById('dataPanelHead');
     els.dataPanelSummary = document.getElementById('dataPanelSummary');
 
+    GZ.views.logBar.init(refreshActiveTab);
     GZ.views.gruenzeitanalyse.init(document.getElementById('tab-gz'));
     GZ.views.stammdatenLsa.init(document.getElementById('tab-sd'));
     GZ.views.phasenauswertung.init(document.getElementById('tab-pa'));
@@ -119,6 +131,18 @@
     document.getElementById('btnSample').addEventListener('click', () => {
       els.rawInput.value = GZ.sampleData.generateSampleText();
       analyze();
+      loadLogText(GZ.sampleData.generateSampleLog(), 'Beispiel-Log');
+    });
+    document.getElementById('logInput').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const parsed = loadLogText(reader.result, file.name);
+        if (!parsed.entries.length) GZ.snackbar.show('Keine Log-Einträge erkannt', { type: 'warning', description: 'Erwartet: Stufe, Zeitstempel (TT.MM.JJJJ, HH:MM:SS), Text – je Zeile.' });
+      };
+      reader.readAsText(file, 'utf-8');
+      e.target.value = '';
     });
     document.getElementById('fileInput').addEventListener('change', e => {
       const file = e.target.files[0];
@@ -143,5 +167,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', init);
-  GZ.app = { switchTab, jumpToGruenzeit, analyze };
+  GZ.app = { switchTab, analyze, refreshActiveTab };
 })(window.GZ = window.GZ || {});

@@ -33,5 +33,21 @@
     return `${s}s`;
   }
 
-  GZ.format = { esc, pad, fmtTs, fmtDate, fmtTimeOnly, fmtTimeShort, fmtDauer };
+  // Number with German decimal comma. Empty value for null/NaN.
+  function fmtNum(v, digits) {
+    if (v == null || !Number.isFinite(v)) return '–';
+    return v.toFixed(digits || 0).replace('.', ',');
+  }
+  // "HH:MM" of a timestamp (local time).
+  function fmtHm(ms) {
+    const d = new Date(ms);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  // "h:mm h" for a span in seconds.
+  function fmtHoursMinutes(sek) {
+    const m = Math.round(sek / 60);
+    return `${Math.floor(m / 60)}:${pad(m % 60)} h`;
+  }
+
+  GZ.format = { esc, pad, fmtTs, fmtDate, fmtTimeOnly, fmtTimeShort, fmtDauer, fmtNum, fmtHm, fmtHoursMinutes };
 })(window.GZ = window.GZ || {});

@@ -1,98 +1,198 @@
-/* GZ.sampleData — synthetischer OCIT-Export für die Demo ("Beispieldaten
-   laden"): 1 Knoten, 3 Signalgruppen + 1 Detektor, 20 Umläufe à 80s, mit
-   einer eingebauten Grünzeit-Anomalie und mehreren Wartezeit-Sonderfällen. */
+/* GZ.sampleData — synthetic OCIT export for the demo ("Beispieldaten laden").
+   One node, 4 hours (06:00–10:00), cycle based:
+   - SPL 12: traffic-actuated, free-running cycle time (Mo–Fr off-peak).
+   - SPL 14 (07:15–09:15): fixed time, cycle time 90 s, with one single
+     intervention (K1 and S1 shortened).
+   Signal groups K1, K2 (vehicles), F1 (pedestrians, on demand in SPL 12),
+   S1 (bus, on demand in SPL 12).
+   Detectors (all OCIT type "single_loop"):
+   - IS1_1, IS1_2: induction loops of K1; IS2: induction loop of K2.
+   - RD2: radar, named like a K2 detector but it really measures K1 (naming trap
+     for the data check).
+   - FT1: pedestrian push button of F1 (pulse detector).
+   - DF3: camera field of K2, no naming rule fits (indexed incrementally).
+   - IS9: counting loop, belongs to no signal group.
+   A matching synthetic log file ("Beispiel-Log") is generated as well.
+   Nothing here is measured data. */
 (function (GZ) {
   'use strict';
-  const { fmtDate, fmtTimeOnly } = GZ.format;
+  const { fmtDate, fmtTimeOnly, pad } = GZ.format;
 
-  function expandPhases(phases, totalSeconds) {
-    const seq = []; let i = 0;
-    while (seq.length < totalSeconds) {
-      const [dur, val] = phases[i % phases.length];
-      for (let k = 0; k < dur && seq.length < totalSeconds; k++) seq.push(val);
-      i++;
+  const SEED = 231;
+  const START = new Date(2026, 10, 3, 6, 0, 0);          // 03.11.2026 06:00:00
+  const DURATION_S = 4 * 3600;
+  const PLAN_CHANGE_1_S = 1 * 3600 + 15 * 60;            // 07:15
+  const PLAN_CHANGE_2_S = 3 * 3600 + 15 * 60;            // 09:15
+
+  // Signal state raw values (see GZ.parser.STATE_CAT)
+  const RED = 3, RED_AMBER = 15, GREEN = 48, AMBER = 12;
+
+  const SIGNAL_GROUPS = [
+    { id: 'K1', type: 'veh',  desc: 'K1 Hauptrichtung Kfz',          redAmber: 2, amber: 3 },
+    { id: 'K2', type: 'veh',  desc: 'K2 Nebenrichtung Kfz',          redAmber: 2, amber: 3 },
+    { id: 'F1', type: 'ped',  desc: 'F1 Fußgänger quer Hauptstraße', redAmber: 0, amber: 0 },
+    { id: 'S1', type: 'tram', desc: 'S1 Bus Hauptrichtung',          redAmber: 2, amber: 3 }
+  ];
+  // truth = signal groups the detector really measures. Only the simulation reads it.
+  const DETECTORS = [
+    { id: 'IS1_1', desc: 'Induktionsschleife K1, Fahrstreifen 1', truth: ['K1'], mean: 5,  dur: [6, 20] },
+    { id: 'IS1_2', desc: 'Induktionsschleife K1, Fahrstreifen 2', truth: ['K1'], mean: 9,  dur: [3, 12] },
+    { id: 'IS2',   desc: 'Induktionsschleife K2',                  truth: ['K2'], mean: 12, dur: [3, 10] },
+    { id: 'RD2',   desc: 'Radar Zufahrt Nebenrichtung',            truth: ['K1'], mean: 7,  dur: [5, 15] },
+    { id: 'FT1',   desc: 'Fußgängertaster Furt Hauptstraße',       truth: ['F1'], pulse: true },
+    { id: 'DF3',   desc: 'Kamerafeld Haltlinie Nebenrichtung',     truth: ['K2'], mean: 10, dur: [3, 8] },
+    { id: 'IS9',   desc: 'Zählschleife Zufahrt Süd',               truth: [] }
+  ];
+
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // Builds the whole scenario once: cycles, signal states per second, detector states per second.
+  let scenario = null;
+  function buildScenario() {
+    if (scenario) return scenario;
+    const rand = mulberry32(SEED);
+    const randn = () => { let u = 0; while (!u) u = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand()); };
+    const expRand = mean => -mean * Math.log(1 - rand());
+    const randInt = (a, b) => a + Math.floor(rand() * (b - a + 1));
+    const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+    const planAt = t => (t >= PLAN_CHANGE_1_S && t < PLAN_CHANGE_2_S) ? '14' : '12';
+
+    // Cycles. sg[id] = { on, off } in seconds after cycle start, or null.
+    const cycles = [];
+    let t = 0, fixedCount = 0;
+    for (;;) {
+      const plan = planAt(t);
+      let cycle;
+      if (plan === '12') {
+        const g1 = clamp(Math.round(36 + 9 * randn()), 18, 52);
+        const pedDemand = rand() < 0.55;
+        let g2 = clamp(Math.round(17 + 6 * randn()), 10, 30);
+        if (pedDemand) g2 = Math.max(g2, 16);
+        const sg = { K1: { on: 0, off: g1 }, K2: { on: g1 + 5, off: g1 + 5 + g2 }, F1: null, S1: null };
+        if (pedDemand) sg.F1 = { on: g1 + 6, off: g1 + 18 };
+        if (rand() < 0.32) { const a = Math.floor(rand() * 6), b = Math.floor(rand() * 4); sg.S1 = { on: a, off: Math.max(a + 8, g1 - b) }; }
+        cycle = { plan, tu: Math.max(50, g1 + g2 + 10), sg };
+      } else {
+        const intervention = (fixedCount === 37);
+        cycle = { plan, tu: 90, intervention, sg: {
+          K1: { on: 0, off: intervention ? 22 : 48 }, K2: { on: 53, off: 75 },
+          F1: { on: 54, off: 66 }, S1: { on: 2, off: intervention ? 20 : 46 } } };
+        fixedCount++;
+      }
+      if (t + cycle.tu > DURATION_S) break;
+      cycle.t = t; cycles.push(cycle); t += cycle.tu;
     }
-    return seq;
+    const rows = t;                                       // whole cycles only
+
+    // Signal states per second
+    const sig = {};
+    SIGNAL_GROUPS.forEach(s => {
+      const a = new Uint8Array(rows).fill(RED);
+      cycles.forEach(c => {
+        const g = c.sg[s.id];
+        if (!g) return;
+        for (let k = c.t + g.on - s.redAmber; k < c.t + g.on; k++) if (k >= 0) a[k] = RED_AMBER;
+        for (let k = c.t + g.on; k < c.t + g.off; k++) a[k] = GREEN;
+        for (let k = c.t + g.off; k < c.t + g.off + s.amber && k < rows; k++) a[k] = AMBER;
+      });
+      sig[s.id] = a;
+    });
+
+    // Detector states per second
+    const det = {};
+    const greensOf = id => cycles.filter(c => c.sg[id]).map(c => ({ start: c.t + c.sg[id].on, end: c.t + c.sg[id].off, tu: c.tu }));
+    DETECTORS.forEach(d => {
+      const a = new Uint8Array(rows);
+      const mark = (from, to) => { for (let k = Math.max(0, Math.round(from)); k <= Math.min(rows - 1, Math.round(to)); k++) a[k] = 1; };
+      det[d.id] = a;
+      if (d.id === 'IS9') { for (let k = 0; k < 90; k++) { const s = randInt(0, rows - 20); mark(s, s + randInt(3, 9)); } return; }
+      d.truth.forEach(sgId => {
+        const sgDef = SIGNAL_GROUPS.find(s => s.id === sgId), greens = greensOf(sgId);
+        greens.forEach((g, k) => {
+          if (d.pulse) {
+            // One button press before each green. About 8 % of the presses just miss a green.
+            const gapStart = k ? greens[k - 1].end + 1 : 0;
+            const wait = rand() < 0.08 ? g.tu + rand() * g.tu : 3 + rand() * (g.tu - 8);
+            const press = Math.max(gapStart, g.start - wait);
+            mark(press, press + 2);
+            if (rand() < 0.3) { const again = press + randInt(5, 15); if (again < g.start - 2) mark(again, again + 2); }
+            return;
+          }
+          // Presence: a vehicle arrives during red and stays until shortly after the green start.
+          if (!k) return;
+          const arrival = greens[k - 1].end + sgDef.amber + 1 + Math.floor(expRand(d.mean));
+          if (arrival >= g.start - 1) return;
+          mark(arrival, g.start + randInt(d.dur[0], d.dur[1]));
+        });
+      });
+    });
+
+    scenario = { cycles, rows, sig, det };
+    return scenario;
+  }
+
+  function stamp(secondsAfterStart) {
+    const d = new Date(START.getTime() + secondsAfterStart * 1000);
+    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}, ${fmtTimeOnly(d)}`;
   }
 
   function generateSampleText() {
-    const CYCLE = 80, TOTAL_S = 1600;
-    const K1_PHASES = [[2, 15], [32, 48], [3, 12], [43, 3]];
-    const K2_PHASES = [[40, 3], [2, 15], [30, 48], [3, 12], [5, 3]];
-    const F1_PHASES = [[6, 3], [24, 48], [50, 3]];
-
-    const k1 = expandPhases(K1_PHASES, TOTAL_S);
-    const k2 = expandPhases(K2_PHASES, TOTAL_S);
-    const f1 = expandPhases(F1_PHASES, TOTAL_S);
-
-    const anomalyStart = 8 * CYCLE;
-    for (let s = 0; s < CYCLE; s++) {
-      const t = anomalyStart + s;
-      if (s < 2) k1[t] = 15;
-      else if (s < 16) k1[t] = 48;
-      else if (s < 19) k1[t] = 12;
-      else k1[t] = 3;
-    }
-    // Engineered "Grenzwert"-Beispiel für die Wartezeit-Analyse: Zyklus 12
-    // bleibt komplett Rot (simulierter Programmwechsel/Ausfall), damit ein
-    // bereits wartendes Fahrzeug > 120s warten muss.
-    for (let s = 0; s < CYCLE; s++) k1[12 * CYCLE + s] = 3;
-
-    // D1 (Induktionsschleife K1): Präsenzdetektor-Modell für die
-    // Wartezeit-ab-Anforderung-Analyse. Ein Fahrzeug belegt die Schleife ab
-    // Ankunft während Rot und bleibt (durchgehend) bis kurz nach Grünbeginn
-    // stehen. Mehrere Sonderfälle sind absichtlich eingebaut.
-    const d1 = new Array(TOTAL_S).fill(0);
-    const GRUEN_START_OFFSET = 2; // Grünbeginn im Zyklus (nach 2s Rot-Gelb)
-    const occupy = (fromAbs, toAbsExcl) => {
-      for (let t = Math.max(0, fromAbs); t < Math.min(toAbsExcl, TOTAL_S); t++) d1[t] = 1;
-    };
-    // Normalfälle: Ankunft während Rot, Wartezeit bis zum nächsten Grün.
-    const arrivalOffsets = { 0: 70, 1: 65, 2: 73, 3: 60, 4: 75, 5: 68, 6: 71, 7: 64, 9: 69, 10: 66, 13: 72, 14: 63, 16: 67, 17: 70, 18: 65, 19: 69 };
-    Object.keys(arrivalOffsets).forEach(cStr => {
-      const c = Number(cStr);
-      occupy(c * CYCLE + arrivalOffsets[c], (c + 1) * CYCLE + GRUEN_START_OFFSET);
-    });
-    // Zyklus 8 (bestehende Grünzeit-Anomalie): Ankunft direkt zu Beginn der
-    // verlängerten Rotzeit -> etwas längere, aber unauffällige Wartezeit.
-    occupy(8 * CYCLE + 19, 9 * CYCLE + GRUEN_START_OFFSET);
-    // Zyklen 11->12->13: das Fahrzeug wartet über den komplett roten Zyklus
-    // 12 hinweg -> Wartezeit > 120s (Grenzwert überschritten).
-    occupy(11 * CYCLE + 40, 13 * CYCLE + GRUEN_START_OFFSET);
-    // Gap-Toleranz-Beispiel (Zyklus 5): 2s-Unterbrechung MITTEN in der
-    // Wartezeit (< 3s Toleranz) -> zählt trotzdem als EIN zusammenhängendes Ereignis.
-    d1[5 * CYCLE + 75] = 0; d1[5 * CYCLE + 76] = 0;
-    // "Aufgelöst ohne Grün"-Beispiel (Zyklus 15): kurze Belegung, Fahrzeug
-    // fährt weg, bevor die Ampel Grün zeigt (Lücke > 3s Toleranz).
-    for (let t = 15 * CYCLE + 70; t < 15 * CYCLE + 74; t++) d1[t] = 1;
-
-    const start = new Date(2026, 6, 8, 8, 14, 0);
+    const sc = buildScenario();
+    const cols = 5 + SIGNAL_GROUPS.length + DETECTORS.length;
+    const empty = () => Array(cols).fill('');
+    const typeRow = ['', '', '', '', ''].concat(SIGNAL_GROUPS.map(s => s.type), DETECTORS.map(() => 'single_loop'));
+    const nameRow = ['', '', '', '', ''].concat(SIGNAL_GROUPS.map(s => s.id), DETECTORS.map(d => d.id));
+    const descRow = ['Beschreibung', '', 'TX', 'TC', 'SP'].concat(SIGNAL_GROUPS.map(s => s.desc), DETECTORS.map(d => d.desc));
     const lines = [];
-    // Spaltenlayout wie in der Roh-CSV vor dem CSV-Import (MergeDatumUndZeit):
-    // 0=Datum 1=Uhrzeit 2=TX 3=TC 4=SP 5=K1(veh) 6=K2(veh) 7=DF1(ped) 8=D1(single_loop)
-    lines.push(['Longname', 'KNOTEN 231 - Bahnhofstr./Ringstr.', 'No', '231', '', '', '', '', ''].join('\t'));
-    lines.push(Array(9).fill('').join('\t'));
-    lines.push(Array(9).fill('').join('\t'));
-    lines.push(['', '', '', '', '', 'veh', 'veh', 'ped', 'single_loop'].join('\t'));
-    lines.push(['', '', '', '', '', 'K1', 'K2', 'DF1', 'D1'].join('\t'));
-    lines.push(['Beschreibung', '', 'TX', 'TC', 'SP', 'K1 Hauptrichtung Kfz', 'K2 Nebenrichtung Kfz', 'DF1 Fußgänger Nord', 'D1 Induktionsschleife K1'].join('\t'));
-    lines.push(Array(9).fill('').join('\t')); // Zeile 7: in Roh-CSV nicht vorhanden (Kürzel wird erst abgeleitet)
-    for (let i = 0; i < TOTAL_S; i++) {
-      const ts = new Date(start.getTime() + i * 1000);
-      const tx = i % CYCLE;
-      // TC und SP werden - wie in der echten Roh-CSV - datensparsam geloggt:
-      // ein Wert steht nur in der Zeile, in der er sich ändert.
-      const tc = (i === 0) ? '4' : '';
-      // SPL-Ausschluss-Beispiel: EIN Ereignis (Zyklus 3) fällt kurz in einen
-      // ausgeschlossenen Signalprogrammzustand (SPL=0).
-      let spl = '';
-      if (i === 0) spl = '12';
-      else if (i === 3 * CYCLE + 60) spl = '0';
-      else if (i === 3 * CYCLE + 61) spl = '12';
-      lines.push([fmtDate(ts), fmtTimeOnly(ts), String(tx), tc, spl, k1[i], k2[i], f1[i], d1[i]].join('\t'));
+    const first = empty(); first[0] = 'Longname'; first[1] = 'KNOTEN 231 - Bahnhofstr./Ringstr.'; first[2] = 'No'; first[3] = '231';
+    lines.push(first.join('\t'));
+    lines.push(empty().join('\t'));
+    lines.push(empty().join('\t'));
+    lines.push(typeRow.join('\t'));
+    lines.push(nameRow.join('\t'));
+    lines.push(descRow.join('\t'));
+    lines.push(empty().join('\t'));                       // header line 7 is empty in the raw CSV
+
+    let cycleIndex = 0, lastPlan = '';
+    for (let i = 0; i < sc.rows; i++) {
+      while (cycleIndex + 1 < sc.cycles.length && i >= sc.cycles[cycleIndex + 1].t) cycleIndex++;
+      const cycle = sc.cycles[cycleIndex];
+      // TC and SP are logged only when they change (the parser forward-fills them).
+      const tc = i === 0 ? '4' : '';
+      const plan = cycle.plan, sp = plan !== lastPlan ? plan : '';
+      lastPlan = plan;
+      const ts = new Date(START.getTime() + i * 1000);
+      lines.push([fmtDate(ts), fmtTimeOnly(ts), String(i - cycle.t), tc, sp]
+        .concat(SIGNAL_GROUPS.map(s => sc.sig[s.id][i]), DETECTORS.map(d => sc.det[d.id][i])).join('\t'));
     }
     return lines.join('\n');
   }
 
-  GZ.sampleData = { generateSampleText };
+  // Synthetic log lines for the same period: level <TAB> timestamp <TAB> text.
+  function generateSampleLog() {
+    const sc = buildScenario();
+    const intervention = sc.cycles.find(c => c.intervention);
+    const rows = [
+      [0, 'Info', 'Steuergerät gestartet'],
+      [1, 'Info', 'Signalprogramm 12 aktiv (Tagesplan)'],
+      [30 * 60, 'Info', 'Verbindung zur Zentrale geprüft'],
+      [PLAN_CHANGE_1_S, 'Info', 'Signalprogrammwechsel 12 → 14 (Zeitplan)'],
+      [PLAN_CHANGE_1_S + 311, 'Warning', 'Detektor RD2: Belegungsdauer über 60 s'],
+      [intervention ? intervention.t + 4 : 2 * 3600, 'Error', 'Eingriff: Freigabe K1 vorzeitig beendet'],
+      [2 * 3600 + 30 * 60, 'Info', 'Verbindung zur Zentrale geprüft'],
+      [PLAN_CHANGE_2_S, 'Info', 'Signalprogrammwechsel 14 → 12 (Zeitplan)'],
+      [PLAN_CHANGE_2_S + 1500, 'Warning', 'Fußgängertaster FT1: Dauerbelegung'],
+      [3 * 3600 + 45 * 60, 'Debug', 'Speicherstand geprüft']
+    ];
+    return ['Stufe\tZeit\tText'].concat(rows.map(r => `${r[1]}\t${stamp(r[0])}\t${r[2]}`)).join('\n');
+  }
+
+  GZ.sampleData = { generateSampleText, generateSampleLog };
 })(window.GZ = window.GZ || {});

@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/charts.css">
+<link rel="stylesheet" href="css/report.css">
 </head>
 <body>
 <div class="appshell">
@@ -24,6 +25,8 @@
       <button id="btnSample">Beispieldaten laden</button>
       <label class="btn" for="fileInput">Datei öffnen …</label>
       <input type="file" id="fileInput" accept=".csv,.txt,.tsv">
+      <label class="btn" for="logInput" title="Log-Datei (Stufe, Zeitstempel, Text) als Marker in den Zeitdiagrammen anzeigen. Bleibt im Browser.">Log öffnen …</label>
+      <input type="file" id="logInput" accept=".csv,.txt,.tsv,.log">
       <button class="primary" id="btnAnalyze">Analysieren</button>
       <button id="btnExport" disabled>Kennzahlen als CSV</button>
     </div>
@@ -57,113 +60,65 @@
 
     <!-- ============== Grünzeitanalyse ============== -->
     <div class="tab-panel active" id="tab-gz">
-      <div class="view gz-layout">
-        <div class="navigator" id="gzNavigator"></div>
-        <div class="main-col">
+      <div class="report">
 
-          <div class="panel">
-            <div class="panel-head">
-              <span>Signalzeitendiagramm</span>
-              <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-                <label class="phase-overlay-toggle" id="gzPhaseOverlayToggle" style="display:none;">
-                  <input type="checkbox" id="gzShowPhaseOverlay"> Phasen einblenden
-                </label>
-                <div class="diagram-controls" id="gzDiagramControls" style="display:none;">
-                  <button id="gzBtnWinPrev" title="Vorheriger Umlauf">◀</button>
-                  <span class="win-label" id="gzWinLabel"></span>
-                  <button id="gzBtnWinNext" title="Nächster Umlauf">▶</button>
-                  <label class="win-size-label">Fenster:
-                    <input type="number" id="gzWinSize" min="1" max="200" value="5" step="1">
-                    Umläufe
-                  </label>
-                  <button id="gzBtnWinAll">Alle anzeigen</button>
-                </div>
-              </div>
-            </div>
-            <div class="legend">
-              <span class="item"><span class="swatch" style="background:var(--sig-red);height:3px;align-self:center;"></span>Rot (Grundlinie)</span>
-              <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,var(--sig-redyellow) 0 3px,#8a6d00 3px 4px)"></span>Rot-Gelb</span>
-              <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,var(--sig-yellow) 0 3px,#8a6d00 3px 4px)"></span>Gelb</span>
-              <span class="item"><span class="swatch" style="background:var(--sig-green)"></span>Grün</span>
-              <span class="item"><span class="swatch" style="background:var(--sig-dark)"></span>Dunkel</span>
-              <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#999 0 4px,#ccc 4px 8px)"></span>Unbekannt/INV</span>
-              <span class="item"><span class="swatch" style="background:repeating-linear-gradient(90deg,#d8dce1 0 3px,#f2f4f6 3px 6px);border:1px dotted var(--border-strong)"></span>Datenlücke</span>
-              <span class="item"><span class="swatch" style="background:var(--sig-yellow);height:4px;align-self:center;"></span>Auffälliger Umlauf</span>
-              <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
-              <span class="item"><span class="swatch" style="background:var(--req-marker);border-radius:50%;width:9px;height:9px;"></span>Anforderungsbeginn (Detektor/Anmeldung, siehe Tab „Wartezeit“ bzw. „ÖPNV“)</span>
-            </div>
-            <div class="lane-row lane-header" style="padding:10px 16px 0;">
-              <div class="lane-name">Signalgr.</div>
-              <div class="lane-num">An</div>
-              <div class="lane-num">Ab</div>
-              <div class="lane-num">TF</div>
-              <div class="lane-track" style="background:none;border:none;"></div>
-            </div>
-            <div class="spl-bar-row" style="padding:0 16px;">
-              <div class="spl-bar-label-fixed">Programm (SPL)</div>
-              <div class="spl-bar" id="gzSplBar"><svg></svg></div>
-            </div>
-            <div style="padding:0 16px 12px;">
-              <div class="timeline-wrap">
-                <div id="gzTimeline"></div>
-                <svg id="gzPhaseOverlaySvg" class="phase-overlay-svg" style="display:none;"></svg>
-              </div>
-              <div class="axis" id="gzAxis"><svg></svg></div>
-            </div>
+        <div class="report-head">
+          <div class="report-context" id="gzContext"></div>
+          <div class="seg-toggle" id="gzScopeGroup">
+            <button type="button" data-scope="total" class="active">Gesamter Mitschnitt</button>
+            <button type="button" data-scope="spl">Je Signalzeitenplan</button>
+            <button type="button" data-scope="hour">Je volle Stunde</button>
           </div>
-
-          <div class="panel">
-            <div class="panel-head">Grünzeit-Trend je Zyklus <span class="trend-target" id="gzTrendTarget" style="font-family:var(--mono);font-weight:600;"></span></div>
-            <div class="trend-toolbar">
-              <span>Punkt anklicken, um im Signalzeitendiagramm zum Zyklus zu springen.</span>
-              <div class="seg-toggle" id="gzTrendModeGroup">
-                <button type="button" data-mode="scatter" class="active">Zeitverlauf</button>
-                <button type="button" data-mode="hist">Verteilung (CDF)</button>
-              </div>
-            </div>
-            <div class="trend-sg-checks" id="gzTrendSgChecks"></div>
-            <div class="trend-legend">
-              <span class="item"><span class="dot" style="background:var(--sig-green)"></span>unauffällig</span>
-              <span class="item"><span class="dot" style="background:var(--sig-yellow)"></span>leichte Abweichung</span>
-              <span class="item"><span class="dot" style="background:var(--sig-redyellow)"></span>mittlere Abweichung</span>
-              <span class="item"><span class="dot" style="background:var(--sig-red)"></span>auffällig</span>
-              <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
-            </div>
-            <div class="chart-box" id="gzTrendChartBox"><svg></svg><div class="chart-tooltip"></div></div>
-            <div class="axis" id="gzTrendAxis"><svg></svg></div>
-            <div class="chart-box hoverable" id="gzTrendHistBox" style="display:none;"><svg></svg><div class="chart-tooltip"></div></div>
-            <div class="axis" id="gzTrendHistAxis" style="display:none;"><svg></svg></div>
-            <div class="chart-caption" id="gzTrendCaption"></div>
-            <div id="gzTrendStackContainer" style="display:none;"></div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <span>Kennzahlen je Signalgruppe</span>
-              <div class="seg-toggle" id="gzStatsScopeGroup">
-                <button type="button" data-scope="total" class="active">Gesamter Mitschnitt</button>
-                <button type="button" data-scope="spl" title="Kennzahlen getrennt je Signalzeitenplan (SPL) berechnen">Je Signalzeitenplan</button>
-              </div>
-            </div>
-            <table>
-              <thead><tr>
-                <th>Signalgruppe</th><th>Zyklen</th><th>Ø Grün</th><th>Median</th>
-                <th>Min</th><th>Max</th><th>σ</th><th>Ø Umlauf</th>
-              </tr></thead>
-              <tbody id="gzStatsBody"></tbody>
-            </table>
-          </div>
-
-          <div class="panel" id="gzDunkelPanel" style="display:none;">
-            <div class="panel-head">Dunkel-/Abschaltzeiträume</div>
-            <table>
-              <thead><tr><th>Signalgruppe</th><th>Dunkel gesamt</th><th>Zeiträume</th><th>Längster Zeitraum</th></tr></thead>
-              <tbody id="gzDunkelBody"></tbody>
-            </table>
-            <div class="hint" id="gzDunkelHint"></div>
-          </div>
-
         </div>
+        <div class="log-bar" data-log-bar style="display:none;"></div>
+        <div class="report-notice" id="gzNotice" style="display:none;"></div>
+
+        <section class="rsec">
+          <div class="rsec-label"><span class="rsec-no">1</span>Lief die Anlage in Festzeit oder verkehrsabhängig?</div>
+          <div class="claim" id="gzClaim1"></div>
+          <div class="fig-title">
+            <span><b>Umlaufzeit</b> je Umlauf</span>
+            <span class="legend"><span class="item"><span class="swatch actuated"></span>verkehrsabhängig</span><span class="item"><span class="swatch fixed"></span>Festzeit</span></span>
+          </div>
+          <div class="host" id="gzCycleChart"></div>
+          <div class="params">
+            Festzeit, wenn mindestens
+            <input type="number" id="gzParamShare" value="95" min="50" max="100" step="1"> %
+            der Grünzeiten innerhalb Median ±
+            <input type="number" id="gzParamTol" value="1" min="0" max="5" step="1"> s liegen.
+            <span class="dim">Aufzeichnungsraster: 1 s</span>
+          </div>
+          <div class="table-scroll"><table class="report-table" id="gzTable1"></table></div>
+          <div class="note" id="gzNote1"></div>
+        </section>
+
+        <section class="rsec">
+          <div class="rsec-label"><span class="rsec-no">2</span>Grünzeit-Trend je Zyklus</div>
+          <div class="trend-tools">
+            <div class="sg-pick" id="gzSgPick"></div>
+            <div class="seg-toggle" id="gzModeGroup">
+              <button type="button" data-mode="time" class="active">Zeitverlauf</button>
+              <button type="button" data-mode="cdf">Verteilung (CDF)</button>
+            </div>
+          </div>
+          <div class="legend" id="gzTrendLegend"></div>
+          <div id="gzTrendStack"></div>
+        </section>
+
+        <section class="rsec">
+          <div class="rsec-label"><span class="rsec-no">3</span>Wo im Umlauf bewegt sich die Freigabe?</div>
+          <div class="claim list" id="gzClaim3"></div>
+          <div class="table-scroll"><table class="report-table" id="gzTable3"></table></div>
+          <div class="note" id="gzNote3"></div>
+        </section>
+
+        <section class="rsec">
+          <div class="rsec-label"><span class="rsec-no">4</span>Wie oft und wie viel Grün gibt es?</div>
+          <div class="claim list" id="gzClaim4"></div>
+          <div class="table-scroll"><table class="report-table" id="gzTable4"></table></div>
+          <div class="note" id="gzNote4"></div>
+        </section>
+
       </div>
     </div>
 
@@ -175,8 +130,8 @@
           <div class="panel-head">
             <span>Stammdaten LSA — Phaseneinteilung</span>
             <div class="panel-head-actions">
-              <button type="button" id="sdConfigSaveBtn" class="btn" title="Phasen + PÜ-Korrekturen als JSON-Datei je Knoten speichern (ohne Rohdaten)">Phasen speichern</button>
-              <label class="btn" for="sdConfigLoadInput">Phasen laden …</label>
+              <button type="button" id="sdConfigSaveBtn" class="btn" title="Phasen, PÜ-Korrekturen und Detektorzuordnung als JSON-Datei je Knoten speichern (ohne Rohdaten)">Konfiguration speichern</button>
+              <label class="btn" for="sdConfigLoadInput">Konfiguration laden …</label>
               <input type="file" id="sdConfigLoadInput" accept=".json" style="display:none;">
             </div>
           </div>
@@ -269,84 +224,64 @@
 
     <!-- ============== Wartezeit ab Anforderung ============== -->
     <div class="tab-panel" id="tab-wz">
-      <div class="view">
+      <div class="report">
 
-        <div class="panel">
-          <div class="panel-head">Wartezeit ab Anforderung — Zuweisung</div>
-          <div class="cfg-grid">
-            <div class="cfg-field">
-              <label for="wzSgSelect">Signalgruppe</label>
-              <select id="wzSgSelect"></select>
-            </div>
-            <div class="cfg-field">
-              <label>Detektor(en) <span class="cfg-field-hint">(mehrere = ODER-Verknüpfung)</span></label>
-              <div id="wzDetChecks" class="det-checks"></div>
-            </div>
-            <div class="cfg-field">
-              <label>Signalgruppentyp</label>
-              <div class="radio-group" id="wzTypGroup">
-                <label><input type="radio" name="wzTyp" value="MIV" checked> MIV/Kfz</label>
-                <label><input type="radio" name="wzTyp" value="FUSS"> Fuß/Rad</label>
-              </div>
-              <label style="margin-top:4px;">Bewertungsgrenzen [s]</label>
-              <div class="num-row">
-                <span>Warnung &gt;</span><input type="number" id="wzWarnSek" min="0" step="1" value="90">
-                <span>Grenzwert &gt;</span><input type="number" id="wzGrenzSek" min="1" step="1" value="120">
-              </div>
-              <div class="source-note">Orientierungswerte ohne Richtlinienbezug – maßgebliche Werte bitte RiLSA/HBS entnehmen und hier eintragen. Warnung leer lassen = keine Warnstufe.</div>
-            </div>
-            <div class="cfg-field">
-              <label>Detektortyp</label>
-              <div class="radio-group" id="wzDetTypGroup">
-                <label><input type="radio" name="wzDetTyp" value="praesenz" checked> Präsenzdetektor <span class="cfg-field-hint">(lange Belegungslücke löst Anforderung auf)</span></label>
-                <label><input type="radio" name="wzDetTyp" value="impuls"> Impulsdetektor/Taster <span class="cfg-field-hint">(Anforderung gilt bis zur nächsten Freigabe)</span></label>
-              </div>
-              <div class="num-row" id="wzGapRow">
-                <span>Lückentoleranz</span><input type="number" id="wzGapSek" min="0" step="1" value="3"><span>s</span>
-              </div>
-              <label style="margin-top:4px;">Grünblinken zählt als Freigabe</label>
-              <div class="radio-group" id="wzBlinkGroup">
-                <label><input type="radio" name="wzBlink" value="ja"> Ja</label>
-                <label><input type="radio" name="wzBlink" value="nein" checked> Nein (nur Dauergrün)</label>
-              </div>
-              <label style="margin-top:4px;">Ausgeschlossene SPL <span class="cfg-field-hint">(kommagetrennt)</span></label>
-              <div class="num-row"><input type="text" id="wzSplExcl" value="0,-1,-2"></div>
-            </div>
+        <div class="report-head">
+          <div class="report-context" id="wzContext"></div>
+          <div class="seg-toggle" id="wzScopeGroup">
+            <button type="button" data-scope="total" class="active">Gesamter Mitschnitt</button>
+            <button type="button" data-scope="spl">Je Signalzeitenplan</button>
+            <button type="button" data-scope="hour">Je volle Stunde</button>
           </div>
-          <div id="wzHint" class="hint"></div>
         </div>
+        <div class="log-bar" data-log-bar style="display:none;"></div>
 
-        <div class="panel" id="wzKpiPanel" style="display:none;">
-          <div class="panel-head">Kennzahlen</div>
-          <div class="kpi-grid" id="wzKpiGrid"></div>
-        </div>
+        <div class="report-empty" id="wzEmpty" style="display:none;">Keine Detektor-Spalten (DET) in den Daten erkannt. Erwartet werden Spalten vom OCIT-Typ „single_loop“ oder Detektoren mit Namen wie IS1, IS1_2, DF1, RD1, FT1.</div>
 
-        <div class="panel" id="wzChartPanel" style="display:none;">
-          <div class="panel-head">
-            <span>Wartezeiten im Zeitverlauf</span>
-            <span class="win-label" id="wzChartInfo"></span>
-          </div>
-          <div class="legend">
-            <span class="item"><span class="swatch" style="background:var(--sig-green);border-radius:50%;width:9px;height:9px;"></span>OK</span>
-            <span class="item"><span class="swatch" style="background:var(--sig-yellow);border-radius:50%;width:9px;height:9px;"></span>Warnung</span>
-            <span class="item"><span class="swatch" style="background:var(--sig-red);border-radius:50%;width:9px;height:9px;"></span>Grenzwert überschritten</span>
-            <span class="item"><span class="swatch" style="background:var(--text-faint);border-radius:50%;width:9px;height:9px;opacity:.6;"></span>Ausgeschlossen (SPL)</span>
-            <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
-          </div>
-          <div class="chart-box" id="wzChartBox"><svg></svg><div class="chart-tooltip"></div></div>
-          <div class="axis" id="wzAxis"><svg></svg></div>
-          <div class="chart-note">Punkt anklicken, um im Signalzeitendiagramm zum betreffenden Umlauf zu springen.</div>
-        </div>
+        <div id="wzContent">
+          <section class="rsec">
+            <div class="rsec-label"><span class="rsec-no">1</span>Welcher Detektor gehört zu welcher Signalgruppe?</div>
+            <div class="claim" id="wzClaim1"></div>
+            <div class="table-scroll"><table class="report-table" id="wzTable1"></table></div>
+            <div id="wzUnassigned" class="table-scroll"></div>
+            <div class="note" id="wzNote1"></div>
+          </section>
 
-        <div class="panel" id="wzTablePanel" style="display:none;">
-          <div class="panel-head">Wartezeit-Ereignisse</div>
-          <table>
-            <thead><tr>
-              <th>Nr</th><th>Anforderung</th><th>TX</th><th>Grünbeginn</th><th>SPL</th>
-              <th>Wartezeit</th><th>Qualität</th><th>Detektor</th>
-            </tr></thead>
-            <tbody id="wzEventsBody"></tbody>
-          </table>
+          <section class="rsec">
+            <div class="rsec-label"><span class="rsec-no">2</span>Wie lange warten Anforderungen auf Grün?</div>
+            <div class="claim" id="wzClaim2"></div>
+            <div class="params">
+              Bewertungsgrenzen – Kfz: Warnung &gt; <input type="number" id="wzParamVehWarn" value="90" min="0"> s · Grenzwert &gt; <input type="number" id="wzParamVehLimit" value="120" min="1"> s
+              <span class="divider"></span> Fuß/Rad: Warnung &gt; <input type="number" id="wzParamVulnWarn" value="" min="0" placeholder="–"> s · Grenzwert &gt; <input type="number" id="wzParamVulnLimit" value="85" min="1"> s
+            </div>
+            <div class="params">
+              Präsenzdetektor: Lückentoleranz <input type="number" id="wzParamGap" value="3" min="0"> s
+              <span class="divider"></span> <label class="inline-check"><input type="checkbox" id="wzParamBlink"> Grünblinken zählt als Freigabe</label>
+              <span class="divider"></span> Ausgeschlossene SPL <input type="text" id="wzParamExcl" value="0,-1,-2" class="wide-input">
+              <span class="dim">Taster: Anforderung gilt bis Grünbeginn · Orientierungswerte ohne Richtlinienbezug (RiLSA/HBS maßgeblich)</span>
+            </div>
+            <div class="table-scroll"><table class="report-table" id="wzTable2"></table></div>
+            <div class="note" id="wzNote2"></div>
+          </section>
+
+          <section class="rsec">
+            <div class="rsec-label"><span class="rsec-no">3</span>Wartezeiten im Verlauf</div>
+            <div class="trend-tools">
+              <div class="sg-pick" id="wzSgPick"></div>
+              <div class="seg-toggle" id="wzModeGroup">
+                <button type="button" data-mode="time" class="active">Zeitverlauf</button>
+                <button type="button" data-mode="cdf">Verteilung (CDF)</button>
+              </div>
+            </div>
+            <div class="legend" id="wzTrendLegend"></div>
+            <div id="wzTrendBlock"></div>
+          </section>
+
+          <section class="rsec">
+            <div class="rsec-label"><span class="rsec-no">4</span>Längste Wartezeiten <span class="rsec-sg" id="wzTitle4"></span></div>
+            <div class="table-scroll"><table class="report-table" id="wzTable4"></table></div>
+            <div class="note" id="wzNote4"></div>
+          </section>
         </div>
 
       </div>
@@ -711,6 +646,10 @@
 <script src="js/core/parser.js"></script>
 <script src="js/core/segments.js"></script>
 <script src="js/core/wartezeitLogic.js"></script>
+<script src="js/core/slices.js"></script>
+<script src="js/core/greenTime.js"></script>
+<script src="js/core/detectors.js"></script>
+<script src="js/core/logParser.js"></script>
 <script src="js/core/oepnvLogic.js"></script>
 <script src="js/core/exprEngine.js"></script>
 <script src="js/core/exprEditor.js"></script>
@@ -721,15 +660,15 @@
 <script src="js/core/sampleData.js"></script>
 <script src="js/state.js"></script>
 <script src="js/charts/tooltipHelper.js"></script>
+<script src="js/charts/chartKit.js"></script>
+<script src="js/charts/logMarkers.js"></script>
+<script src="js/charts/reportCharts.js"></script>
 <script src="js/charts/timelineLane.js"></script>
 <script src="js/charts/timelineChart.js"></script>
-<script src="js/charts/trendChart.js"></script>
-<script src="js/charts/waitScatterChart.js"></script>
 <script src="js/charts/oepnvScatterChart.js"></script>
 <script src="js/charts/oepnvRawPointsChart.js"></script>
 <script src="js/charts/phaseDurationChart.js"></script>
-<script src="js/charts/phaseOverlay.js"></script>
-<script src="js/views/navigator.js"></script>
+<script src="js/views/logBar.js"></script>
 <script src="js/views/gruenzeitanalyse.js"></script>
 <script src="js/views/stammdatenLsa.js"></script>
 <script src="js/views/phasenauswertung.js"></script>
