@@ -109,19 +109,19 @@
       winSize: root.querySelector('#upWinSize'),
       btnWinAll: root.querySelector('#upBtnWinAll'),
       configSaveBtn: root.querySelector('#upConfigSaveBtn'),
-      configLoadInput: root.querySelector('#upConfigLoadInput'),
-      jumpNote: root.querySelector('#upJumpNote')
+      configLoadInput: root.querySelector('#upConfigLoadInput')
     };
 
-    // Buttons inside the cycle list (expand / shorten an irregular cycle, close the jump note)
+    // Buttons inside the cycle list: expand / shorten an irregular cycle, close a jump note.
     els.rows.addEventListener('click', e => {
+      const close = e.target.closest('button.up-jump-close');
+      if (close) { close.closest('.up-jump-note').remove(); return; }
       const b = e.target.closest('button.up-expand');
       if (!b) return;
       const i = Number(b.dataset.cycle);
       if (expandedCycles.has(i)) expandedCycles.delete(i); else expandedCycles.add(i);
       render();
     });
-    els.jumpNote.addEventListener('click', e => { if (e.target.closest('button.up-jump-close')) els.jumpNote.style.display = 'none'; });
 
     els.objSearch.addEventListener('input', applyObjSearch);
     els.addFilterBtn.addEventListener('click', () => {
@@ -823,7 +823,6 @@
     showAll = false;
     expandedCycles = new Set();
     pendingJump = null;
-    els.jumpNote.style.display = 'none';
     els.btnWinAll.textContent = 'Alle anzeigen';
     els.btnWinAll.classList.remove('primary');
 
@@ -1210,31 +1209,31 @@
 
     const n = cycleStarts.length;
     const matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
-    // A jump (from a log marker, for example) moves the window to the cycle that contains the time.
+    // A jump (from the log list, for example) shows the cycle that contains the time.
+    // It does not change the selection, the filter or "Alle anzeigen". With a window,
+    // the window moves to the cycle. A cycle hidden by the filter is shown anyway ("pinned").
     let jump = null;
     if (pendingJump) {
       const ci = Math.max(0, cycleIndexAt(cycleStarts, pendingJump.t));
       const pos = matchingCycles ? matchingCycles.indexOf(ci) : ci;
-      if (pos < 0) {
-        // The filter hides this cycle: remove the filter and render again.
-        filterRows = [];
-        renderFilterRows();
-        if (GZ.snackbar) GZ.snackbar.show('Filter zurückgesetzt', { description: `Umlauf #${ci + 1} erfüllte den Filter nicht.` });
-        return render();
+      const hidden = pos < 0;
+      if (!showAll) {
+        const at = hidden ? matchingCycles.findIndex(c => c > ci) : pos;
+        windowStartIdx = Math.max(0, (at < 0 ? matchingCycles.length : at) - Math.floor(windowCount / 2));
       }
-      const cycleEnd = ci + 1 < n ? cycleStarts[ci + 1] : tMax;
-      if (TU && (cycleEnd - cycleStarts[ci]) / 1000 > irregularLimitSec && (pendingJump.t - cycleStarts[ci]) / 1000 > cropSec) expandedCycles.add(ci);
-      showAll = false;
-      els.btnWinAll.textContent = 'Alle anzeigen';
-      els.btnWinAll.classList.remove('primary');
-      windowStartIdx = Math.max(0, pos - Math.floor(windowCount / 2));
-      jump = { cycle: ci, t: pendingJump.t, entry: pendingJump.entry };
+      jump = { cycle: ci, t: pendingJump.t, entry: pendingJump.entry, hidden };
       pendingJump = null;
     }
     const effectiveCount = matchingCycles ? matchingCycles.length : n;
     lastEffectiveCount = effectiveCount;
     const { from, to } = windowRange(effectiveCount);
     const cycleIdxList = matchingCycles ? matchingCycles.slice(from, to) : Array.from({ length: to - from }, (_, k) => from + k);
+    if (jump && !cycleIdxList.includes(jump.cycle)) {
+      // hidden by the filter, or outside the window while "Alle anzeigen" is off: show it as well
+      cycleIdxList.push(jump.cycle);
+      cycleIdxList.sort((p, q) => p - q);
+      jump.pinned = true;
+    }
 
     els.diagramControls.style.display = 'flex';
     const filterSuffix = matchingCycles ? ` (gefiltert aus ${n})` : '';
@@ -1591,25 +1590,35 @@
     els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');
     els.info.textContent = `${n} Umlauf/Umläufe`;
     els.tablePanel.style.display = '';
-    if (jump) showJumpTarget(jump);
+    if (jump) showJumpTarget(jump, rowData);
   }
 
   /* ---------------- Jump from a log entry (or any time) ---------------- */
-  // Highlights the target cycle, scrolls to it and shows what was clicked.
-  function showJumpTarget(jump) {
+  // Highlights the target cycle and puts a note INSIDE it (under the caption), so it is
+  // in view after the scroll: what was clicked, where in the cycle, and why it is shown.
+  function showJumpTarget(jump, rowData) {
     const group = els.rows.querySelector(`.up-group[data-cycle="${jump.cycle}"]`);
-    if (group) {
-      group.classList.add('jump-target');
-      group.scrollIntoView({ block: 'center' });
-    }
+    if (!group) return;
+    const r = rowData.find(x => x.i === jump.cycle);
     const e = jump.entry;
-    els.jumpNote.innerHTML = e
-      ? `<b>Log-Eintrag</b> <span class="log-time">${esc(fmtTs(new Date(e.t)))}</span> <b class="log-sev log-sev-${esc(e.severity)}">${esc(e.level || '–')}</b> ${esc(e.text)} <span class="dim">· Umlauf #${jump.cycle + 1}</span><button type="button" class="up-jump-close" title="Schließen">✕</button>`
-      : `<b>Sprung zu</b> <span class="log-time">${esc(fmtTs(new Date(jump.t)))}</span> <span class="dim">· Umlauf #${jump.cycle + 1}</span><button type="button" class="up-jump-close" title="Schließen">✕</button>`;
-    els.jumpNote.style.display = '';
+    const offset = Math.round((jump.t - r.start) / 1000);
+    const parts = [];
+    if (e) parts.push(`<b>Log-Eintrag</b> <span class="log-time">${esc(fmtTimeShort(e.t))}</span> <b class="log-sev log-sev-${esc(e.severity)}">${esc(e.level || '–')}</b> ${esc(e.text)}`);
+    else parts.push(`<b>Sprung zu</b> <span class="log-time">${esc(fmtTimeShort(jump.t))}</span>`);
+    parts.push(`<span class="dim">· ${offset} s nach Umlaufbeginn</span>`);
+    if (r.cropped && jump.t > r.end) {
+      parts.push(`<span class="up-warn-text">– liegt hinter dem dargestellten Ausschnitt</span> <button type="button" class="up-expand" data-cycle="${r.i}">volle Länge anzeigen</button>`);
+    }
+    if (jump.pinned) parts.push('<span class="dim">· angezeigt trotz Filter/Fenster</span>');
+    const note = document.createElement('div');
+    note.className = 'up-jump-note';
+    note.innerHTML = parts.join(' ') + '<button type="button" class="up-jump-close" title="Schließen">✕</button>';
+    group.querySelector('.up-group-caption').after(note);
+    group.classList.add('jump-target');
+    group.scrollIntoView({ block: 'center' });
   }
 
-  // Opens the cycle that contains time t. Selects all signal groups when none is selected.
+  // Opens the cycle that contains time t. Selects all signal groups only when none is selected.
   function jumpTo(t, entry) {
     const a = GZ.state.data.currentAnalysis;
     if (!a || !a.cycleStarts || a.cycleStarts.length < 2) return;

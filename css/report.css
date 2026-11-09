@@ -158,7 +158,12 @@ button.action{ font-size:11.5px; font-weight:600; color:var(--accent-strong); pa
 .report-table tbody tr[data-t]:hover td{ background:var(--bg-surface-2); }
 
 /* Log list under the log bar */
-.log-list{ flex-basis:100%; max-height:260px; overflow:auto; border:1px solid var(--border); margin-top:4px; }
+.log-list{ flex-basis:100%; border:1px solid var(--border); margin-top:4px; background:#fff; }
+.log-list-head{ display:flex; align-items:center; gap:8px; padding:6px 10px; border-bottom:1px solid var(--border); background:var(--bg-surface-2); font-size:11.5px; }
+.log-list-head button{ padding:2px 9px; font-size:11.5px; }
+.log-list-head button.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.log-list-head .dim{ margin-left:auto; color:var(--text-faint); }
+.log-list-scroll{ max-height:260px; overflow:auto; }
 .log-list table{ width:100%; border-collapse:collapse; font-size:12px; }
 .log-list th, .log-list td{ padding:4px 10px; text-align:left; border-bottom:1px solid var(--border); background:none; white-space:nowrap; }
 .log-list th{ position:sticky; top:0; background:var(--bg-surface-2); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); }
@@ -166,6 +171,8 @@ button.action{ font-size:11.5px; font-weight:600; color:var(--accent-strong); pa
 .log-list td{ font-family:var(--mono); }
 .log-list tbody tr{ cursor:pointer; }
 .log-list tbody tr:hover td{ background:var(--accent-bg); }
+.log-list tbody tr.active td{ background:var(--accent-bg-strong); font-weight:600; }
+.log-bar-panel{ margin:0; padding:8px 14px; background:#fff; border:1px solid var(--border); border-radius:var(--radius-md); }
 .log-list tbody tr:nth-child(even){ background:none; }
 .log-sev-critical, .log-list .sev-critical{ color:var(--log-critical); font-weight:800; }
 .log-sev-error, .log-list .sev-error{ color:var(--sig-red); font-weight:700; }
@@ -175,9 +182,12 @@ button.action{ font-size:11.5px; font-weight:600; color:var(--accent-strong); pa
 /* Cycle check: irregular cycles and jump target */
 .up-irregular{ margin-left:10px; padding:1px 6px; border:1px solid var(--sig-yellow); background:var(--warn-bg); color:var(--warn-text); font-size:10.5px; font-weight:700; border-radius:3px; }
 button.up-expand{ margin-left:8px; padding:1px 8px; font-size:11px; }
-.up-jump-note{ margin:8px 16px 0; padding:7px 12px; background:var(--accent-bg); border-left:3px solid var(--accent); font-size:12px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+.up-jump-note{ margin:4px 0 6px; padding:6px 12px; background:var(--accent-bg); border-left:3px solid var(--accent); font-size:12px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
 .up-jump-note .log-time{ font-family:var(--mono); color:var(--text-muted); }
 .up-jump-note .dim{ color:var(--text-faint); }
+.up-jump-note .up-warn-text{ color:var(--warn-text); font-weight:600; }
 .up-jump-note button.up-jump-close{ margin-left:auto; border:none; background:none; color:var(--text-faint); cursor:pointer; padding:0 4px; }
-.up-group.jump-target{ box-shadow:inset 3px 0 0 var(--accent); animation:jump-flash 2.4s ease-out; }
-@keyframes jump-flash{ from{ background:var(--accent-bg-strong); } to{ background:transparent; } }
+.up-jump-note button.up-expand{ margin-left:0; }
+/* The highlight is drawn left of the group, so it does not cover the lane names. */
+.up-group.jump-target{ background:var(--bg-surface-2); box-shadow:-3px 0 0 var(--accent); animation:jump-flash 2.4s ease-out; }
+@keyframes jump-flash{ from{ background:var(--accent-bg-strong); } to{ background:var(--bg-surface-2); } }

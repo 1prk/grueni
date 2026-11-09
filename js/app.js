@@ -30,6 +30,7 @@
   function jumpToLog(entry) {
     switchTab('up');
     GZ.views.umlaufpruefung.jumpTo(entry.t, entry);
+    GZ.views.logBar.markActive(entry);
   }
   function jumpToTime(t) {
     switchTab('up');

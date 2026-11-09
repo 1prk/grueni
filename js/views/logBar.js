@@ -10,9 +10,21 @@
   // More rows make the list slow. The filters narrow it down.
   const MAX_LIST_ROWS = 500;
 
+  // Quick filter of the LIST only (the chips filter list and markers).
+  // A level in the list is shown when its rank is at least the chosen one.
+  const RANK = { debug: 0, other: 1, info: 2, warning: 3, error: 4, critical: 5 };
+  const LIST_FILTERS = [
+    { id: 'all', label: 'Alle', min: 0 },
+    { id: 'warning', label: 'ab Warnung', min: 3 },
+    { id: 'error', label: 'ab Fehler', min: 4 },
+    { id: 'critical', label: 'nur Schwerer Fehler', min: 5 }
+  ];
+
   let onChange = () => {};
   let listOpen = false;
-  let listed = [];   // entries shown in the list, same order as the rows
+  let listFilter = 'all';
+  let active = null;  // the entry that was opened last
+  let listed = [];    // entries shown in the list, same order as the rows
 
   function containers() { return [...document.querySelectorAll('[data-log-bar]')]; }
 
@@ -33,18 +45,22 @@
 
   // The list of entries that pass the filters. Click = open in the cycle check.
   function renderLists() {
-    listed = listOpen ? GZ.logs.visible().slice(0, MAX_LIST_ROWS) : [];
-    const total = listOpen ? GZ.logs.visible().length : 0;
+    const min = LIST_FILTERS.find(f => f.id === listFilter).min;
+    const matching = listOpen ? GZ.logs.visible().filter(e => RANK[e.severity] >= min) : [];
+    listed = matching.slice(0, MAX_LIST_ROWS);
+    const total = matching.length;
+    const head = `<div class="log-list-head"><span>Anzeigen:</span>${LIST_FILTERS.map(f =>
+      `<button type="button" data-list-filter="${f.id}" class="${f.id === listFilter ? 'active' : ''}">${f.label}</button>`).join('')}<span class="dim">${total} Einträge</span></div>`;
     containers().forEach(box => {
       const host = box.querySelector('.log-list');
       if (!host) return;
       host.style.display = listOpen ? '' : 'none';
       if (!listOpen) { host.innerHTML = ''; return; }
-      host.innerHTML = listed.length
-        ? `<table><thead><tr><th>Zeit</th><th>Stufe</th><th>Text</th></tr></thead><tbody>${listed.map((e, i) =>
-            `<tr data-i="${i}" title="Klick: Umlauf in der Umlaufprüfung öffnen"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
-          + (total > listed.length ? `<div class="log-list-more">${listed.length} von ${total} Einträgen – Filter oder Suche einschränken.</div>` : '')
-        : '<div class="log-list-more">Keine Einträge für diese Filter.</div>';
+      host.innerHTML = head + (listed.length
+        ? `<div class="log-list-scroll"><table><thead><tr><th>Zeit</th><th>Stufe</th><th>Text</th></tr></thead><tbody>${listed.map((e, i) =>
+            `<tr data-i="${i}" class="${e === active ? 'active' : ''}" title="Klick: Umlauf in der Umlaufprüfung öffnen"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
+          + (total > listed.length ? `<div class="log-list-more">${listed.length} von ${total} Einträgen – Filter oder Suche einschränken.</div>` : '') + '</div>'
+        : '<div class="log-list-more">Keine Einträge für diese Filter.</div>');
     });
   }
 
@@ -67,6 +83,14 @@
     renderLists();
   }
 
+  // Marks the entry that was opened last (without redrawing, so the scroll position stays).
+  function markActive(entry) {
+    active = entry;
+    containers().forEach(box => {
+      box.querySelectorAll('.log-list tbody tr').forEach(tr => tr.classList.toggle('active', listed[Number(tr.dataset.i)] === entry));
+    });
+  }
+
   function init(changeCallback) {
     onChange = changeCallback;
     document.addEventListener('change', e => {
@@ -87,11 +111,13 @@
     document.addEventListener('click', e => {
       if (e.target.closest('[data-log-clear]')) { GZ.logs.clear(); listOpen = false; render(); onChange(); return; }
       if (e.target.closest('[data-log-list]')) { listOpen = !listOpen; render(); return; }
+      const filterBtn = e.target.closest('button[data-list-filter]');
+      if (filterBtn) { listFilter = filterBtn.dataset.listFilter; renderLists(); return; }
       const row = e.target.closest('.log-list tbody tr[data-i]');
       if (row && listed[Number(row.dataset.i)]) GZ.app.jumpToLog(listed[Number(row.dataset.i)]);
     });
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.logBar = { init, render };
+  GZ.views.logBar = { init, render, markActive };
 })(window.GZ = window.GZ || {});

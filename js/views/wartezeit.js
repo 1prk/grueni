@@ -319,7 +319,7 @@
     const points = all.map(e => {
       const g = e.excluded ? 'ex' : grade(e.waitSec, t);
       return {
-        t: e.reqTime, y: e.waitSec, onClick: () => GZ.app.jumpToTime(e.reqTime), r: g === 'crit' ? 3.8 : (g === 'warn' ? 3.4 : 2.6),
+        t: e.reqTime, y: e.waitSec, r: g === 'crit' ? 3.8 : (g === 'warn' ? 3.4 : 2.6),
         color: g === 'ex' ? 'var(--text-faint)' : g === 'crit' ? 'var(--sig-red)' : g === 'warn' ? 'var(--sig-yellow)' : 'var(--sig-green)', opacity: g === 'ex' ? .55 : 1,
         tip: `Anforderung ${fmtTimeShort(e.reqTime)} (${esc(e.detector)})<br>Grünbeginn ${fmtTimeShort(e.greenTime)} · ${esc(GZ.slices.planLabel(e.plan))}<br>Wartezeit ${fmtNum(e.waitSec, 1)} s${e.excluded ? '<br>ausgeschlossen (SPL)' : ''}`
       };

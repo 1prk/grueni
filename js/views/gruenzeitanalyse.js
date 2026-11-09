@@ -239,7 +239,7 @@
     const windowAt = t => windows.find(w => t >= w.t0 && t < w.t1) || windows[windows.length - 1];
     const points = sg.greens.map(g => {
       const w = windowAt(g.t), diff = g.dur - w.med;
-      return { t: g.t, y: g.dur, onClick: () => GZ.app.jumpToTime(g.t), tip: `${g.cycle >= 0 ? 'Umlauf ' + (g.cycle + 1) + ' · ' : ''}${fmtTimeShort(g.t)}<br>Grünzeit ${fmtNum(g.dur, 1)} s (${diff >= 0 ? '+' : '−'}${fmtNum(Math.abs(diff), 1)} s zum Median)<br>${esc(GZ.slices.planLabel(g.plan))}` };
+      return { t: g.t, y: g.dur, tip: `${g.cycle >= 0 ? 'Umlauf ' + (g.cycle + 1) + ' · ' : ''}${fmtTimeShort(g.t)}<br>Grünzeit ${fmtNum(g.dur, 1)} s (${diff >= 0 ? '+' : '−'}${fmtNum(Math.abs(diff), 1)} s zum Median)<br>${esc(GZ.slices.planLabel(g.plan))}` };
     });
     const withGreen = new Set(sg.greens.map(g => g.cycle));
     const crosses = model.hasCycles ? model.cycles.filter(c => c.regular && !withGreen.has(c.i))
