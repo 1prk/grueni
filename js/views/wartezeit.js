@@ -319,7 +319,7 @@
     const points = all.map(e => {
       const g = e.excluded ? 'ex' : grade(e.waitSec, t);
       return {
-        t: e.reqTime, y: e.waitSec, r: g === 'crit' ? 3.8 : (g === 'warn' ? 3.4 : 2.6),
+        t: e.reqTime, y: e.waitSec, onClick: () => GZ.app.jumpToTime(e.reqTime), r: g === 'crit' ? 3.8 : (g === 'warn' ? 3.4 : 2.6),
         color: g === 'ex' ? 'var(--text-faint)' : g === 'crit' ? 'var(--sig-red)' : g === 'warn' ? 'var(--sig-yellow)' : 'var(--sig-green)', opacity: g === 'ex' ? .55 : 1,
         tip: `Anforderung ${fmtTimeShort(e.reqTime)} (${esc(e.detector)})<br>Grünbeginn ${fmtTimeShort(e.greenTime)} · ${esc(GZ.slices.planLabel(e.plan))}<br>Wartezeit ${fmtNum(e.waitSec, 1)} s${e.excluded ? '<br>ausgeschlossen (SPL)' : ''}`
       };
@@ -390,9 +390,10 @@
           const hasCritical = near.some(x => x.severity === 'critical'), hasError = near.some(x => x.severity === 'error');
           logCell = `<td class="left sans log-cell${hasCritical ? ' has-critical' : hasError ? ' has-error' : ''}" title="${esc(full)}">${near.length ? `<span class="log-count-badge">${near.length}</span> ${esc(first.text.length > 48 ? first.text.slice(0, 47) + '…' : first.text)}` : '<span class="dim">–</span>'}</td>`;
         }
-        return `<tr class="${g === 'crit' ? 'event-crit' : g === 'warn' ? 'event-warn' : ''}"><td>${e.nr}</td><td>${esc(fmtTs(new Date(e.reqTime)))}</td><td>${tx ?? '–'}</td><td>${esc(fmtTs(new Date(e.greenTime)))}</td><td>${esc(e.spl)}</td><td>${fmtNum(e.waitSec, 1)} s</td><td class="left sans">${g === 'crit' ? 'Grenzwert überschritten' : g === 'warn' ? 'Warnung' : 'OK'}</td><td class="left">${esc(e.detector)}</td>${logCell}</tr>`;
+        return `<tr data-t="${e.reqTime}" class="${g === 'crit' ? 'event-crit' : g === 'warn' ? 'event-warn' : ''}"><td>${e.nr}</td><td>${esc(fmtTs(new Date(e.reqTime)))}</td><td>${tx ?? '–'}</td><td>${esc(fmtTs(new Date(e.greenTime)))}</td><td>${esc(e.spl)}</td><td>${fmtNum(e.waitSec, 1)} s</td><td class="left sans">${g === 'crit' ? 'Grenzwert überschritten' : g === 'warn' ? 'Warnung' : 'OK'}</td><td class="left">${esc(e.detector)}</td>${logCell}</tr>`;
       }).join('') + '</tbody>';
-    els.note4.textContent = `Die 10 längsten von ${st.n} Anforderungen, absteigend; Nr = Reihenfolge im Mitschnitt.` + (hasLog ? ' Die Log-Spalte zeigt Einträge von 60 s vor der Anforderung bis 60 s nach dem Grünbeginn (Tooltip: alle).' : '');
+    els.table4.querySelectorAll('tr[data-t]').forEach(tr => tr.addEventListener('click', () => GZ.app.jumpToTime(Number(tr.dataset.t))));
+    els.note4.textContent = `Die 10 längsten von ${st.n} Anforderungen, absteigend; Nr = Reihenfolge im Mitschnitt. Zeile anklicken: Umlauf in der Umlaufprüfung öffnen.` + (hasLog ? ' Die Log-Spalte zeigt Einträge von 60 s vor der Anforderung bis 60 s nach dem Grünbeginn (Tooltip: alle).' : '');
   }
 
   /* ---------------- Tab ---------------- */

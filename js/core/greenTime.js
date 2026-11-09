@@ -92,7 +92,7 @@
     });
 
     // cycles: all complete cycles (indexed by green.cycle); only regular ones enter the statistics.
-    return { cycles, hasCycles: regularCount >= 2, tuMedian, sgs };
+    return { cycles, hasCycles: regularCount >= 2, irregularCount: cycles.length - regularCount, tuMedian, sgs };
   }
 
   function greensInSlice(sg, sliceKey) {
@@ -162,7 +162,7 @@
   }
 
   GZ.greenTime = {
-    MIN_GREENS, params, build, stats, plantActuated, plantHasData, cycleTimes, cyclesInSlice, behaviour,
+    MIN_GREENS, IRREGULAR_CYCLE_FACTOR, params, build, stats, plantActuated, plantHasData, cycleTimes, cyclesInSlice, behaviour,
     mean, percentile
   };
 })(window.GZ = window.GZ || {});

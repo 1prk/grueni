@@ -181,5 +181,27 @@ test('wait time: pulse detector holds the request until green', () => {
   assert.ok(Math.max(...r.events.map(e => e.waitSec)) > 85);
 });
 
+/* ---------- Dark period: TX stops, the whole dark block becomes one long "cycle" ---------- */
+test('green time: a dark period without TX gives one irregular cycle that is left out of the statistics', () => {
+  const lines = GZ.sampleData.generateSampleText().split('\n');
+  const out = lines.slice(0, 7);
+  for (let i = 7; i < lines.length; i++) {
+    const f = lines[i].split('\t'), sec = i - 7;
+    if (sec >= 7200 && sec < 9000) { f[2] = '0'; for (let c = 5; c <= 8; c++) f[c] = '0'; }   // 08:00-08:30 dark, TX frozen
+    out.push(f.join('\t'));
+  }
+  const p2 = GZ.parser.parseOcitText(out.join('\n'));
+  const stats2 = p2.columns.map(col => {
+    const segs = GZ.segments.buildSegments(p2.times, p2.seriesByCol.get(col.index));
+    return { col, segs, stats: GZ.segments.computeCycleStats(segs) };
+  });
+  const a2 = Object.assign({}, a, { allStats: stats2, cycleStarts: p2.cycleStarts, times: p2.times, seriesByCol: p2.seriesByCol, splValues: p2.splValues, tMin: p2.times[0], tMax: p2.times[p2.times.length - 1] + 1000 });
+  const m2 = GZ.greenTime.build(a2);
+  assert.strictEqual(m2.irregularCount, 1);
+  const long = m2.cycles.filter(c => !c.regular)[0];
+  assert.ok(long.tu > 1500 && long.tu < 2000);
+  assert.ok(GZ.greenTime.cycleTimes(m2, null).max < 200);   // the dark block is not in the cycle time statistics
+});
+
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }
 console.log('\nall tests passed');

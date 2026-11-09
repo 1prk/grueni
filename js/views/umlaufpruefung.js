@@ -41,6 +41,13 @@
 
   let els = null;
   let windowCount = 20, windowStartIdx = 0, showAll = false;
+  // Irregular cycles (much longer than the median cycle time, for example a
+  // dark period without TX) are shown shortened. These are the ones the user
+  // expanded to full length.
+  let expandedCycles = new Set();
+  // Set by jumpTo(); handled in the next render().
+  let pendingJump = null;
+  const CROP_FACTOR = 1.5; // shortened cycles show the first 1.5 x median cycle time
   let lastEffectiveCount = 0; // Anzahl Umläufe nach aktuellem Filter (für Fenster-Navigation)
 
   // Vereinheitlichte Objekt-Liste (SG/DET/APW/ÖPNV/FORMEL in EINER Liste,
@@ -102,8 +109,19 @@
       winSize: root.querySelector('#upWinSize'),
       btnWinAll: root.querySelector('#upBtnWinAll'),
       configSaveBtn: root.querySelector('#upConfigSaveBtn'),
-      configLoadInput: root.querySelector('#upConfigLoadInput')
+      configLoadInput: root.querySelector('#upConfigLoadInput'),
+      jumpNote: root.querySelector('#upJumpNote')
     };
+
+    // Buttons inside the cycle list (expand / shorten an irregular cycle, close the jump note)
+    els.rows.addEventListener('click', e => {
+      const b = e.target.closest('button.up-expand');
+      if (!b) return;
+      const i = Number(b.dataset.cycle);
+      if (expandedCycles.has(i)) expandedCycles.delete(i); else expandedCycles.add(i);
+      render();
+    });
+    els.jumpNote.addEventListener('click', e => { if (e.target.closest('button.up-jump-close')) els.jumpNote.style.display = 'none'; });
 
     els.objSearch.addEventListener('input', applyObjSearch);
     els.addFilterBtn.addEventListener('click', () => {
@@ -803,6 +821,9 @@
 
     windowStartIdx = 0;
     showAll = false;
+    expandedCycles = new Set();
+    pendingJump = null;
+    els.jumpNote.style.display = 'none';
     els.btnWinAll.textContent = 'Alle anzeigen';
     els.btnWinAll.classList.remove('primary');
 
@@ -1048,6 +1069,23 @@
     return (els && els.laneStyle && els.laneStyle.value === 'default') ? 'default' : 'minimal';
   }
 
+  // Seconds in the dark state ("Dunkel") of a segment list inside [start, end).
+  function darkSeconds(segs, start, end) {
+    let lo = 0, hi = segs.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (segs[mid].end <= start) lo = mid + 1; else hi = mid; }
+    let sum = 0;
+    for (let i = lo; i < segs.length && segs[i].start < end; i++) {
+      if (segs[i].cat === 'DUNKEL') sum += Math.min(segs[i].end, end) - Math.max(segs[i].start, start);
+    }
+    return sum / 1000;
+  }
+  // Index of the last cycle that starts at or before t (-1 if none).
+  function cycleIndexAt(cycleStarts, t) {
+    let lo = 0, hi = cycleStarts.length - 1, found = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (cycleStarts[mid] <= t) { found = mid; lo = mid + 1; } else hi = mid - 1; }
+    return found;
+  }
+
   function render() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -1111,6 +1149,8 @@
     }
 
     const TU = computeGlobalTU(cycleStarts);
+    const irregularLimitSec = TU ? TU * GZ.greenTime.IRREGULAR_CYCLE_FACTOR : Infinity;
+    const cropSec = TU ? TU * CROP_FACTOR : Infinity;
     const anomalyCtx = GZ.state.anomalyCtx();
     const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
     const laneStyle = currentLaneStyle();
@@ -1170,6 +1210,27 @@
 
     const n = cycleStarts.length;
     const matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
+    // A jump (from a log marker, for example) moves the window to the cycle that contains the time.
+    let jump = null;
+    if (pendingJump) {
+      const ci = Math.max(0, cycleIndexAt(cycleStarts, pendingJump.t));
+      const pos = matchingCycles ? matchingCycles.indexOf(ci) : ci;
+      if (pos < 0) {
+        // The filter hides this cycle: remove the filter and render again.
+        filterRows = [];
+        renderFilterRows();
+        if (GZ.snackbar) GZ.snackbar.show('Filter zurückgesetzt', { description: `Umlauf #${ci + 1} erfüllte den Filter nicht.` });
+        return render();
+      }
+      const cycleEnd = ci + 1 < n ? cycleStarts[ci + 1] : tMax;
+      if (TU && (cycleEnd - cycleStarts[ci]) / 1000 > irregularLimitSec && (pendingJump.t - cycleStarts[ci]) / 1000 > cropSec) expandedCycles.add(ci);
+      showAll = false;
+      els.btnWinAll.textContent = 'Alle anzeigen';
+      els.btnWinAll.classList.remove('primary');
+      windowStartIdx = Math.max(0, pos - Math.floor(windowCount / 2));
+      jump = { cycle: ci, t: pendingJump.t, entry: pendingJump.entry };
+      pendingJump = null;
+    }
     const effectiveCount = matchingCycles ? matchingCycles.length : n;
     lastEffectiveCount = effectiveCount;
     const { from, to } = windowRange(effectiveCount);
@@ -1204,6 +1265,9 @@
       const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
       const spl = findSplAt(start, times, splValues) || '–';
       const tu = Math.round((end - start) / 1000);
+      const irregular = tu > irregularLimitSec;
+      const cropped = irregular && !expandedCycles.has(i);
+      const viewEnd = cropped ? Math.min(end, start + Math.round(cropSec * 1000)) : end;
 
       const sgRows = sgData.map((sd, sgIdx) => {
         const gIdx = sd.greenSweep(start, end);
@@ -1234,9 +1298,9 @@
         }
         return {
           sgEntry: sd.sgEntry, an, ab, tf, anomClass, greenSeg, carryGreenSeg, carryAb,
-          visSegs: sd.segSweep(start, end),
-          fzVisSegs: sd.fzRows.map(fd => fd.fzSweep(start, end)),
-          zwlVisSegs: sd.fzRows.map(fd => fd.zwlSweep(start, end)),
+          visSegs: sd.segSweep(start, viewEnd),
+          fzVisSegs: sd.fzRows.map(fd => fd.fzSweep(start, viewEnd)),
+          zwlVisSegs: sd.fzRows.map(fd => fd.zwlSweep(start, viewEnd)),
           fzRows: sd.fzRows
         };
       });
@@ -1249,10 +1313,12 @@
             span: m.spansByCycleIdx ? m.spansByCycleIdx[i] : null
           };
         }
-        return { col: m.col, kind: m.kind, visSegs: m.sweep(start, end) };
+        return { col: m.col, kind: m.kind, visSegs: m.sweep(start, viewEnd) };
       });
 
-      rowData.push({ i, start, end, spl, tu, sgRows, traceRows });
+      // end = end of the drawn window, fullEnd = real end of the cycle
+      rowData.push({ i, start, end: viewEnd, fullEnd: end, spl, tu, irregular, cropped, sgRows, traceRows,
+        darkShare: irregular && sgData.length ? darkSeconds(sgData[0].segs, start, end) / Math.max(1, (end - start) / 1000) : 0 });
     });
 
     if (rowData.length === 0) {
@@ -1315,19 +1381,30 @@
     // The row has no "up-sub-row" class, because the code below finds the lane
     // rows of a group by that class (in DOM order).
     const logRowHtml = r => {
-      r.logs = GZ.logs.hasEntries() ? GZ.logs.visible(r.start, r.end) : [];
-      if (!r.logs.length) return '';
+      const all = GZ.logs.hasEntries() ? GZ.logs.visible(r.start, r.fullEnd) : [];
+      r.logsInView = all.filter(e => e.t <= r.end);
+      r.logsBeyond = all.filter(e => e.t > r.end);
+      if (!all.length) return '';
       return `
         <div class="lane-row up-log-row">
-          <div class="lane-name" title="Log-Einträge in diesem Umlauf">Log (${r.logs.length})</div>
+          <div class="lane-name" title="Log-Einträge in diesem Umlauf">Log (${all.length})</div>
           <div class="lane-num"></div><div class="lane-num"></div><div class="lane-num"></div>
           <div class="lane-track up-sub-track"><svg></svg></div>
         </div>`;
     };
 
+    // Caption of an irregular cycle: explains the length and offers full length / shortened view.
+    const irregularHtml = r => {
+      if (!r.irregular) return '';
+      const dark = r.darkShare > 0.05 ? ` · davon ${Math.round(r.darkShare * 100)} % Dunkel` : '';
+      return ` <span class="up-irregular" title="Länger als das ${GZ.format.fmtNum(GZ.greenTime.IRREGULAR_CYCLE_FACTOR, 1)}-Fache des Median-Umlaufs. Meist Dunkelzeit oder Abschaltung: TX läuft dann nicht, daher kommt keine Umlaufgrenze.">unregelmäßig · ${GZ.format.fmtDauer(r.tu)}${dark}</span>` +
+        `<button type="button" class="up-expand" data-cycle="${r.i}">${r.cropped ? 'volle Länge anzeigen' : 'kürzen'}</button>` +
+        (r.cropped ? ` <span class="win-label">dargestellt: erste ${Math.round((r.end - r.start) / 1000)} s</span>` : '');
+    };
+
     els.rows.innerHTML = rowData.map(r => `
-      <div class="up-group">
-        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">${fmtTimeShort(r.start)} · SPL ${esc(r.spl)} · TU ${r.tu}s</span></div>
+      <div class="up-group" data-cycle="${r.i}">
+        <div class="up-group-caption" title="Start: ${esc(fmtTs(new Date(r.start)))}">Umlauf #${r.i + 1} <span class="win-label">${fmtTimeShort(r.start)} · SPL ${esc(r.spl)} · TU ${r.tu}s</span>${irregularHtml(r)}</div>
         ${logRowHtml(r)}
         ${laneRowsHtml(r)}
       </div>`).join('');
@@ -1501,9 +1578,9 @@
         }
       });
 
-      if (r.logs.length) {
+      if (r.logsInView.length || r.logsBeyond.length) {
         GZ.charts.logMarkers.drawStrip(group.querySelector('.up-log-row .lane-track svg'), {
-          wMin: r.start, wMax: r.end, width: subSize.width, height: subSize.height, entries: r.logs
+          wMin: r.start, wMax: r.end, width: subSize.width, height: subSize.height, entries: r.logsInView, beyond: r.logsBeyond
         });
       }
       wireCrosshair(group, r.start, r.end);
@@ -1514,8 +1591,36 @@
     els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');
     els.info.textContent = `${n} Umlauf/Umläufe`;
     els.tablePanel.style.display = '';
+    if (jump) showJumpTarget(jump);
+  }
+
+  /* ---------------- Jump from a log entry (or any time) ---------------- */
+  // Highlights the target cycle, scrolls to it and shows what was clicked.
+  function showJumpTarget(jump) {
+    const group = els.rows.querySelector(`.up-group[data-cycle="${jump.cycle}"]`);
+    if (group) {
+      group.classList.add('jump-target');
+      group.scrollIntoView({ block: 'center' });
+    }
+    const e = jump.entry;
+    els.jumpNote.innerHTML = e
+      ? `<b>Log-Eintrag</b> <span class="log-time">${esc(fmtTs(new Date(e.t)))}</span> <b class="log-sev log-sev-${esc(e.severity)}">${esc(e.level || '–')}</b> ${esc(e.text)} <span class="dim">· Umlauf #${jump.cycle + 1}</span><button type="button" class="up-jump-close" title="Schließen">✕</button>`
+      : `<b>Sprung zu</b> <span class="log-time">${esc(fmtTs(new Date(jump.t)))}</span> <span class="dim">· Umlauf #${jump.cycle + 1}</span><button type="button" class="up-jump-close" title="Schließen">✕</button>`;
+    els.jumpNote.style.display = '';
+  }
+
+  // Opens the cycle that contains time t. Selects all signal groups when none is selected.
+  function jumpTo(t, entry) {
+    const a = GZ.state.data.currentAnalysis;
+    if (!a || !a.cycleStarts || a.cycleStarts.length < 2) return;
+    const hasSg = [...els.objList.querySelectorAll('.obj-row input:checked')].some(cb => cb.closest('.obj-row').dataset.key.startsWith('SG|'));
+    if (!hasSg) {
+      els.objList.querySelectorAll('.obj-row').forEach(row => { if (row.dataset.key.startsWith('SG|')) row.querySelector('input').checked = true; });
+    }
+    pendingJump = { t, entry: entry || null };
+    render();
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.umlaufpruefung = { init, populateControls, render, refreshSyntheticColumns };
+  GZ.views.umlaufpruefung = { init, populateControls, render, refreshSyntheticColumns, jumpTo };
 })(window.GZ = window.GZ || {});

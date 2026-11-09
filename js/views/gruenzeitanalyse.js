@@ -8,7 +8,7 @@
    (SPL) or per clock hour. Log markers appear in the time charts. */
 (function (GZ) {
   'use strict';
-  const { esc, fmtNum, fmtTimeShort, fmtHoursMinutes } = GZ.format;
+  const { esc, fmtNum, fmtTimeShort, fmtHoursMinutes, fmtDauer, fmtTs } = GZ.format;
   const GT = GZ.greenTime;
   const R = GZ.charts.report;
   const kit = GZ.charts.kit;
@@ -44,8 +44,17 @@
       note3: root.querySelector('#gzNote3'),
       claim4: root.querySelector('#gzClaim4'),
       table4: root.querySelector('#gzTable4'),
-      note4: root.querySelector('#gzNote4')
+      note4: root.querySelector('#gzNote4'),
+      darkSection: root.querySelector('#gzDarkSection'),
+      claimDark: root.querySelector('#gzClaimDark'),
+      tableDark: root.querySelector('#gzTableDark'),
+      noteDark: root.querySelector('#gzNoteDark')
     };
+    // A dark period in the list opens its start in the cycle check.
+    root.addEventListener('click', e => {
+      const b = e.target.closest('button[data-jump-t]');
+      if (b) GZ.app.jumpToTime(Number(b.dataset.jumpT));
+    });
     els.scopeGroup.addEventListener('click', e => {
       const b = e.target.closest('button[data-scope]');
       if (!b || b.disabled) return;
@@ -186,6 +195,7 @@
     els.note1.innerHTML = `${legend}Balken = Anteil der Grünphasen je 1-s-Klasse, Maßstab je Zeile auf die höchste Klasse normiert. Gemeinsame Zeitachse für alle Zeilen. ` +
       `<b>Verkehrsabhängig</b> heißt: die Grünzeit streut. <b>Festzeit</b> heißt: sie streut nicht. Die Anlage gilt als verkehrsabhängig, sobald eine Signalgruppe streut. ` +
       `Signalgruppen mit weniger als ${GT.MIN_GREENS} Grünphasen werden nicht eingestuft. ` +
+      (model.irregularCount ? `${model.irregularCount === 1 ? '1 Umlauf, der länger' : model.irregularCount + ' Umläufe, die länger'} als das ${fmtNum(GT.IRREGULAR_CYCLE_FACTOR, 1)}-Fache des Median-Umlaufs ${model.irregularCount === 1 ? 'dauert' : 'dauern'} (meist Dunkelzeit, siehe 5), ${model.irregularCount === 1 ? 'fließt' : 'fließen'} nicht in die Statistik ein. ` : '') +
       `„bei Max“ = Anteil der Grünphasen, die genau das beobachtete Maximum erreichen (Hinweis auf Deckelung durch die Maximalgrünzeit).`;
   }
 
@@ -229,7 +239,7 @@
     const windowAt = t => windows.find(w => t >= w.t0 && t < w.t1) || windows[windows.length - 1];
     const points = sg.greens.map(g => {
       const w = windowAt(g.t), diff = g.dur - w.med;
-      return { t: g.t, y: g.dur, tip: `${g.cycle >= 0 ? 'Umlauf ' + (g.cycle + 1) + ' · ' : ''}${fmtTimeShort(g.t)}<br>Grünzeit ${fmtNum(g.dur, 1)} s (${diff >= 0 ? '+' : '−'}${fmtNum(Math.abs(diff), 1)} s zum Median)<br>${esc(GZ.slices.planLabel(g.plan))}` };
+      return { t: g.t, y: g.dur, onClick: () => GZ.app.jumpToTime(g.t), tip: `${g.cycle >= 0 ? 'Umlauf ' + (g.cycle + 1) + ' · ' : ''}${fmtTimeShort(g.t)}<br>Grünzeit ${fmtNum(g.dur, 1)} s (${diff >= 0 ? '+' : '−'}${fmtNum(Math.abs(diff), 1)} s zum Median)<br>${esc(GZ.slices.planLabel(g.plan))}` };
     });
     const withGreen = new Set(sg.greens.map(g => g.cycle));
     const crosses = model.hasCycles ? model.cycles.filter(c => c.regular && !withGreen.has(c.i))
@@ -367,6 +377,32 @@
       '<b>Rot</b> = Dauer des Rot-Zustands zwischen zwei Grünphasen (ohne Rot-Gelb und Gelb); Umläufe ohne Grün verlängern sie. Rot ist nicht die Wartezeit eines Fahrzeugs – die steht im Tab „Wartezeit ab Anforderung“.';
   }
 
+  /* ---------------- Section 5: dark periods ----------------
+     Background (VwV-StVO to § 37 para 2): traffic signals should usually stay in
+     operation at night too. Switching off is justified only after a case-by-case check. */
+  function darkPeriods(segs) {
+    return segs.filter(s => s.cat === 'DUNKEL').map(s => ({ start: s.start, end: s.end, sec: (s.end - s.start) / 1000 }));
+  }
+  function renderDark() {
+    const a = analysis();
+    const rows = a.allStats.map(({ col, segs }) => {
+      const periods = darkPeriods(segs);
+      return { col, periods, total: periods.reduce((s, p) => s + p.sec, 0), longest: periods.reduce((m, p) => Math.max(m, p.sec), 0) };
+    }).filter(r => r.periods.length);
+    els.darkSection.style.display = rows.length ? '' : 'none';
+    if (!rows.length) return;
+    const span = (a.tMax - a.tMin) / 1000;
+    els.tableDark.innerHTML = '<thead><tr><th>Signalgruppe</th><th>Dunkel gesamt</th><th>Anteil an der Aufzeichnung</th><th>Zeiträume</th><th>Längster Zeitraum</th></tr></thead><tbody>' +
+      rows.map(r => `<tr><td><span class="name">${esc(r.col.name)}</span></td><td>${fmtDauer(r.total)}</td><td>${fmtNum(r.total / span * 100, 1)} %</td><td>${r.periods.length}</td><td>${fmtDauer(r.longest)}</td></tr>`).join('') + '</tbody>';
+    // The longest periods of the signal group with the most dark time, as links into the cycle check
+    const lead = rows.slice().sort((p, q) => q.total - p.total)[0];
+    const longest = lead.periods.slice().sort((p, q) => q.sec - p.sec).slice(0, 8).sort((p, q) => p.start - q.start);
+    els.claimDark.innerHTML = `Dunkel bei ${rows.length} von ${a.allStats.length} Signalgruppen, längster Zeitraum ${fmtDauer(Math.max(...rows.map(r => r.longest)))}.`;
+    els.noteDark.innerHTML = `<b>Längste Zeiträume (${esc(lead.col.name)})</b> – Klick öffnet den Beginn in der Umlaufprüfung:<br>` +
+      longest.map(p => `<button type="button" class="action" data-jump-t="${p.start}">${esc(fmtTs(new Date(p.start)))} – ${esc(GZ.format.fmtTimeShort(p.end))} (${fmtDauer(p.sec)})</button>`).join(' ') +
+      '<br>Erkannte Zeiträume ohne Signalbild (Zustand „Dunkel“), z. B. Nachtabschaltung oder Programmwechsel. Ein Abschalten von Lichtzeichenanlagen ist nach VwV-StVO zu § 37 Abs. 2 nur nach eingehender Einzelfallprüfung zu verantworten.';
+  }
+
   /* ---------------- Whole tab ---------------- */
   function renderContext() {
     const a = analysis();
@@ -377,7 +413,7 @@
 
   function renderAll() {
     if (!model) return;
-    renderCycleChart(); renderTable1(); renderTrend(); renderTable3(); renderTable4();
+    renderCycleChart(); renderTable1(); renderTrend(); renderTable3(); renderTable4(); renderDark();
   }
 
   // Redraw after a size change, a tab switch or a log change. Tables do not depend on the width.

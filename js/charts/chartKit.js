@@ -162,6 +162,7 @@
     (o.points || []).forEach(p => {
       const dot = el('circle', { cx: x(p.t), cy: y(Math.min(p.y, o.yMax)), r: p.r || 2.6, fill: p.color || 'var(--text)', stroke: '#fff', 'stroke-width': .8, opacity: p.opacity == null ? 1 : p.opacity }, svg);
       if (p.tip) attachTooltip(dot, p.tip);
+      if (p.onClick) { dot.style.cursor = 'pointer'; dot.addEventListener('click', p.onClick); }
     });
 
     if (logLane) GZ.charts.logMarkers.draw(svg, { x, entries: o.logs, laneTop: plotBottom + 8, plotTop: m.t, plotBottom, left: m.l, right: W - m.r });

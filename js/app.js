@@ -26,6 +26,16 @@
     if (GZ.state.data.currentAnalysis && TAB_REFRESH[name]) TAB_REFRESH[name]();
   }
 
+  // Opens the cycle that contains a log entry (or any time) in the cycle check.
+  function jumpToLog(entry) {
+    switchTab('up');
+    GZ.views.umlaufpruefung.jumpTo(entry.t, entry);
+  }
+  function jumpToTime(t) {
+    switchTab('up');
+    GZ.views.umlaufpruefung.jumpTo(t, null);
+  }
+
   // Redraws the active tab (after a log change, for example).
   function refreshActiveTab() {
     if (GZ.state.data.currentAnalysis && TAB_REFRESH[activeTab]) TAB_REFRESH[activeTab]();
@@ -167,5 +177,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', init);
-  GZ.app = { switchTab, analyze, refreshActiveTab };
+  GZ.app = { switchTab, analyze, refreshActiveTab, jumpToLog, jumpToTime };
 })(window.GZ = window.GZ || {});

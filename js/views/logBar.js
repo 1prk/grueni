@@ -1,12 +1,18 @@
 /* GZ.views.logBar — controls for the log markers (shown in every tab that
    has time charts). Appears when a log file is loaded: summary, a toggle per
-   severity, a text filter and a button to remove the log. All containers
-   with the attribute data-log-bar show the same state. */
+   severity, a text filter, a list of the entries and a button to remove the
+   log. A click on a list entry opens its cycle in the cycle check. All
+   containers with the attribute data-log-bar show the same state. */
 (function (GZ) {
   'use strict';
-  const { esc } = GZ.format;
+  const { esc, fmtTs } = GZ.format;
+
+  // More rows make the list slow. The filters narrow it down.
+  const MAX_LIST_ROWS = 500;
 
   let onChange = () => {};
+  let listOpen = false;
+  let listed = [];   // entries shown in the list, same order as the rows
 
   function containers() { return [...document.querySelectorAll('[data-log-bar]')]; }
 
@@ -25,6 +31,23 @@
     return `<b>Log</b> ${esc(st.fileName)} · ${st.entries.length} Einträge${range}${skipped}`;
   }
 
+  // The list of entries that pass the filters. Click = open in the cycle check.
+  function renderLists() {
+    listed = listOpen ? GZ.logs.visible().slice(0, MAX_LIST_ROWS) : [];
+    const total = listOpen ? GZ.logs.visible().length : 0;
+    containers().forEach(box => {
+      const host = box.querySelector('.log-list');
+      if (!host) return;
+      host.style.display = listOpen ? '' : 'none';
+      if (!listOpen) { host.innerHTML = ''; return; }
+      host.innerHTML = listed.length
+        ? `<table><thead><tr><th>Zeit</th><th>Stufe</th><th>Text</th></tr></thead><tbody>${listed.map((e, i) =>
+            `<tr data-i="${i}" title="Klick: Umlauf in der Umlaufprüfung öffnen"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
+          + (total > listed.length ? `<div class="log-list-more">${listed.length} von ${total} Einträgen – Filter oder Suche einschränken.</div>` : '')
+        : '<div class="log-list-more">Keine Einträge für diese Filter.</div>';
+    });
+  }
+
   function render() {
     const st = GZ.logs.state();
     const counts = GZ.logs.severityCounts();
@@ -37,8 +60,11 @@
           <span class="log-swatch" style="border-bottom-color:${GZ.charts.logMarkers.SEVERITY_COLOR[s.id]}"></span>${esc(s.label)} <span class="dim">${counts[s.id]}</span></label>`).join('');
       box.innerHTML = `<span class="log-summary">${summaryText()}</span>${chips}
         <input type="search" class="log-search" placeholder="Log durchsuchen …" value="${esc(st.search)}">
-        <button type="button" data-log-clear>Log entfernen</button>`;
+        <button type="button" data-log-list>${listOpen ? 'Liste ausblenden' : 'Liste anzeigen'}</button>
+        <button type="button" data-log-clear>Log entfernen</button>
+        <div class="log-list" style="display:none;"></div>`;
     });
+    renderLists();
   }
 
   function init(changeCallback) {
@@ -56,11 +82,13 @@
       GZ.logs.state().search = input.value;
       // keep the other search fields in sync without re-rendering (focus stays)
       document.querySelectorAll('.log-search').forEach(o => { if (o !== input) o.value = input.value; });
-      onChange();
+      renderLists(); onChange();
     });
     document.addEventListener('click', e => {
-      if (!e.target.closest('[data-log-clear]')) return;
-      GZ.logs.clear(); render(); onChange();
+      if (e.target.closest('[data-log-clear]')) { GZ.logs.clear(); listOpen = false; render(); onChange(); return; }
+      if (e.target.closest('[data-log-list]')) { listOpen = !listOpen; render(); return; }
+      const row = e.target.closest('.log-list tbody tr[data-i]');
+      if (row && listed[Number(row.dataset.i)]) GZ.app.jumpToLog(listed[Number(row.dataset.i)]);
     });
   }
 
