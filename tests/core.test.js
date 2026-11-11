@@ -454,7 +454,7 @@ test('topology: a free right turn gives a triangle island between slip lane and 
   const m = T.create();
   const d = T.exampleCrossing(m);
   const islands = T.freeRightIslands(d);
-  assert.strictEqual(islands.length, 2, 'both side street arms');
+  assert.strictEqual(islands.length, 1, 'the north arm has a free right turn');
   const north = d.arms.find(a => a.name === 'Nord');
   const pair = T.freeRightPair(d, north);
   assert.strictEqual(pair.prev.name, 'West');
@@ -519,6 +519,46 @@ test('topology: insetting a polygon moves every edge inward by the distance', ()
   const tri = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 0, y: 2 }];
   assert.ok(T.fitRadius(tri, 5) < 1);
   assert.strictEqual(T.fitRadius(sq, 0.5), 0.5);
+});
+
+test('topology: lanes never touch an island or a kerb inside the junction (example)', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const issues = T.connectionIssues(m, d);
+  same(issues.map(i => i.connId + ':' + i.kind), []);
+});
+
+test('topology: the egress lane of a free right turn is reserved for the slip lane', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const north = d.arms.find(a => a.name === 'Nord');
+  const pair = T.freeRightPair(d, north);
+  const into = m.connections.filter(c => c.to === pair.target.lane.id);
+  same(into.map(c => c.from), [pair.slip.lane.id]);
+});
+
+test('topology: a connection that crosses an island is found', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const east = d.arms.find(a => a.name === 'Ost'), west = d.arms.find(a => a.name === 'West');
+  // through traffic into the egress lane of the slip lane has to cross the triangle island
+  const c = T.addConnection(m, east.in[1].lane.id, west.out[2].lane.id);
+  const issues = T.connectionIssues(m, T.derive(m));
+  assert.ok(issues.some(i => i.connId === c.id && i.kind === 'island'), 'found');
+  // the path of the slip lane itself keeps its distance to the kerb: it is not reported
+  const slip = m.connections.find(x => x.from === T.freeRightPair(d, d.arms.find(a => a.name === 'Nord')).slip.lane.id);
+  assert.ok(!issues.some(i => i.connId === slip.id));
+});
+
+test('topology: a straight movement with a sideways shift is in line before the corner', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const g = T.allLaneGeoms(d);
+  const c = m.connections.find(x => g.get(x.from).arm.name === 'Ost' && g.get(x.from).label === 'Z3' && g.get(x.to).arm.name === 'West');
+  const line = T.connectionPolyline(m, d, c);
+  const end = line[line.length - 1];
+  const late = line.filter(p => p.x < 0).map(p => Math.abs(p.y - end.y) / Math.abs(line[0].y - end.y));
+  assert.ok(Math.max(...late) < 0.45, 'most of the shift is done at the centre');
 });
 
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }

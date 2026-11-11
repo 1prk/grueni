@@ -487,37 +487,40 @@ let linkStops = false;     // move all stop lines together
       (showText ? `<text class="t-label dark" x="1.1" y="0" dominant-baseline="central" font-size="${fs(8.5)}" stroke-width="${fs(2)}">${esc(name)}</text>` : '') + '</g>';
   }
 
-  function connPath(c) { return `M${pt(c.p0)} C${pt(c.c0)} ${pt(c.c1)} ${pt(c.p1)}`; }
+  const lineD = line => (line.length ? 'M' + line.map(pt).join(' L') : '');
 
   function renderConnections() {
     const geoms = T.allLaneGeoms(derived);
     const m = M();
+    const islands = T.freeRightIslands(derived);
     if (step < 4) {
       // thin dashed guide lines, as on a plan
-      layers.conns.html(m.connections.map(conn => {
-        const a = geoms.get(conn.from), b = geoms.get(conn.to);
-        return a && b ? `<path class="t-guide" d="${connPath(T.connectionCurve(a, b))}"/>` : '';
-      }).join(''));
+      layers.conns.html(m.connections.map(conn => `<path class="t-guide" d="${lineD(T.connectionPolyline(m, derived, conn, islands))}"/>`).join(''));
       return;
     }
+    const issues = new Map(T.connectionIssues(m, derived).map(i => [i.connId, i]));
     let html = '';
     m.connections.forEach(conn => {
       const a = geoms.get(conn.from), b = geoms.get(conn.to);
       if (!a || !b) return;
-      const curve = T.connectionCurve(a, b);
+      const line = T.connectionPolyline(m, derived, conn, islands);
+      if (line.length < 2) return;
+      const d = lineD(line);
       const sg = T.connectionSg(m, conn);
-      const color = sg ? sgColor(sg) : '#f1f4f7';
+      const bad = issues.has(conn.id);
+      const color = bad ? '#f59e0b' : sg ? sgColor(sg) : '#f1f4f7';
       const isSel = sel && sel.kind === 'conn' && sel.id === conn.id;
       const fromSel = sel && sel.kind === 'lane' && sel.id === conn.from;
       const dim = sel && sel.kind === 'lane' && !fromSel && sel.id !== conn.to;
-      const wd = sg ? (isSel || fromSel ? 0.62 : 0.46) : (isSel || fromSel ? 0.46 : 0.3);
-      // arrow head at the end
-      const tx = curve.h1.x, ty = curve.h1.y;
-      const head = [{ x: curve.p1.x, y: curve.p1.y }, { x: curve.p1.x - tx * 1.1 - ty * 0.55, y: curve.p1.y - ty * 1.1 + tx * 0.55 }, { x: curve.p1.x - tx * 1.1 + ty * 0.55, y: curve.p1.y - ty * 1.1 - tx * 0.55 }];
-      if (isSel) html += `<path class="t-conn-halo" stroke-width="${wd + 0.5}" d="${connPath(curve)}"/>`;
-      html += `<g style="opacity:${dim ? 0.3 : 1}"><path class="t-conn-hit" data-kind="conn" data-id="${conn.id}" d="${connPath(curve)}"/>` +
- `${sg ? `<path class="t-conn-case" stroke-width="${wd + 0.34}" d="${connPath(curve)}"/>` : ''}` +
-        `<path class="t-conn ${sg ? '' : 'unassigned'}" stroke="${color}" stroke-width="${wd}" d="${connPath(curve)}"/>` +
+      const wd = (sg || bad) ? (isSel || fromSel ? 0.62 : 0.46) : (isSel || fromSel ? 0.46 : 0.3);
+      // arrow head at the end, along the last part of the path
+      const e = line[line.length - 1], q = line[Math.max(0, line.length - 4)];
+      const len = Math.hypot(e.x - q.x, e.y - q.y) || 1, tx = (e.x - q.x) / len, ty = (e.y - q.y) / len;
+      const head = [{ x: e.x, y: e.y }, { x: e.x - tx * 1.1 - ty * 0.55, y: e.y - ty * 1.1 + tx * 0.55 }, { x: e.x - tx * 1.1 + ty * 0.55, y: e.y - ty * 1.1 - tx * 0.55 }];
+      if (isSel) html += `<path class="t-conn-halo" stroke-width="${wd + 0.5}" d="${d}"/>`;
+      html += `<g style="opacity:${dim ? 0.3 : 1}"><path class="t-conn-hit" data-kind="conn" data-id="${conn.id}" d="${d}"/>` +
+        `${(sg || bad) ? `<path class="t-conn-case" stroke-width="${wd + 0.34}" d="${d}"/>` : ''}` +
+        `<path class="t-conn ${sg || bad ? '' : 'unassigned'}" stroke="${color}" stroke-width="${wd}" d="${d}"/>` +
         `<polygon points="${polyPts(head)}" fill="${color}"/></g>`;
     });
     layers.conns.html(html);
@@ -799,6 +802,7 @@ let linkStops = false;     // move all stop lines together
     const geoms = T.allLaneGeoms(derived);
     const label = id => { const g = geoms.get(id); return g ? `${esc(g.arm.name)} ${g.label}` : id; };
     const sgNames = allSgNames();
+    const badSet = new Set(T.connectionIssues(m, derived).map(i => i.connId));
     const rows = m.connections.map(c => {
       const a = geoms.get(c.from), b = geoms.get(c.to);
       if (!a || !b) return '';
@@ -806,17 +810,19 @@ let linkStops = false;     // move all stop lines together
       const cur = T.connectionSg(m, c);
       const opts = ['<option value="">– von Fahrstreifen –</option>'].concat(sgNames.map(n => `<option value="${esc(n)}" ${c.sg === n ? 'selected' : ''}>${esc(n)}</option>`)).join('');
       return `<div class="ts-item ${sel && sel.kind === 'conn' && sel.id === c.id ? 'sel' : ''}" data-action="conn-select" data-id="${c.id}" style="flex-wrap:wrap">
-        <span class="ts-dot" style="background:${cur ? sgColor(cur) : '#9aa5b1'}"></span>
+        <span class="ts-dot" style="background:${badSet.has(c.id) ? '#f59e0b' : cur ? sgColor(cur) : '#9aa5b1'}" title="${badSet.has(c.id) ? 'Kollidiert mit Insel oder Bordstein' : ''}"></span>
         <span class="grow" title="${label(c.from)} → ${label(c.to)}">${label(c.from)} → ${label(c.to)}</span>
         <span class="ts-note">${man}</span>
         <button type="button" class="x" data-action="conn-del" data-id="${c.id}" title="Verbindung löschen">✕</button>
         <select data-field="connSg" data-id="${c.id}" style="flex-basis:100%">${opts}</select></div>`;
     }).join('');
     const has = m.lanes.some(l => l.dir === 'in');
+    const issueCount = T.connectionIssues(m, derived).length;
     return `<div class="ts-sec"><div class="ts-title">Verbindungen <span class="ts-note">${m.connections.length}</span></div>
       <div class="ts-btns" style="margin-bottom:10px">
         <button type="button" class="primary" data-action="conn-propose" ${has ? '' : 'disabled'}>Vorschlag erzeugen</button>
         <button type="button" data-action="conn-clear" ${m.connections.length ? '' : 'disabled'}>Alle löschen</button></div>
+      ${issueCount ? `<div class="ts-note warn" style="margin-bottom:8px">⚠ ${issueCount} Verbindung${issueCount === 1 ? '' : 'en'} berühr${issueCount === 1 ? 't' : 'en'} eine Insel oder einen Bordstein (orange). Ein Fahrstreifen darf im Knoten nie mit einer Insel oder einem Bordstein kollidieren.</div>` : ''}
       <div class="ts-list">${rows || '<div class="ts-note">Noch keine Verbindung. Zufahrt anklicken, dann Ausfahrt anklicken.</div>'}</div></div>`;
   }
 

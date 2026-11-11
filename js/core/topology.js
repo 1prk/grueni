@@ -30,6 +30,8 @@
     walk: 2.5,           // m, width of the footway drawn beside the road
     triRound: 0.9,       // m, radius of its rounded corners
     triTip: 1.6          // m, width of the nose of the triangle island
+    ,shift: 12            // m, a through movement finishes its sideways shift within this distance
+    ,collideSlack: 0.2   // m, a path may come this much closer to an island or kerb than half its lane width
   };
 
   const LANE_TYPES = {
@@ -606,12 +608,15 @@
     const p0 = fromG.startPt, p1 = toG.startPt;
     const h0 = { x: -fromG.arm.dir.x, y: -fromG.arm.dir.y };   // heading when entering the intersection
     const h1 = { x: toG.arm.dir.x, y: toG.arm.dir.y };         // heading when leaving
-    const k = Math.max(2, dist(p0, p1) * 0.42);
+    const angle = turnAngle(h0, h1), turn = Math.abs(angle), chord = dist(p0, p1);
+    // the sweep grows with the turn angle, so a turn stays clear of the islands in the corners
+    const k = Math.max(2, chord * (0.42 + 0.2 * Math.min(1, turn / 90)));
+    const k0 = k, k1 = k;
     return {
       p0, p1,
-      c0: { x: p0.x + h0.x * k, y: p0.y + h0.y * k },
-      c1: { x: p1.x - h1.x * k, y: p1.y - h1.y * k },
-      h0, h1, angle: turnAngle(h0, h1)
+      c0: { x: p0.x + h0.x * k0, y: p0.y + h0.y * k0 },
+      c1: { x: p1.x - h1.x * k1, y: p1.y - h1.y * k1 },
+      h0, h1, angle
     };
   }
   function cubicPoint(c, t) {
@@ -648,6 +653,11 @@
   // Proposes connections by geometry. Does not change the model; returns [{from,to}].
   function proposeConnections(model, derived) {
     const out = [];
+    const reserved = new Set(), reservedBy = new Map();
+    derived.arms.forEach(a => {
+      const pair = a.freeRight ? freeRightPair(derived, a) : null;
+      if (pair) { reserved.add(pair.target.lane.id); reservedBy.set(pair.target.lane.id, pair.slip.lane.id); }
+    });
     derived.arms.forEach(arm => {
       const ins = arm.in;
       if (!ins.length) return;
@@ -661,11 +671,14 @@
         const score = m === 'straight' ? ang : Math.abs(ang - 90);
         if (!targets[m] || score < targets[m].score) targets[m] = { arm: other, score };
       });
+      let throughIdx = 0;      // number of through lanes before the lane that is handled now
       const pick = (g, targetArm, m) => {
-        const outs = targetArm.out;
+        // the egress lane of a free right turn belongs to the slip lane only
+        const free = targetArm.out.filter(o => !reserved.has(o.lane.id) || g.lane.id === reservedBy.get(o.lane.id));
+        const outs = free.length ? free : targetArm.out;
         const same = outs.filter(o => o.lane.type === g.lane.type);
         const pool = same.length ? same : outs;
-        let idx = m === 'left' ? 0 : m === 'right' ? pool.length - 1 : Math.min(g.index, pool.length - 1);
+        let idx = m === 'left' ? 0 : m === 'right' ? pool.length - 1 : Math.min(throughIdx, pool.length - 1);
         return pool[Math.max(0, idx)];
       };
       const vehicleIns = ins.filter(g => g.lane.type !== 'bike');
@@ -686,6 +699,7 @@
           const to = pick(g, targets[m].arm, m);
           if (to) out.push({ from: g.lane.id, to: to.lane.id });
         });
+        if (wanted.includes('straight') && g.lane.type !== 'bike') throughIdx++;
       });
     });
     return out;
@@ -736,28 +750,23 @@
       const inset = kerb.map((_, i) => -(dEgress + (dSlip - dEgress) * (i / N)));   // right of the travel direction = junction side
       const curve = offsetPoly(kerb, inset).reverse();                   // from the slip lane (v1) to the egress lane (v2)
 
-      // The island runs from the crossing of one arm to the crossing of the other arm (or 4 m from the
-      // stop line when there is no crossing). The curved side keeps the lane width. The two noses
-      // are DEFAULTS.triTip wide: where the curved side is closer to the straight leg, the nose edge
-      // is moved a little into the through lane. The flat noses are rounded afterwards.
+      // The island must never reach into a lane: its straight legs lie on the lane boundaries and
+      // its curved side keeps the lane width to the kerb. The thin ends are cut where the island is
+      // DEFAULTS.triTip wide (a thinner end can not be rounded); the flat ends are then rounded.
       const gapTo = (q, v, d) => Math.abs((q.x - v.x) * d.y - (q.y - v.y) * d.x);   // distance of q to the line through v along d
-      const reach = a => (a.cross ? Math.max(1, a.stopDist - (a.cross.s - a.cross.cw.width / 2)) : 4);   // stop line to the near crossing line
-      const tA = reach(arm), tB = reach(prev);
-      const k = curve.findIndex(q => (v1.x - q.x) * arm.dir.x + (v1.y - q.y) * arm.dir.y >= tA);
+      const k = curve.findIndex(q => gapTo(q, v1, arm.dir) >= DEFAULTS.triTip);
       let m = -1;
-      curve.forEach((q, i) => { if ((v2.x - q.x) * prev.dir.x + (v2.y - q.y) * prev.dir.y >= tB) m = i; });
+      curve.forEach((q, i) => { if (gapTo(q, v2, prev.dir) >= DEFAULTS.triTip) m = i; });
       if (k < 0 || m <= k) return;
       const onLine = (q, v, d) => { const t = (q.x - v.x) * d.x + (q.y - v.y) * d.y; return { x: v.x + d.x * t, y: v.y + d.y * t }; };
-      const dA = Math.max(0, DEFAULTS.triTip - gapTo(curve[k], v1, arm.dir)), dB = Math.max(0, DEFAULTS.triTip - gapTo(curve[m], v2, prev.dir));
       const pa = onLine(curve[k], v1, arm.dir), pb = onLine(curve[m], v2, prev.dir);
-      const na = { x: pa.x - arm.normal.x * dA, y: pa.y - arm.normal.y * dA };          // toward the through lanes of the arm
-      const nb = { x: pb.x + prev.normal.x * dB, y: pb.y + prev.normal.y * dB };        // toward the through lanes of the receiving arm
-      // both legs stay straight: they run through the (moved) noses, the corner is where they meet
-      const corner = lineIntersect(na, arm.dir, nb, prev.dir) || apex;
-      const pts = [na].concat(curve.slice(k, m + 1), [nb, corner]);
+      const pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
       // the radius must stay below half the width of the noses, or the inset polygon folds over
       const r = Math.min(fitRadius(pts, DEFAULTS.triRound), DEFAULTS.triTip * 0.47);
-      out.push({ armKey: arm.key, polygon: insetPolygon(pts, r), r, outline: pts, curve, kerb, widths: [dSlip, dEgress] });
+      // centre line of the slip lane: kerb curve moved inward by (distance to the island edge - half the lane width)
+      const w = (slip.lane.width + target.lane.width) / 2;
+      const slipPath = offsetPoly(kerb, kerb.map((_, i) => -(dEgress + (dSlip - dEgress) * (i / N) - w / 2))).reverse();
+      out.push({ armKey: arm.key, polygon: insetPolygon(pts, r), r, outline: pts, curve, kerb, widths: [dSlip, dEgress], slipPath, slipFrom: slip.lane.id, slipTo: target.lane.id });
     });
     return out;
   }
@@ -774,30 +783,129 @@
     addConnection(model, pair.slip.lane.id, pair.target.lane.id);
   }
 
+
+  /* ---------------- Connection paths and collisions ---------------- */
+  // Sampled centre line of a connection. A free right turn follows the slip lane (kerb curve moved
+  // inward), every other connection is the cubic curve between its two lanes.
+  function connectionPolyline(model, derived, conn, islands) {
+    const geoms = allLaneGeoms(derived);
+    const a = geoms.get(conn.from), b = geoms.get(conn.to);
+    if (!a || !b) return [];
+    const isl = (islands || freeRightIslands(derived)).find(i => i.slipFrom === conn.from && i.slipTo === conn.to);
+    if (isl) return isl.slipPath;
+    const c = connectionCurve(a, b), out = [];
+    if (Math.abs(c.angle) < 30) return throughPath(c);
+    for (let i = 0; i <= 32; i++) out.push(cubicPoint(c, i / 32));
+    return out;
+  }
+
+  // A through movement leaves along the heading of its ingress lane, moves sideways within the
+  // first DEFAULTS.shift metres (smooth step) and then runs straight in the egress lane. So it is
+  // in line before it reaches an island, and it keeps its lane width.
+  function throughPath(c) {
+    const along = { x: c.p1.x - c.p0.x, y: c.p1.y - c.p0.y };
+    const S = Math.max(1, along.x * c.h0.x + along.y * c.h0.y);          // forward distance
+    const n1 = { x: -c.h1.y, y: c.h1.x };
+    const D = (c.p0.x - c.p1.x) * n1.x + (c.p0.y - c.p1.y) * n1.y;       // sideways distance of the start to the egress line
+    const Ls = Math.min(DEFAULTS.shift, S * 0.4);
+    const sm = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+    const raw = s => ({ x: c.p0.x + c.h0.x * s - n1.x * D * sm(s / Ls), y: c.p0.y + c.h0.y * s - n1.y * D * sm(s / Ls) });
+    const end = raw(S), err = { x: c.p1.x - end.x, y: c.p1.y - end.y };
+    const out = [];
+    for (let i = 0; i <= 40; i++) {
+      const s = (S * i) / 40, w = sm(s / S) * sm(s / S);                 // the small rest error is spread over the whole path
+      const p = raw(s);
+      out.push({ x: p.x + err.x * w, y: p.y + err.y * w });
+    }
+    return out;
+  }
+
+  function pointPolygonDistance(p, poly) {
+    let inside = false, best = Infinity;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i], b = poly[j];
+      if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+      best = Math.min(best, distToSegment(p, a, b));
+    }
+    return inside ? 0 : best;
+  }
+  function pointPolylineDistance(p, line) {
+    let best = Infinity;
+    for (let i = 0; i < line.length - 1; i++) best = Math.min(best, distToSegment(p, line[i], line[i + 1]));
+    return best;
+  }
+
+  // The curved kerbs of the junction as polylines.
+  function kerbPolylines(derived) {
+    const cmds = junctionOutline(derived.arms), out = [];
+    cmds.forEach((c, i) => {
+      if (c.type !== 'Q') return;
+      const p0 = cmds[i - 1].pts[cmds[i - 1].pts.length - 1], q = c.pts[0], p2 = c.pts[1], line = [];
+      for (let j = 0; j <= 24; j++) { const t = j / 24, u = 1 - t; line.push({ x: u * u * p0.x + 2 * u * t * q.x + t * t * p2.x, y: u * u * p0.y + 2 * u * t * q.y + t * t * p2.y }); }
+      out.push(line);
+    });
+    return out;
+  }
+
+  // Rule: the lane of a connection must never touch an island or a kerb inside the junction.
+  // Returns [{ connId, kind: 'island'|'kerb', dist }] (dist = smallest distance of the centre line).
+  function connectionIssues(model, derived) {
+    const islands = freeRightIslands(derived);
+    const solid = [];
+    islands.forEach(i => solid.push(i.outline));
+    derived.arms.forEach(arm => {
+      const sf = armSurfaces(arm);
+      if (sf.island) solid.push(sf.island);
+      sf.freed.forEach(f => solid.push(f));
+    });
+    const kerbs = kerbPolylines(derived), geoms = allLaneGeoms(derived), out = [];
+    model.connections.forEach(conn => {
+      const g = geoms.get(conn.from);
+      if (!g) return;
+      const need = g.lane.width / 2 - DEFAULTS.collideSlack;
+      const line = connectionPolyline(model, derived, conn, islands);
+      let worstIsland = Infinity, worstKerb = Infinity;
+      line.forEach(p => {
+        solid.forEach(poly => { worstIsland = Math.min(worstIsland, pointPolygonDistance(p, poly)); });
+        kerbs.forEach(k => { worstKerb = Math.min(worstKerb, pointPolylineDistance(p, k)); });
+      });
+      if (worstIsland < need) out.push({ connId: conn.id, kind: 'island', dist: worstIsland });
+      else if (worstKerb < need) out.push({ connId: conn.id, kind: 'kerb', dist: worstKerb });
+    });
+    return out;
+  }
+
   /* ---------------- Example ---------------- */
   // Four arms with two ingress lanes, one egress lane and a crossing each.
   function exampleCrossing(model) {
     const ew = addAxis(model, [{ x: -95, y: -7 }, { x: -45, y: -1 }, { x: 0, y: 0 }, { x: 45, y: 1 }, { x: 95, y: 6 }]);
     const ns = addAxis(model, [{ x: 4, y: -95 }, { x: 1, y: -45 }, { x: 0, y: 0 }, { x: -1, y: 45 }, { x: -5, y: 95 }]);
     ew.name = 'Hauptstraße'; ns.name = 'Querstraße';
-    const d = derive(model);
+    let d = derive(model);
     ensureDefaults(model, d);
-    d.arms.forEach(arm => {
-      const main = arm.axisId === ew.id;
-      setLaneCount(model, arm.key, 'in', main ? 4 : 2);
-      setCrosswalk(model, arm.key, true);
-      if (!main) { model.arms[arm.key].stopDist = 20; model.arms[arm.key].freeRight = true; return; }   // behind the wide main road
-      // main road: median island, left turning lane (35 m), bike lanes on both sides
-      const cfg = model.arms[arm.key];
+    const arm = name => derive(model).arms.find(a => a.name === name);
+    const lanes = (name, dir, types) => {            // lane types from the median outward
+      const key = arm(name).key;
+      setLaneCount(model, key, dir, types.length);
+      lanesOf(model, key, dir).forEach((l, i) => setLaneType(l, types[i]));
+    };
+    const V = 'vehicle', B = 'bike';
+    // Main road: median island, left turning lane (35 m), bike lane along the south kerb.
+    lanes('West', 'in', [V, V, V, B]);  lanes('West', 'out', [V, V, V]);   // the third egress lane belongs to the free right turn
+    lanes('Ost', 'in', [V, V, V]);      lanes('Ost', 'out', [V, V, B]);
+    ['West', 'Ost'].forEach(n => {
+      const cfg = model.arms[arm(n).key];
       cfg.gap = 3; cfg.islandLen = 40; cfg.stopDist = 18;
-      const ins = lanesOf(model, arm.key, 'in');
-      ins[0].length = 35;
-      setLaneType(ins[ins.length - 1], 'bike');
-      setLaneCount(model, arm.key, 'out', 3);       // two vehicle lanes (one for the free right turn) and a bike lane
-      setLaneType(lanesOf(model, arm.key, 'out')[2], 'bike');
+      lanesOf(model, arm(n).key, 'in')[0].length = 35;
     });
-    const d2 = derive(model);
-    proposeConnections(model, d2).forEach(c => addConnection(model, c.from, c.to));
+    // Side street: free right turn from the north (triangle island in the north-west corner), bike lane along the east kerb.
+    lanes('Nord', 'in', [V, V]);        lanes('Nord', 'out', [V, B]);
+    lanes('Süd', 'in', [V, V, B]);      lanes('Süd', 'out', [V]);
+    ['Nord', 'Süd'].forEach(n => { model.arms[arm(n).key].stopDist = 20; });
+    model.arms[arm('Nord').key].freeRight = true;
+    derive(model).arms.forEach(a => setCrosswalk(model, a.key, true));
+    d = derive(model);
+    proposeConnections(model, d).forEach(c => addConnection(model, c.from, c.to));
     return derive(model);
   }
 
@@ -966,7 +1074,7 @@
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
     // geometry
-    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
+    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
     create, addAxis, removeAxis, setLaneCount, setLaneType, setCrosswalk, addConnection, removeConnection, ensureDefaults,
