@@ -25,8 +25,7 @@
     crossWidth: 4,       // m, distance between the two dashed lines of a pedestrian crossing
     corridorTol: 8,      // m; axes that do not cross but come this close still form an intersection
     islandLen: 30,       // m, length of a median island (Mittelinsel) from the stop line outward
-    islandNose: 6,       // m, length of the pointed ends of a median island
-    islandBack: 2,       // m, the island nose starts this far before the stop line
+    islandBack: 2,       // m, the island starts this far before the stop line (round end)
     taper: 8,            // m, length of the taper at the end of a short (turning) lane
     walk: 2.5            // m, width of the footway drawn beside the road
   };
@@ -78,6 +77,50 @@
   function cleanPoly(poly) {
     const out = [];
     poly.forEach(p => { if (!out.length || dist(out[out.length - 1], p) > 1e-6) out.push(p); });
+    return out;
+  }
+
+
+  // Points at equal arc length distance (the last point is always kept).
+  function resamplePoly(poly, step) {
+    if (poly.length < 2) return poly.map(p => ({ x: p.x, y: p.y }));
+    const cl = cumLen(poly), total = cl[cl.length - 1];
+    const n = Math.max(1, Math.ceil(total / step));
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const p = pointAt(poly, cl, (total * i) / n);
+      out.push({ x: p.x, y: p.y });
+    }
+    return out;
+  }
+
+  // Outline of a stadium: the path with half circles at both ends (radius r).
+  function stadiumPolygon(path, r) {
+    const dense = resamplePoly(path, 0.15);
+    if (dense.length < 2) return [];
+    const cl = cumLen(dense), L = cl[cl.length - 1];
+    r = Math.min(r, L / 2);
+    const cap = d => (d >= r ? r : Math.sqrt(Math.max(0, 2 * r * d - d * d)));   // circle: height at distance d from the end
+    const hw = cl.map(s => Math.min(cap(s), cap(L - s)));
+    return offsetPoly(dense, hw).concat(offsetPoly(dense, hw.map(h => -h)).reverse());
+  }
+
+  // Rounds the corners of a polygon. pts: [{x,y,round?}]. Only points with round = true are rounded.
+  function roundCorners(pts, r) {
+    const n = pts.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const v = pts[i];
+      if (!v.round) { out.push({ x: v.x, y: v.y }); continue; }
+      const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n];
+      const la = dist(v, a), lb = dist(v, b);
+      const k = Math.min(r, la * 0.45, lb * 0.45);
+      const p1 = { x: v.x + (a.x - v.x) / la * k, y: v.y + (a.y - v.y) / la * k };
+      const p2 = { x: v.x + (b.x - v.x) / lb * k, y: v.y + (b.y - v.y) / lb * k };
+      for (let j = 0; j <= 6; j++) {
+        const t = j / 6, u = 1 - t;
+        out.push({ x: u * u * p1.x + 2 * u * t * v.x + t * t * p2.x, y: u * u * p1.y + 2 * u * t * v.y + t * t * p2.y });
+      }
+    }
     return out;
   }
 
@@ -364,6 +407,7 @@
       arm.stopDist = Math.max(1, Math.min(cfg.stopDist != null ? cfg.stopDist : DEFAULTS.stopDist, arm.length - 2));
       arm.gap = cfg.gap != null ? cfg.gap : DEFAULTS.gap;
       arm.islandLen = cfg.islandLen != null ? cfg.islandLen : DEFAULTS.islandLen;
+      arm.freeRight = !!cfg.freeRight;
       buildArmGeometry(model, arm);
     });
     return { center, autoCenter: autoC, arms, axes: entries };
@@ -441,8 +485,7 @@
     return (g._outline = { pts: innerEdge.concat(outerEdge.slice().reverse()), innerEdge, outerEdge, poly, cl });
   }
 
-  const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
-
+  
   // Areas around the lanes of one arm (all polygons in world coordinates):
   //   walk    footway band beside the road
   //   gapBase road colour under the median
@@ -460,9 +503,7 @@
       const a = Math.max(0, arm.stopDist - DEFAULTS.islandBack), b = Math.min(arm.length, arm.stopDist + arm.islandLen);
       const path = subPoly(arm.path, arm.cl, a, b);
       if (path.length >= 2) {
-        const cl = cumLen(path), L = cl[cl.length - 1];
-        const hw = cl.map(s => half * smooth(Math.min(s / DEFAULTS.islandNose, (L - s) / DEFAULTS.islandNose, 1)));
-        out.island = offsetPoly(path, hw).concat(offsetPoly(path, hw.map(h => -h)).reverse());
+        out.island = stadiumPolygon(path, half);
         out.kerbPolys.push(out.island);
       }
     }
@@ -599,11 +640,12 @@
         if (g.lane.type === 'bike') wanted = ['straight'];
         else {
           const k = vehicleIns.indexOf(g), n = vehicleIns.length;
-          if (n === 1) wanted = ['left', 'straight', 'right'];
+          if (arm.freeRight && n >= 2) wanted = k === n - 1 ? ['right'] : (k === 0 ? ['left'] : ['straight']);
+          else if (n === 1) wanted = ['left', 'straight', 'right'];
           else if (k === 0) wanted = ['left'];
           else if (k === n - 1) wanted = ['straight', 'right'];
           else wanted = ['straight'];
-          if (n === 2 && k === 0) wanted = ['left', 'straight'];
+          if (n === 2 && k === 0 && !arm.freeRight) wanted = ['left', 'straight'];
         }
         wanted.forEach(m => {
           if (!targets[m]) return;
@@ -613,6 +655,58 @@
       });
     });
     return out;
+  }
+
+
+  /* ---------------- Free right turn (Dreiecksinsel) ---------------- */
+  // The slip lane is the outermost vehicle lane of the arm. It turns into the outermost
+  // vehicle egress lane of the arm that comes before it in clockwise order (the kerb side).
+  function freeRightPair(derived, arm) {
+    const arms = derived.arms;
+    if (arms.length < 2) return null;
+    const prev = arms[(arms.indexOf(arm) - 1 + arms.length) % arms.length];
+    if (!prev || prev === arm) return null;
+    const veh = lanes => lanes.filter(g => g.lane.type !== 'bike');
+    const ins = veh(arm.in), outs = veh(prev.out);
+    if (arm.in.length < 2 || !ins.length || !outs.length) return null;
+    return { prev, slip: ins[ins.length - 1], target: outs[outs.length - 1] };
+  }
+
+  // Island between the slip lane and the other lanes: a triangle with a concave long side.
+  function freeRightIslands(derived) {
+    const out = [];
+    derived.arms.forEach(arm => {
+      if (!arm.freeRight) return;
+      const pair = freeRightPair(derived, arm);
+      if (!pair) return;
+      const { prev, slip, target } = pair;
+      const v1 = { x: arm.stopPt.x + arm.normal.x * slip.inner, y: arm.stopPt.y + arm.normal.y * slip.inner };
+      const v2 = { x: prev.stopPt.x - prev.normal.x * target.inner, y: prev.stopPt.y - prev.normal.y * target.inner };
+      const apex = lineIntersect(v1, arm.dir, v2, prev.dir);
+      if (!apex) return;
+      const inward = (p, from, dir) => (p.x - from.x) * dir.x + (p.y - from.y) * dir.y < -0.5;
+      if (!inward(apex, v1, arm.dir) || !inward(apex, v2, prev.dir)) return;
+      const pts = [{ x: v1.x, y: v1.y, round: true }];
+      for (let i = 1; i < 16; i++) {
+        const t = i / 16, u = 1 - t;
+        pts.push({ x: u * u * v1.x + 2 * u * t * apex.x + t * t * v2.x, y: u * u * v1.y + 2 * u * t * apex.y + t * t * v2.y });
+      }
+      pts.push({ x: v2.x, y: v2.y, round: true }, { x: apex.x, y: apex.y, round: true });
+      out.push({ armKey: arm.key, polygon: roundCorners(pts, 1.0) });
+    });
+    return out;
+  }
+
+  // Switches the free right turn of an arm. The slip lane then only turns right.
+  function applyFreeRight(model, derived, armKey, on) {
+    const cfg = model.arms[armKey] || (model.arms[armKey] = {});
+    cfg.freeRight = !!on;
+    if (!on) return;
+    const arm = derived.arms.find(a => a.key === armKey);
+    const pair = arm ? freeRightPair(derived, arm) : null;
+    if (!pair) return;
+    model.connections = model.connections.filter(c => c.from !== pair.slip.lane.id);
+    addConnection(model, pair.slip.lane.id, pair.target.lane.id);
   }
 
   /* ---------------- Example ---------------- */
@@ -627,7 +721,7 @@
       const main = arm.axisId === ew.id;
       setLaneCount(model, arm.key, 'in', main ? 4 : 2);
       setCrosswalk(model, arm.key, true);
-      if (!main) { model.arms[arm.key].stopDist = 17; return; }   // behind the wide main road
+      if (!main) { model.arms[arm.key].stopDist = 17; model.arms[arm.key].freeRight = true; return; }   // behind the wide main road
       // main road: median island, left turning lane (35 m), bike lanes on both sides
       const cfg = model.arms[arm.key];
       cfg.gap = 3; cfg.islandLen = 40; cfg.stopDist = 14;
@@ -807,7 +901,7 @@
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
     // geometry
-    sampleSpline, cleanPoly, laneOutline, armSurfaces, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
+    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
     create, addAxis, removeAxis, setLaneCount, setLaneType, setCrosswalk, addConnection, removeConnection, ensureDefaults,

@@ -428,5 +428,70 @@ test('topology: lane length and median settings survive the config round trip', 
   assert.ok(Object.values(m2.arms).some(a => a.gap === 3 && a.islandLen === 40));
 });
 
+test('topology: a stadium has round half-circle ends', () => {
+  const path = [{ x: 0, y: 0 }, { x: 20, y: 0 }];
+  const poly = T.stadiumPolygon(path, 1.5);
+  const xs = poly.map(p => p.x), ys = poly.map(p => p.y);
+  near(Math.min(...xs), 0, 1e-6); near(Math.max(...xs), 20, 1e-6);
+  near(Math.max(...ys), 1.5, 1e-6); near(Math.min(...ys), -1.5, 1e-6);
+  // every point of the cap is on the circle around (1.5, 0)
+  poly.filter(p => p.x < 1.5).forEach(p => near(Math.hypot(p.x - 1.5, p.y), 1.5, 0.02, 'cap point'));
+  assert.ok(poly.filter(p => p.x < 1.5).length >= 8, 'dense enough for a smooth cap');
+  // a path shorter than the diameter gets a smaller radius
+  const short = T.stadiumPolygon([{ x: 0, y: 0 }, { x: 2, y: 0 }], 1.5);
+  near(Math.max(...short.map(p => p.y)), 1, 1e-6);
+});
+
+test('topology: rounded corners only change the flagged points', () => {
+  const sq = [{ x: 0, y: 0, round: true }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+  const r = T.roundCorners(sq, 2);
+  assert.ok(r.length > 4);
+  assert.ok(r.some(p => p.x === 10 && p.y === 0), 'sharp corner stays');
+  assert.ok(!r.some(p => p.x === 0 && p.y === 0), 'rounded corner is cut');
+});
+
+test('topology: a free right turn gives a triangle island between slip lane and through lanes', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const islands = T.freeRightIslands(d);
+  assert.strictEqual(islands.length, 2, 'both side street arms');
+  const north = d.arms.find(a => a.name === 'Nord');
+  const pair = T.freeRightPair(d, north);
+  assert.strictEqual(pair.prev.name, 'West');
+  assert.strictEqual(pair.slip, north.in[1]);
+  // the slip lane only turns right
+  const fromSlip = m.connections.filter(c => c.from === pair.slip.lane.id);
+  assert.strictEqual(fromSlip.length, 1);
+  assert.strictEqual(T.connectionManeuver(pair.slip, d.arms.find(a => a.name === 'West').out[0]), 'right');
+  // the island lies between the slip lane and the through lane: x between the lane boundary and the slip lane
+  const isl = islands.find(i => i.armKey === north.key).polygon;
+  const slipInner = Math.abs(north.in[1].startPt.x) - 3.25 / 2;   // inner edge of the slip lane
+  isl.forEach(p => assert.ok(p.x <= -slipInner + 0.3, 'island is west of the through lane boundary'));
+  assert.ok(isl.length > 20);
+  // an arm with one ingress lane has no free right turn
+  const south = d.arms.find(a => a.name === 'Süd');
+  T.setLaneCount(m, south.key, 'in', 1);
+  assert.strictEqual(T.freeRightPair(T.derive(m), T.derive(m).arms.find(a => a.key === south.key)), null);
+});
+
+test('topology: applyFreeRight rewires the slip lane and can be switched off', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -90 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const key = T.derive(m).arms.find(a => a.name === 'Nord').key;
+  T.setLaneCount(m, key, 'in', 2);
+  let d = T.derive(m);
+  T.proposeConnections(m, d).forEach(c => T.addConnection(m, c.from, c.to));
+  const slipId = d.arms.find(a => a.key === key).in[1].lane.id;
+  assert.ok(m.connections.filter(c => c.from === slipId).length >= 2, 'before: straight and right');
+  T.applyFreeRight(m, d, key, true);
+  assert.strictEqual(m.connections.filter(c => c.from === slipId).length, 1);
+  d = T.derive(m);
+  assert.strictEqual(T.freeRightIslands(d).length, 1);
+  T.applyFreeRight(m, d, key, false);
+  assert.strictEqual(T.freeRightIslands(T.derive(m)).length, 0);
+});
+
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }
 console.log('\nall tests passed');

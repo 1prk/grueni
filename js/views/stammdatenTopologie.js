@@ -276,15 +276,20 @@ let linkStops = false;     // move all stop lines together
     // road surface: junction, median base, one polygon per lane, then islands on top
     let html = '';
     if (jp.cmds.length) html += `<path class="t-road" d="${jp.d}"/>`;
+    const dark = [];
     surf.forEach(({ arm, s: sf }) => {
       if (sf.gapBase) html += `<polygon class="t-road" points="${polyPts(sf.gapBase)}"/>`;
       arm.in.concat(arm.out).forEach(g => {
         const o = T.laneOutline(g);
         if (o.pts.length >= 3) html += `<polygon class="t-road" points="${polyPts(o.pts)}"/>`;
       });
-      if (sf.island) html += `<polygon class="t-island" points="${polyPts(sf.island)}"/>`;
-      sf.freed.forEach(poly => { html += `<polygon class="t-island" points="${polyPts(poly)}"/>`; });
+      if (sf.island) dark.push(sf.island);
+      sf.freed.forEach(poly => dark.push(poly));
     });
+    T.freeRightIslands(derived).forEach(i => dark.push(i.polygon));
+    // Islands: one kerb outline under all fills, so no line shows where two islands meet.
+    dark.forEach(poly => { html += `<polygon class="t-island-edge" points="${polyPts(poly)}"/>`; });
+    dark.forEach(poly => { html += `<polygon class="t-island" points="${polyPts(poly)}"/>`; });
     // kerb lines
     jp.cmds.forEach((c, i) => {
       if (c.type !== 'Q') return;
@@ -293,7 +298,6 @@ let linkStops = false;     // move all stop lines together
     });
     surf.forEach(({ s: sf }) => {
       sf.kerbs.forEach(line => { if (line.length > 1) html += `<path class="t-kerb" d="${polyD(line)}"/>`; });
-      sf.kerbPolys.forEach(poly => { html += `<polygon class="t-kerb" points="${polyPts(poly)}"/>`; });
     });
     layers.roads.html(html);
 
@@ -326,16 +330,19 @@ let linkStops = false;     // move all stop lines together
         lanes.forEach(g => {
           if (g.lane.type !== 'bike' || g.path.length < 2) return;
           const len = g.cl[g.cl.length - 1];
-          const p = T.pointAt(g.path, g.cl, Math.min(len * 0.5, 16));
+          const p = T.pointAt(g.path, g.cl, Math.min(len * 0.5, 12.5));
           const h = dir === 'in' ? { x: -g.arm.dir.x, y: -g.arm.dir.y } : { x: g.arm.dir.x, y: g.arm.dir.y };
           mk += `<g class="t-bike" transform="translate(${f2(p.x)},${f2(-p.y)}) rotate(${f2(T.bearingOf(h.x, h.y))})">` +
-            '<circle cx="0" cy="-.62" r=".36"/><circle cx="0" cy=".62" r=".36"/><path d="M0,.62 L0,-.15 L0,-.62 M-.3,-.32 L.3,-.32 M0,.62 L-.05,.2"/></g>';
+            '<ellipse cx="0" cy="-.72" rx=".13" ry=".46"/><ellipse cx="0" cy=".72" rx=".13" ry=".46"/>' +
+            '<path d="M0,-.3 L0,.3 M-.34,-.5 L.34,-.5 M-.12,.1 L.12,.1"/></g>';
         });
       });
       void half; void D;
       if (arm.in.length) {
         const a = { x: arm.stopPt.x + arm.normal.x * (arm.gap / 2), y: arm.stopPt.y + arm.normal.y * (arm.gap / 2) };
-        const b = { x: arm.cornerLeft.x, y: arm.cornerLeft.y };
+        let b = { x: arm.cornerLeft.x, y: arm.cornerLeft.y };
+        const fr = arm.freeRight ? T.freeRightPair(derived, arm) : null;
+        if (fr) b = { x: arm.stopPt.x + arm.normal.x * fr.slip.inner, y: arm.stopPt.y + arm.normal.y * fr.slip.inner };
         mk += `<line class="t-stop" x1="${f2(a.x)}" y1="${f2(-a.y)}" x2="${f2(b.x)}" y2="${f2(-b.y)}"/>`;
       }
     });
@@ -385,12 +392,27 @@ let linkStops = false;     // move all stop lines together
     layers.cross.html(html);
   }
 
-  function arrowGlyph(m) {
-    const left = '<path class="t-arrow-line" d="M0,1.5 L0,.1 Q0,-.45 -.55,-.8"/><path class="t-arrow" transform="translate(-.62,-.85) rotate(-55)" d="M-.5,.1 L0,-.75 L.5,.1 Z"/>';
-    if (m === 'straight') return '<path class="t-arrow" d="M-.17,1.5 L-.17,-.45 L-.62,-.45 L0,-1.5 L.62,-.45 L.17,-.45 L.17,1.5 Z"/>';
-    if (m === 'left') return left;
-    if (m === 'right') return `<g transform="scale(-1,1)">${left}</g>`;
-    return '';
+  // Lane arrows (pointing up, units in metres). A branch leaves the stem to the left or right.
+  function arrowGlyphs(mans) {
+    const has = m => mans.includes(m);
+    const head = (x, y, rot) => `<path class="t-arrow" transform="translate(${x},${y}) rotate(${rot})" d="M-.55,.15 L0,-.85 L.55,.15 Z"/>`;
+    const branch = (sign, fromY) => {
+      const g = `<path class="t-arrow-line" d="M0,${fromY} Q0,${fromY - 0.75} ${-0.95 * sign},${fromY - 1.25}"/>` + head(-1.0 * sign, f2(fromY - 1.32), -58 * sign);
+      return g;
+    };
+    let out = '';
+    const straight = '<path class="t-arrow" d="M-.19,1.7 L-.19,-.5 L-.68,-.5 L0,-1.75 L.68,-.5 L.19,-.5 L.19,1.7 Z"/>';
+    if (has('straight')) {
+      out += straight;
+      if (has('left')) out += branch(1, 0.55);
+      if (has('right')) out += branch(-1, 0.55);
+    } else {
+      // turn only: the stem runs up to the bend
+      const turn = sign => `<path class="t-arrow-line" d="M0,1.7 L0,.35 Q0,-.45 ${-1.0 * sign},-.95"/>` + head(-1.08 * sign, -1.02, -58 * sign);
+      if (has('left')) out += turn(1);
+      if (has('right')) out += turn(-1);
+    }
+    return out;
   }
 
   const LANE_S = { arrow: 3.4, sg: 7.2, sgGap: 1.75 };
@@ -408,7 +430,7 @@ let linkStops = false;     // move all stop lines together
       if (step < 3) return;
       arm.in.concat(arm.out).forEach(g => {
         const len = g.cl[g.cl.length - 1];
-        const lp = T.pointAt(g.path, g.cl, Math.min(len - 1.5, 17));
+        const lp = T.pointAt(g.path, g.cl, Math.min(len - 1.5, 22));
         if (showText) html += `<text class="t-label light" x="${f2(lp.x)}" y="${f2(-lp.y)}" text-anchor="middle" dominant-baseline="central" font-size="${fs(9.5)}" stroke-width="${fs(2)}">${g.label}</text>`;
         if (g.dir !== 'in') return;
         // arrows from the connections
@@ -417,7 +439,7 @@ let linkStops = false;     // move all stop lines together
         const ap = T.pointAt(g.path, g.cl, LANE_S.arrow);
         if (mans.length) {
           const rot = T.bearingOf(heading.x, heading.y);
-          html += `<g transform="translate(${f2(ap.x)},${f2(-ap.y)}) rotate(${f2(rot)})">${mans.map(arrowGlyph).join('')}</g>`;
+          html += `<g transform="translate(${f2(ap.x)},${f2(-ap.y)}) rotate(${f2(rot)})">${arrowGlyphs(mans)}</g>`;
         }
         // signal group pills
         const sgs = laneSgNames(g.lane);
@@ -484,16 +506,17 @@ let linkStops = false;     // move all stop lines together
       if (!a || !b) return;
       const curve = T.connectionCurve(a, b);
       const sg = T.connectionSg(m, conn);
-      const color = sg ? sgColor(sg) : '#9aa5b1';
+      const color = sg ? sgColor(sg) : '#f1f4f7';
       const isSel = sel && sel.kind === 'conn' && sel.id === conn.id;
       const fromSel = sel && sel.kind === 'lane' && sel.id === conn.from;
       const dim = sel && sel.kind === 'lane' && !fromSel && sel.id !== conn.to;
-      const wd = isSel || fromSel ? 0.62 : 0.46;
+      const wd = sg ? (isSel || fromSel ? 0.62 : 0.46) : (isSel || fromSel ? 0.46 : 0.3);
       // arrow head at the end
       const tx = curve.h1.x, ty = curve.h1.y;
       const head = [{ x: curve.p1.x, y: curve.p1.y }, { x: curve.p1.x - tx * 1.1 - ty * 0.55, y: curve.p1.y - ty * 1.1 + tx * 0.55 }, { x: curve.p1.x - tx * 1.1 + ty * 0.55, y: curve.p1.y - ty * 1.1 - tx * 0.55 }];
       if (isSel) html += `<path class="t-conn-halo" stroke-width="${wd + 0.5}" d="${connPath(curve)}"/>`;
       html += `<g style="opacity:${dim ? 0.3 : 1}"><path class="t-conn-hit" data-kind="conn" data-id="${conn.id}" d="${connPath(curve)}"/>` +
+ `${sg ? `<path class="t-conn-case" stroke-width="${wd + 0.34}" d="${connPath(curve)}"/>` : ''}` +
         `<path class="t-conn ${sg ? '' : 'unassigned'}" stroke="${color}" stroke-width="${wd}" d="${connPath(curve)}"/>` +
         `<polygon points="${polyPts(head)}" fill="${color}"/></g>`;
     });
@@ -758,6 +781,7 @@ let linkStops = false;     // move all stop lines together
         ${stepper('in', 'Zufahrten')}${stepper('out', 'Ausfahrten')}
         <div class="ts-row"><label>Mittelinsel</label><input type="number" step="0.5" min="0" max="12" data-field="gap" data-key="${arm.key}" value="${arm.gap}" title="Breite zwischen Zu- und Ausfahrt. 0 = keine Insel"><span class="ts-note">m breit</span></div>
         ${arm.gap > 0.3 ? `<div class="ts-row"><label></label><input type="number" step="1" min="5" data-field="islandLen" data-key="${arm.key}" value="${arm.islandLen}"><span class="ts-note">m lang</span></div>` : ''}
+        <div class="ts-row"><label>Freie Rechtsabb.</label><input type="checkbox" data-field="freeRight" data-key="${arm.key}" ${arm.freeRight ? 'checked' : ''} ${T.freeRightPair(derived, arm) ? '' : 'disabled'}><span class="ts-note">${T.freeRightPair(derived, arm) ? 'Dreiecksinsel, Rechtsabbiegestreifen' : 'braucht mind. 2 Zufahrten'}</span></div>
         <div class="ts-row"><label>Fußgängerfurt</label><input type="checkbox" data-field="cross" data-key="${arm.key}" ${cw ? 'checked' : ''}>
           ${cw ? `<input type="number" step="0.5" min="1.5" max="8" data-field="crossWidth" data-id="${cw.id}" value="${cw.width}"><span class="ts-note">m Linienabstand</span>` : ''}</div>
         <div class="ts-list" style="margin-top:6px">${arm.in.map(laneRow).join('')}${arm.out.map(laneRow).join('')}</div>
@@ -947,6 +971,7 @@ let linkStops = false;     // move all stop lines together
         case 'armName': { (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).name = el.value.trim() || undefined; changed(true); return; }
         case 'stopDist': { const v = num(); const arm = derived.arms.find(a => a.key === el.dataset.key); if (v != null && arm) setStopDist(arm, v); changed(true); return; }
         case 'gap': { const v = num(); if (v != null) (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).gap = Math.max(0, Math.min(12, v)); changed(true); return; }
+        case 'freeRight': T.applyFreeRight(m, derived, el.dataset.key, el.checked); changed(true); return;
         case 'cross': T.setCrosswalk(m, el.dataset.key, el.checked); changed(true); return;
         case 'crossWidth': { const c = m.crosswalks.find(x => x.id === el.dataset.id); const v = num(); if (c && v != null) c.width = Math.max(1.5, Math.min(8, v)); changed(true); return; }
         case 'laneType': { const l = m.lanes.find(x => x.id === el.dataset.id); if (l) T.setLaneType(l, el.value); changed(true); return; }
