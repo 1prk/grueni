@@ -204,10 +204,23 @@
                   <button type="button" class="primary" id="topoDrawDone">Fertig</button>
                   <button type="button" id="topoDrawCancel">Abbrechen</button>
                 </div>
+                <details class="topo-legend" open>
+                  <summary>Legende</summary>
+                  <h5>Flächen</h5>
+                  <div class="lg"><span class="sw" style="background:var(--topo-road)"></span>Fahrbahn</div>
+                  <div class="lg"><span class="sw" style="background:var(--topo-bike)"></span>Radfahrstreifen</div>
+                  <div class="lg"><span class="sw" style="background:var(--topo-bus)"></span>Busspur</div>
+                  <div class="lg"><span class="sw" style="background:var(--topo-walk)"></span>Gehweg</div>
+                  <h5>Zeichen</h5>
+                  <div class="lg"><span class="sw pill" style="background:var(--topo-sg-veh)"></span>Signalgruppe</div>
+                  <div class="lg"><span class="sw det"></span>Detektor</div>
+                  <div class="lg"><span class="sw furt"></span>Furt (Linienabstand 4 m)</div>
+                </details>
                 <div class="topo-tools">
                   <button type="button" id="topoZoomOut" title="Verkleinern">−</button>
                   <button type="button" id="topoFit" title="Alles einpassen">Einpassen</button>
                   <button type="button" id="topoZoomIn" title="Vergrößern">+</button>
+                  <label class="topo-link" title="Haltlinien gemeinsam verschieben (statt einzeln)"><input type="checkbox" id="topoLinkStops"> Haltlinien koppeln</label>
                 </div>
               </div>
               <aside class="topo-side" id="topoSide"></aside>

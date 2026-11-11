@@ -32,6 +32,7 @@
   let draft = null;          // axis being drawn: { points:[{x,y}], cursor:{x,y} }
   let derived = null;
   let fitted = false;
+let linkStops = false;     // move all stop lines together
   const manualSg = new Set(), manualDet = new Set();
 
   const M = () => GZ.state.data.topology;
@@ -61,6 +62,8 @@
       e.target.value = '';
     });
     root.querySelector('#topoFit').addEventListener('click', fitView);
+    els.linkStops = root.querySelector('#topoLinkStops');
+    els.linkStops.addEventListener('change', () => { linkStops = els.linkStops.checked; });
     root.querySelector('#topoZoomIn').addEventListener('click', () => svg.transition().duration(150).call(zoomBehavior.scaleBy, 1.4));
     root.querySelector('#topoZoomOut').addEventListener('click', () => svg.transition().duration(150).call(zoomBehavior.scaleBy, 1 / 1.4));
     root.querySelector('#topoDrawDone').addEventListener('click', finishDraft);
@@ -140,6 +143,7 @@
   function renderStepBar() {
     els.steps.querySelectorAll('.topo-step').forEach(b => b.classList.toggle('active', Number(b.dataset.step) === step));
     els.stepHint.innerHTML = STEPS[step - 1].hint;
+    els.linkStops.closest('label').style.display = step === 2 || step === 3 ? '' : 'none';
   }
 
   /* ---------------- Canvas ---------------- */
@@ -149,7 +153,7 @@
     const defs = svg.append('defs');
     defs.append('clipPath').attr('id', 'topoClip').append('rect').attr('id', 'topoClipRect');
     worldG = svg.append('g').attr('class', 'topo-world');
-    ['grid', 'roads', 'marks', 'laneFill', 'cross', 'conns', 'lanes', 'labels', 'axes', 'handles', 'overlay'].forEach(name => {
+    ['grid', 'walk', 'roads', 'marks', 'laneFill', 'cross', 'conns', 'lanes', 'labels', 'axes', 'handles', 'overlay'].forEach(name => {
       layers[name] = worldG.append('g').attr('class', 'layer-' + name);
     });
     hudG = svg.append('g').attr('class', 't-hud');
@@ -255,6 +259,16 @@
   }
 
   function renderRoads() {
+    // Gehweg: a wide light stroke along every kerb. The road area is drawn on top of it.
+    let walk = '';
+    derived.arms.forEach(arm => {
+      if (arm.widthIn + arm.widthOut <= 0 || arm.sub.length < 2) return;
+      walk += `<path class="t-walk" d="${polyD(arm.edgeLeft)}"/><path class="t-walk" d="${polyD(arm.edgeRight)}"/>`;
+    });
+    const outline = T.junctionOutline(derived.arms);
+    if (outline.length) walk += `<path class="t-walk" stroke-linecap="round" d="${outline.map(c => c.type === 'Z' ? 'Z' : c.type + c.pts.map(pt).join(' ')).join(' ')}"/>`;
+    layers.walk.html(walk);
+
     let html = '';
     derived.arms.forEach(arm => {
       if (arm.widthIn + arm.widthOut <= 0 || arm.sub.length < 2) return;
@@ -334,7 +348,11 @@
       if (!c) return;
       const w = c.cw.width;
       const isSel = sel && sel.kind === 'cross' && sel.id === c.cw.id;
-      html += `<path class="t-zebra" d="M${pt(c.a)} L${pt(c.b)}" stroke-width="${w}" stroke-dasharray="0.55 0.55" opacity=".92"/>`;
+      // two thin dashed lines (1 m dash, 1 m gap) across the road, "width" apart
+      [1, -1].forEach(side => {
+        const o = { x: c.dir.x * w / 2 * side, y: c.dir.y * w / 2 * side };
+        html += `<path class="t-crossline" d="M${pt({ x: c.a.x + o.x, y: c.a.y + o.y })} L${pt({ x: c.b.x + o.x, y: c.b.y + o.y })}"/>`;
+      });
       if (step >= 3) {
         const corners = [
           { x: c.a.x + c.dir.x * w / 2, y: c.a.y + c.dir.y * w / 2 }, { x: c.b.x + c.dir.x * w / 2, y: c.b.y + c.dir.y * w / 2 },
@@ -461,7 +479,7 @@
       if (step === 1) {
         html += `<path class="t-axis-hit" data-kind="axis" data-id="${e.axis.id}" stroke-width="${f2(14 / tr.k)}" d="${polyD(e.poly)}"/>`;
         html += `<path class="t-axis ${isSel ? 'sel' : ''}" stroke-width="${f2((isSel ? 2.6 : 1.8) / tr.k)}" d="${polyD(e.poly)}"/>`;
-      } else {
+      } else if (step === 2) {
         html += `<path class="t-axis" stroke-width="${f2(1.2 / tr.k)}" stroke-dasharray="${f2(6 / tr.k)} ${f2(5 / tr.k)}" opacity=".7" d="${polyD(e.poly)}"/>`;
       }
     });
@@ -511,13 +529,21 @@
       const arm = derived.arms.find(a => a.key === d.armKey);
       if (!arm) return;
       const pr = T.projectOnPoly(arm.path, arm.cl, worldOf(e.sourceEvent));
-      (m.arms[arm.key] || (m.arms[arm.key] = {})).stopDist = Math.round(Math.max(2, Math.min(arm.length - 3, pr.s)) * 10) / 10;
+      setStopDist(arm, pr.s);
     }
     update();
     renderCanvas();
     // keep the same element data for the running drag
     d.x = d.type === 'stop' ? derived.arms.find(a => a.key === d.armKey).stopPt.x : p.x;
     d.y = d.type === 'stop' ? derived.arms.find(a => a.key === d.armKey).stopPt.y : p.y;
+  }
+
+  // Sets the stop line distance of one arm. With "koppeln" every arm moves by the same amount.
+  function setStopDist(arm, dist) {
+    const clamp = (a, v) => Math.round(Math.max(2, Math.min(a.length - 3, v)) * 10) / 10;
+    const delta = dist - arm.stopDist;
+    const targets = linkStops ? derived.arms.map(a => ({ a, v: a.stopDist + delta })) : [{ a: arm, v: dist }];
+    targets.forEach(t => { (M().arms[t.a.key] || (M().arms[t.a.key] = {})).stopDist = clamp(t.a, t.v); });
   }
 
   function renderOverlay() {
@@ -677,7 +703,7 @@
     return `<div class="ts-sec"><div class="ts-title">Mittelpunkt ${m.center ? '<button type="button" data-action="center-auto" style="font-size:11px;padding:2px 8px">Automatisch</button>' : ''}</div>
       <div class="ts-note">${c ? (m.center ? 'Von Hand gesetzt (gelben Punkt ziehen).' : 'Automatisch aus dem Kreuzungspunkt der Achsen. Der gelbe Punkt lässt sich ziehen.') : 'Kein Mittelpunkt: mindestens eine Achse zeichnen (Schritt 1).'}</div></div>
       <div class="ts-sec"><div class="ts-title">Arme <span class="ts-note">Name · Haltlinie</span></div>${rows || '<div class="ts-note">Noch keine Arme.</div>'}
-      <div class="ts-note">Die Nummer ist die Zufahrts-ID (im Uhrzeigersinn ab Nord).</div></div>`;
+      <div class="ts-note">Die Nummer ist die Zufahrts-ID (im Uhrzeigersinn ab Nord). Haltlinien lassen sich einzeln ziehen oder mit „Haltlinien koppeln“ (unten links im Plan) gemeinsam verschieben.</div></div>`;
   }
 
   function sideLanes() {
@@ -698,7 +724,7 @@
         ${stepper('in', 'Zufahrten')}${stepper('out', 'Ausfahrten')}
         <div class="ts-row"><label>Mittelstreifen</label><input type="number" step="0.5" min="0" max="12" data-field="gap" data-key="${arm.key}" value="${arm.gap}"><span class="ts-note">m</span></div>
         <div class="ts-row"><label>Fußgängerfurt</label><input type="checkbox" data-field="cross" data-key="${arm.key}" ${cw ? 'checked' : ''}>
-          ${cw ? `<input type="number" step="0.5" min="1.5" max="8" data-field="crossWidth" data-id="${cw.id}" value="${cw.width}"><span class="ts-note">m breit</span>` : ''}</div>
+          ${cw ? `<input type="number" step="0.5" min="1.5" max="8" data-field="crossWidth" data-id="${cw.id}" value="${cw.width}"><span class="ts-note">m Linienabstand</span>` : ''}</div>
         <div class="ts-list" style="margin-top:6px">${arm.in.map(laneRow).join('')}${arm.out.map(laneRow).join('')}</div>
         ${cw ? `<div class="ts-list" style="margin-top:4px"><div class="ts-item ${sel && sel.kind === 'cross' && sel.id === cw.id ? 'sel' : ''}" data-action="cross-select" data-id="${cw.id}"><b class="grow">Fußgängerfurt</b></div></div>` : ''}
       </div>`;
@@ -884,7 +910,7 @@
         case 'topoName': m.name = el.value.trim(); renderSide(); return;
         case 'axisName': { const a = m.axes.find(x => x.id === el.dataset.id); if (a) a.name = el.value.trim() || a.name; return; }
         case 'armName': { (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).name = el.value.trim() || undefined; changed(true); return; }
-        case 'stopDist': { const v = num(); if (v != null) (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).stopDist = Math.max(2, v); changed(true); return; }
+        case 'stopDist': { const v = num(); const arm = derived.arms.find(a => a.key === el.dataset.key); if (v != null && arm) setStopDist(arm, v); changed(true); return; }
         case 'gap': { const v = num(); if (v != null) (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).gap = Math.max(0, Math.min(12, v)); changed(true); return; }
         case 'cross': T.setCrosswalk(m, el.dataset.key, el.checked); changed(true); return;
         case 'crossWidth': { const c = m.crosswalks.find(x => x.id === el.dataset.id); const v = num(); if (c && v != null) c.width = Math.max(1.5, Math.min(8, v)); changed(true); return; }

@@ -1,15 +1,16 @@
 /* Topology editor (tab "Stammdaten LSA" > "Topologie"). Uses the tokens from tokens.css.
    Road colours are local tokens: a plan drawing keeps its look in every theme. */
 .topo{
-  --topo-paper:#f4f6f8;
-  --topo-grid:#e3e8ed;
-  --topo-grid-major:#d3dae1;
-  --topo-road:#3d4551;
-  --topo-road-2:#474f5c;
-  --topo-kerb:#aeb8c3;
+  --topo-paper:#fbfcfd;
+  --topo-grid:#eef1f4;
+  --topo-grid-major:#e1e6eb;
+  --topo-road:#8e9298;
+  --topo-walk:#dcdddf;
+  --topo-ink:#2b3038;
+  --topo-kerb:#2b3038;
   --topo-mark:#f5f7f9;
-  --topo-bike:rgba(70,170,110,.55);
-  --topo-bus:rgba(200,70,70,.5);
+  --topo-bike:#1d9ce2;
+  --topo-bus:rgba(196,74,74,.65);
   --topo-sg-veh:#475569;
   --topo-sg-bike:#2f8f5b;
   --topo-sg-ped:#c2517a;
@@ -72,7 +73,7 @@
 .t-grid line{ stroke:var(--topo-grid); stroke-width:1; vector-effect:non-scaling-stroke; }
 .t-grid line.major{ stroke:var(--topo-grid-major); }
 .t-road{ fill:var(--topo-road); }
-.t-kerb{ fill:none; stroke:var(--topo-kerb); stroke-width:.28; stroke-linejoin:round; stroke-linecap:round; }
+.t-kerb{ fill:none; stroke:var(--topo-kerb); stroke-width:.12; stroke-linejoin:round; stroke-linecap:round; }
 .t-mark{ fill:none; stroke:var(--topo-mark); stroke-width:.14; }
 .t-mark.dash{ stroke-dasharray:1.6 2.6; stroke-width:.14; }
 .t-stop{ stroke:var(--topo-mark); stroke-width:.5; }
@@ -153,3 +154,21 @@
 .ts-btns button{ font-size:12px; padding:5px 10px; }
 .ts-dot{ width:10px; height:10px; border-radius:50%; flex-shrink:0; border:1px solid rgba(0,0,0,.2); }
 .ts-item select{ font:inherit; font-size:12px; padding:3px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); color:var(--text); min-width:0; }
+.t-crossline{ fill:none; stroke:var(--topo-mark); stroke-width:.22; stroke-dasharray:1 1; }
+.topo-link{ display:flex; align-items:center; gap:5px; padding:0 8px; font-size:12px; color:var(--text-muted); cursor:pointer; border-left:1px solid var(--border); margin-left:2px; }
+
+.t-walk{ fill:none; stroke:var(--topo-walk); stroke-width:5; stroke-linejoin:round; stroke-linecap:butt; }
+.t-label.light{ stroke:rgba(30,36,44,.8); }
+
+/* legend card (plan style: light-blue headings, colour swatches) */
+.topo-legend{
+  position:absolute; top:12px; left:12px; background:rgba(255,255,255,.94); border:1px solid var(--border);
+  border-radius:var(--radius-md); padding:8px 12px 10px; font-size:11.5px; color:var(--text-muted); box-shadow:var(--shadow-sm);
+}
+.topo-legend summary{ cursor:pointer; font-weight:700; letter-spacing:.04em; text-transform:uppercase; font-size:11px; color:var(--accent); }
+.topo-legend h5{ margin:10px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--accent); }
+.topo-legend .lg{ display:flex; align-items:center; gap:8px; margin:3px 0; }
+.topo-legend .sw{ width:16px; height:12px; border:1px solid rgba(0,0,0,.25); border-radius:2px; flex-shrink:0; }
+.topo-legend .sw.pill{ width:22px; height:12px; border-radius:6px; border:0; }
+.topo-legend .sw.det{ width:12px; background:var(--topo-det); border:1px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.2); }
+.topo-legend .sw.furt{ background:repeating-linear-gradient(90deg,#fff 0 4px,transparent 4px 8px); border-top:2px solid #fff; border-bottom:2px solid #fff; background-color:var(--topo-road); }

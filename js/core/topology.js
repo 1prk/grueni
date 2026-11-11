@@ -22,7 +22,7 @@
     gap: 0,              // m between the ingress side and the egress side (median)
     minArmLen: 4,        // m; shorter arms are ignored
     maxCenterDist: 30,   // m; an axis farther away from the centre is not part of the intersection
-    crossWidth: 3,       // m, width of a pedestrian crossing
+    crossWidth: 4,       // m, distance between the two dashed lines of a pedestrian crossing
     corridorTol: 8       // m; axes that do not cross but come this close still form an intersection
   };
 
