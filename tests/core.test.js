@@ -467,7 +467,9 @@ test('topology: a free right turn gives a triangle island between slip lane and 
   const isl = islands.find(i => i.armKey === north.key).polygon;
   const slipInner = Math.abs(north.in[1].startPt.x) - 3.25 / 2;   // inner edge of the slip lane
   isl.forEach(p => assert.ok(p.x <= -slipInner + 0.3, 'island is west of the through lane boundary'));
-  assert.ok(isl.length > 20);
+  assert.ok(isl.length > 10);
+  const info = T.freeRightIslands(d).find(i => i.armKey === north.key);
+  assert.ok(info.r > 0.3 && info.r <= T.DEFAULTS.triRound, 'rounding radius');
   // an arm with one ingress lane has no free right turn
   const south = d.arms.find(a => a.name === 'Süd');
   T.setLaneCount(m, south.key, 'in', 1);
@@ -491,6 +493,18 @@ test('topology: applyFreeRight rewires the slip lane and can be switched off', (
   assert.strictEqual(T.freeRightIslands(d).length, 1);
   T.applyFreeRight(m, d, key, false);
   assert.strictEqual(T.freeRightIslands(T.derive(m)).length, 0);
+});
+
+test('topology: insetting a polygon moves every edge inward by the distance', () => {
+  const sq = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+  const a = T.insetPolygon(sq, 1);
+  same(a.map(p => [p.x, p.y]), [[1, 1], [9, 1], [9, 9], [1, 9]]);
+  const cw = T.insetPolygon(sq.slice().reverse(), 1);          // the orientation does not matter
+  assert.ok(cw.every(p => p.x > 0.99 && p.x < 9.01 && p.y > 0.99 && p.y < 9.01));
+  // a thin triangle gets a radius that fits inside
+  const tri = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 0, y: 2 }];
+  assert.ok(T.fitRadius(tri, 5) < 1);
+  assert.strictEqual(T.fitRadius(sq, 0.5), 0.5);
 });
 
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }

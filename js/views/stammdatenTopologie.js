@@ -283,13 +283,13 @@ let linkStops = false;     // move all stop lines together
         const o = T.laneOutline(g);
         if (o.pts.length >= 3) html += `<polygon class="t-road" points="${polyPts(o.pts)}"/>`;
       });
-      if (sf.island) dark.push(sf.island);
-      sf.freed.forEach(poly => dark.push(poly));
+      if (sf.island) dark.push({ pts: sf.island, r: 0 });
+      sf.freed.forEach(poly => dark.push({ pts: poly, r: 0 }));
     });
-    T.freeRightIslands(derived).forEach(i => dark.push(i.polygon));
+    T.freeRightIslands(derived).forEach(i => dark.push({ pts: i.polygon, r: i.r }));   // r > 0: the stroke rounds every corner
     // Islands: one kerb outline under all fills, so no line shows where two islands meet.
-    dark.forEach(poly => { html += `<polygon class="t-island-edge" points="${polyPts(poly)}"/>`; });
-    dark.forEach(poly => { html += `<polygon class="t-island" points="${polyPts(poly)}"/>`; });
+    dark.forEach(d => { html += `<polygon class="t-island-edge" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.3)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
+    dark.forEach(d => { html += `<polygon class="t-island" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.02)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
     // kerb lines
     jp.cmds.forEach((c, i) => {
       if (c.type !== 'Q') return;

@@ -27,7 +27,9 @@
     islandLen: 30,       // m, length of a median island (Mittelinsel) from the stop line outward
     islandBack: 2,       // m, the island starts this far before the stop line (round end)
     taper: 8,            // m, length of the taper at the end of a short (turning) lane
-    walk: 2.5            // m, width of the footway drawn beside the road
+    walk: 2.5,           // m, width of the footway drawn beside the road
+    triRound: 0.9,       // m, radius of its rounded corners
+    triTip: 1.7          // m, width of the nose of the triangle island
   };
 
   const LANE_TYPES = {
@@ -122,6 +124,38 @@
       }
     }
     return out;
+  }
+
+
+  // Ring (closed polygon) moved inward by d with mitre joins. Used to build rounded shapes:
+  // draw the inset ring with a round stroke of width 2*d and every corner becomes a true arc.
+  function polygonArea(pts) {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; }
+    return a / 2;
+  }
+  function insetPolygon(pts, d) {
+    const n = pts.length;
+    const ccw = polygonArea(pts) > 0;
+    const nrm = [];
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], q = pts[(i + 1) % n];
+      const dx = q.x - p.x, dy = q.y - p.y, l = Math.hypot(dx, dy) || 1;
+      nrm.push(ccw ? { x: -dy / l, y: dx / l } : { x: dy / l, y: -dx / l });   // points into the polygon
+    }
+    return pts.map((v, i) => {
+      const a = nrm[(i - 1 + n) % n], b = nrm[i];
+      const mx = a.x + b.x, my = a.y + b.y, m2 = mx * mx + my * my;
+      if (m2 < 0.01) return { x: v.x + b.x * d, y: v.y + b.y * d };
+      const k = (2 * d) / m2;
+      return { x: v.x + mx * k, y: v.y + my * k };
+    });
+  }
+  // Radius that fits into a polygon (about the radius of the biggest inscribed circle).
+  function fitRadius(pts, r) {
+    let per = 0;
+    for (let i = 0; i < pts.length; i++) per += dist(pts[i], pts[(i + 1) % pts.length]);
+    return Math.max(0.05, Math.min(r, 0.8 * (2 * Math.abs(polygonArea(pts))) / per));
   }
 
   function cumLen(poly) {
@@ -686,13 +720,29 @@
       if (!apex) return;
       const inward = (p, from, dir) => (p.x - from.x) * dir.x + (p.y - from.y) * dir.y < -0.5;
       if (!inward(apex, v1, arm.dir) || !inward(apex, v2, prev.dir)) return;
-      const pts = [{ x: v1.x, y: v1.y, round: true }];
-      for (let i = 1; i < 16; i++) {
-        const t = i / 16, u = 1 - t;
-        pts.push({ x: u * u * v1.x + 2 * u * t * apex.x + t * t * v2.x, y: u * u * v1.y + 2 * u * t * apex.y + t * t * v2.y });
+      // Shape: tip at the stop line, straight leg along the lane boundary, a flat base,
+      // a straight leg along the egress lane and a gently curved side facing the slip lane.
+      // The legs are cut after DEFAULTS.triLeg metres, so the island stays small.
+      // The curved side leaves the tip at an angle (about 10 to 15 degrees), not along the leg:
+      // its control point is halfway between the apex and the middle of the chord.
+      const c = { x: (apex.x + (v1.x + v2.x) / 2) / 2, y: (apex.y + (v1.y + v2.y) / 2) / 2 };
+      const curve = [];
+      for (let i = 0; i <= 18; i++) {
+        const t = i / 18, u = 1 - t;
+        curve.push({ x: u * u * v1.x + 2 * u * t * c.x + t * t * v2.x, y: u * u * v1.y + 2 * u * t * c.y + t * t * v2.y });
       }
-      pts.push({ x: v2.x, y: v2.y, round: true }, { x: apex.x, y: apex.y, round: true });
-      out.push({ armKey: arm.key, polygon: roundCorners(pts, 1.0) });
+      // Both thin ends are cut where the island is DEFAULTS.triTip wide (a thinner end can not
+      // be rounded). The flat ends are then rounded, so the noses look like bullets.
+      const gapTo = (q, v, d) => Math.abs((q.x - v.x) * d.y - (q.y - v.y) * d.x);   // distance of q to the line through v along d
+      const k = curve.findIndex(q => gapTo(q, v1, arm.dir) >= DEFAULTS.triTip);
+      let m = -1;
+      curve.forEach((q, i) => { if (gapTo(q, v2, prev.dir) >= DEFAULTS.triTip) m = i; });
+      if (k < 0 || m <= k) return;
+      const onLine = (q, v, d) => { const t = (q.x - v.x) * d.x + (q.y - v.y) * d.y; return { x: v.x + d.x * t, y: v.y + d.y * t }; };
+      const pa = onLine(curve[k], v1, arm.dir), pb = onLine(curve[m], v2, prev.dir);
+      const pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
+      const r = fitRadius(pts, DEFAULTS.triRound);
+      out.push({ armKey: arm.key, polygon: insetPolygon(pts, r), r, outline: pts });
     });
     return out;
   }
@@ -901,7 +951,7 @@
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
     // geometry
-    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
+    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
     create, addAxis, removeAxis, setLaneCount, setLaneType, setCrosswalk, addConnection, removeConnection, ensureDefaults,
