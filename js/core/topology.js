@@ -30,7 +30,6 @@
     walk: 2.5,           // m, width of the footway drawn beside the road
     triRound: 0.9,       // m, radius of its rounded corners
     triTip: 1.6          // m, width of the nose of the triangle island
-    ,shift: 12            // m, a through movement finishes its sideways shift within this distance
     ,collideSlack: 0.2   // m, a path may come this much closer to an island or kerb than half its lane width
   };
 
@@ -793,29 +792,35 @@
     if (!a || !b) return [];
     const isl = (islands || freeRightIslands(derived)).find(i => i.slipFrom === conn.from && i.slipTo === conn.to);
     if (isl) return isl.slipPath;
-    const c = connectionCurve(a, b), out = [];
-    if (Math.abs(c.angle) < 30) return throughPath(c);
-    for (let i = 0; i <= 32; i++) out.push(cubicPoint(c, i / 32));
-    return out;
+    return drivingPath(connectionCurve(a, b));
   }
 
-  // A through movement leaves along the heading of its ingress lane, moves sideways within the
-  // first DEFAULTS.shift metres (smooth step) and then runs straight in the egress lane. So it is
-  // in line before it reaches an island, and it keeps its lane width.
-  function throughPath(c) {
-    const along = { x: c.p1.x - c.p0.x, y: c.p1.y - c.p0.y };
-    const S = Math.max(1, along.x * c.h0.x + along.y * c.h0.y);          // forward distance
-    const n1 = { x: -c.h1.y, y: c.h1.x };
-    const D = (c.p0.x - c.p1.x) * n1.x + (c.p0.y - c.p1.y) * n1.y;       // sideways distance of the start to the egress line
-    const Ls = Math.min(DEFAULTS.shift, S * 0.4);
-    const sm = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
-    const raw = s => ({ x: c.p0.x + c.h0.x * s - n1.x * D * sm(s / Ls), y: c.p0.y + c.h0.y * s - n1.y * D * sm(s / Ls) });
-    const end = raw(S), err = { x: c.p1.x - end.x, y: c.p1.y - end.y };
-    const out = [];
-    for (let i = 0; i <= 40; i++) {
-      const s = (S * i) / 40, w = sm(s / S) * sm(s / S);                 // the small rest error is spread over the whole path
-      const p = raw(s);
-      out.push({ x: p.x + err.x * w, y: p.y + err.y * w });
+  // Driving line of a connection: a quintic Bezier curve. The two inner handles at each end lie on the
+  // lane heading, so the curvature is zero where the line meets the lane (straight in, arc, straight out)
+  // and the line has no kinks. A through movement starts to shift early (short handle at the start,
+  // long handle at the end), so it is in line before it reaches an island.
+  function drivingPath(c) {
+    const chord = dist(c.p0, c.p1), turn = Math.abs(c.angle);
+    const through = turn < 30;
+    const f = through ? { a0: 0.03, b0: 0.2, a1: 0.3, b1: 1.2 } : { a0: 0.16, b0: 0.46, a1: 0.16, b1: 0.46 };
+    const P = [
+      c.p0,
+      { x: c.p0.x + c.h0.x * chord * f.a0, y: c.p0.y + c.h0.y * chord * f.a0 },
+      { x: c.p0.x + c.h0.x * chord * f.b0, y: c.p0.y + c.h0.y * chord * f.b0 },
+      { x: c.p1.x - c.h1.x * chord * f.b1, y: c.p1.y - c.h1.y * chord * f.b1 },
+      { x: c.p1.x - c.h1.x * chord * f.a1, y: c.p1.y - c.h1.y * chord * f.a1 },
+      c.p1
+    ];
+    const W = [1, 5, 10, 10, 5, 1], out = [];
+    const N = 60;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, u = 1 - t;
+      let x = 0, y = 0;
+      for (let j = 0; j < 6; j++) {
+        const w = W[j] * Math.pow(t, j) * Math.pow(u, 5 - j);
+        x += P[j].x * w; y += P[j].y * w;
+      }
+      out.push({ x, y });
     }
     return out;
   }

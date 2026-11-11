@@ -303,7 +303,6 @@ let linkStops = false;     // move all stop lines together
 
     // markings
     let mk = '';
-    const D = T.DEFAULTS;
     derived.arms.forEach(arm => {
       if (arm.sub.length < 2) return;
       const total = arm.subCl[arm.subCl.length - 1];
@@ -311,7 +310,6 @@ let linkStops = false;     // move all stop lines together
         const part = lim != null ? T.subPoly(arm.sub, arm.subCl, 0, Math.min(total, lim)) : arm.sub;
         return part.length > 1 ? `<path class="t-mark ${cls}" d="${polyD(T.offsetPoly(part, off))}"/>` : '';
       };
-      const half = arm.gap / 2;
       if (arm.in.length && arm.out.length && arm.gap <= 0.3) mk += line(0, '');
       ['in', 'out'].forEach(dir => {
         const side = dir === 'in' ? 1 : -1;
@@ -326,18 +324,7 @@ let linkStops = false;     // move all stop lines together
             mk += line(side * (g.outer - 0.2), '');
           }
         });
-        // bicycle pictogram on bike lanes
-        lanes.forEach(g => {
-          if (g.lane.type !== 'bike' || g.path.length < 2) return;
-          const len = g.cl[g.cl.length - 1];
-          const p = T.pointAt(g.path, g.cl, Math.min(len * 0.5, 12.5));
-          const h = dir === 'in' ? { x: -g.arm.dir.x, y: -g.arm.dir.y } : { x: g.arm.dir.x, y: g.arm.dir.y };
-          mk += `<g class="t-bike" transform="translate(${f2(p.x)},${f2(-p.y)}) rotate(${f2(T.bearingOf(h.x, h.y))})">` +
-            '<ellipse cx="0" cy="-.72" rx=".13" ry=".46"/><ellipse cx="0" cy=".72" rx=".13" ry=".46"/>' +
-            '<path d="M0,-.3 L0,.3 M-.34,-.5 L.34,-.5 M-.12,.1 L.12,.1"/></g>';
-        });
       });
-      void half; void D;
       if (arm.in.length) {
         const a = { x: arm.stopPt.x + arm.normal.x * (arm.gap / 2), y: arm.stopPt.y + arm.normal.y * (arm.gap / 2) };
         let b = { x: arm.cornerLeft.x, y: arm.cornerLeft.y };
@@ -392,25 +379,23 @@ let linkStops = false;     // move all stop lines together
     layers.cross.html(html);
   }
 
-  // Lane arrows (pointing up, units in metres). A branch leaves the stem to the left or right.
+  // Lane arrows (pointing up, units in metres). Every glyph is at most 2.6 m wide, so it stays inside its
+  // lane. With a through arrow the turn branch leaves the stem low, beside (not on) the arrow head.
   function arrowGlyphs(mans) {
     const has = m => mans.includes(m);
-    const head = (x, y, rot) => `<path class="t-arrow" transform="translate(${x},${y}) rotate(${rot})" d="M-.55,.15 L0,-.85 L.55,.15 Z"/>`;
-    const branch = (sign, fromY) => {
-      const g = `<path class="t-arrow-line" d="M0,${fromY} Q0,${fromY - 0.75} ${-0.95 * sign},${fromY - 1.25}"/>` + head(-1.0 * sign, f2(fromY - 1.32), -58 * sign);
-      return g;
-    };
+    const tri = (x, y, rot) => `<path class="t-arrow" transform="translate(${x},${y}) rotate(${rot})" d="M-.38,.1 L0,-.62 L.38,.1 Z"/>`;
+    // turn branch: from the stem at height y0 to the side, ending in a small head
+    const branch = (sign, y0) => `<path class="t-arrow-line" d="M0,${y0} Q0,${f2(y0 - 0.55)} ${f2(0.8 * sign)},${f2(y0 - 0.85)}"/>` + tri(f2(0.86 * sign), f2(y0 - 0.9), 62 * sign);
     let out = '';
-    const straight = '<path class="t-arrow" d="M-.19,1.7 L-.19,-.5 L-.68,-.5 L0,-1.75 L.68,-.5 L.19,-.5 L.19,1.7 Z"/>';
     if (has('straight')) {
-      out += straight;
-      if (has('left')) out += branch(1, 0.55);
-      if (has('right')) out += branch(-1, 0.55);
+      out += '<path class="t-arrow" d="M-.15,1.3 L-.15,-.35 L-.5,-.35 L0,-1.3 L.5,-.35 L.15,-.35 L.15,1.3 Z"/>';
+      if (has('left')) out += branch(-1, 0.75);
+      if (has('right')) out += branch(1, 0.75);
     } else {
       // turn only: the stem runs up to the bend
-      const turn = sign => `<path class="t-arrow-line" d="M0,1.7 L0,.35 Q0,-.45 ${-1.0 * sign},-.95"/>` + head(-1.08 * sign, -1.02, -58 * sign);
-      if (has('left')) out += turn(1);
-      if (has('right')) out += turn(-1);
+      const turn = sign => `<path class="t-arrow-line" d="M0,1.3 L0,.3 Q0,-.4 ${f2(0.85 * sign)},-.8"/>` + tri(f2(0.92 * sign), -0.85, 62 * sign);
+      if (has('left')) out += turn(-1);
+      if (has('right')) out += turn(1);
     }
     return out;
   }
@@ -512,14 +497,14 @@ let linkStops = false;     // move all stop lines together
       const isSel = sel && sel.kind === 'conn' && sel.id === conn.id;
       const fromSel = sel && sel.kind === 'lane' && sel.id === conn.from;
       const dim = sel && sel.kind === 'lane' && !fromSel && sel.id !== conn.to;
-      const wd = (sg || bad) ? (isSel || fromSel ? 0.62 : 0.46) : (isSel || fromSel ? 0.46 : 0.3);
+      const wd = (sg || bad) ? (isSel || fromSel ? 0.42 : 0.28) : (isSel || fromSel ? 0.26 : 0.14);
       // arrow head at the end, along the last part of the path
       const e = line[line.length - 1], q = line[Math.max(0, line.length - 4)];
       const len = Math.hypot(e.x - q.x, e.y - q.y) || 1, tx = (e.x - q.x) / len, ty = (e.y - q.y) / len;
-      const head = [{ x: e.x, y: e.y }, { x: e.x - tx * 1.1 - ty * 0.55, y: e.y - ty * 1.1 + tx * 0.55 }, { x: e.x - tx * 1.1 + ty * 0.55, y: e.y - ty * 1.1 - tx * 0.55 }];
-      if (isSel) html += `<path class="t-conn-halo" stroke-width="${wd + 0.5}" d="${d}"/>`;
+      const head = [{ x: e.x, y: e.y }, { x: e.x - tx * 0.8 - ty * 0.34, y: e.y - ty * 0.8 + tx * 0.34 }, { x: e.x - tx * 0.8 + ty * 0.34, y: e.y - ty * 0.8 - tx * 0.34 }];
+      if (isSel) html += `<path class="t-conn-halo" stroke-width="${wd + 0.35}" d="${d}"/>`;
       html += `<g style="opacity:${dim ? 0.3 : 1}"><path class="t-conn-hit" data-kind="conn" data-id="${conn.id}" d="${d}"/>` +
-        `${(sg || bad) ? `<path class="t-conn-case" stroke-width="${wd + 0.34}" d="${d}"/>` : ''}` +
+        `${(sg || bad) ? `<path class="t-conn-case" stroke-width="${wd + 0.2}" d="${d}"/>` : ''}` +
         `<path class="t-conn ${sg || bad ? '' : 'unassigned'}" stroke="${color}" stroke-width="${wd}" d="${d}"/>` +
         `<polygon points="${polyPts(head)}" fill="${color}"/></g>`;
     });

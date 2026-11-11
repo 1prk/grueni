@@ -561,5 +561,31 @@ test('topology: a straight movement with a sideways shift is in line before the 
   assert.ok(Math.max(...late) < 0.45, 'most of the shift is done at the centre');
 });
 
+test('topology: driving lines are smooth and leave and enter the lanes straight', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const g = T.allLaneGeoms(d);
+  m.connections.forEach(c => {
+    const line = T.connectionPolyline(m, d, c);
+    const a = g.get(c.from), b = g.get(c.to);
+    // start and end on the lane centre lines
+    near(Math.hypot(line[0].x - a.startPt.x, line[0].y - a.startPt.y), 0, 0.05, c.id + ' start');
+    near(Math.hypot(line[line.length - 1].x - b.startPt.x, line[line.length - 1].y - b.startPt.y), 0, 0.05, c.id + ' end');
+    // no kink: the heading changes by less than 4 degrees from one sample to the next
+    let worst = 0;
+    for (let i = 2; i < line.length; i++) {
+      const h1 = Math.atan2(line[i - 1].y - line[i - 2].y, line[i - 1].x - line[i - 2].x), h2 = Math.atan2(line[i].y - line[i - 1].y, line[i].x - line[i - 1].x);
+      let dh = Math.abs(h2 - h1); if (dh > Math.PI) dh = 2 * Math.PI - dh;
+      worst = Math.max(worst, dh * 180 / Math.PI);
+    }
+    assert.ok(worst < 4, `${c.id}: heading change ${worst.toFixed(1)} degrees between samples`);
+    // curvature is zero at both ends: the first and last segments follow the lane heading
+    const h0 = Math.atan2(line[1].y - line[0].y, line[1].x - line[0].x);
+    const want = Math.atan2(-a.arm.dir.y, -a.arm.dir.x);
+    let dd = Math.abs(h0 - want); if (dd > Math.PI) dd = 2 * Math.PI - dd;
+    assert.ok(dd * 180 / Math.PI < 3, c.id + ' leaves along the lane');
+  });
+});
+
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }
 console.log('\nall tests passed');
