@@ -311,7 +311,9 @@ test('topology: junction outline is closed', () => {
   const cmds = T.junctionOutline(d.arms);
   assert.strictEqual(cmds[0].type, 'M');
   assert.strictEqual(cmds[cmds.length - 1].type, 'Z');
-  assert.strictEqual(cmds.filter(c => c.type === 'Q').length, 4);
+  // three rounded corners and one corner that follows the slip lane of the free right turn
+  assert.strictEqual(cmds.filter(c => c.type === 'Q').length, 3);
+  assert.strictEqual(cmds.filter(c => c.kerb).length, 1);
 });
 
 test('topology: config round trip keeps the model and the id counters', () => {
@@ -554,6 +556,46 @@ test('topology: a turn whose egress lane starts at the corner continues into the
     const len = Math.hypot(line[i].x - line[i - 1].x, line[i].y - line[i - 1].y);
     assert.ok(dh * 180 / Math.PI / Math.max(len, 0.05) < 18, 'radius at sample ' + i);
   }
+});
+
+test('topology: an ingress lane can have its own stop line, set back from the arm stop line', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -90 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const west = T.derive(m).arms.find(a => a.name === 'West');
+  T.setLaneCount(m, west.key, 'in', 3);
+  const lanes = T.lanesOf(m, west.key, 'in');
+  lanes[0].stopOffset = 7.5;
+  const d = T.derive(m), arm = d.arms.find(a => a.key === west.key);
+  near(arm.in[0].startPt.x, -(arm.stopDist + 7.5), 1e-6);
+  near(arm.in[1].startPt.x, -arm.stopDist, 1e-6);
+  // two stop line pieces: the set-back lane and the two other lanes together
+  const segs = T.stopLineSegments(arm, null);
+  assert.strictEqual(segs.length, 2);
+  near(segs[0][0].x, -(arm.stopDist + 7.5), 1e-6);
+  // kept in the config
+  const back = T.fromConfig(JSON.parse(JSON.stringify(T.toConfig(m))));
+  assert.strictEqual(back.lanes.find(l => l.id === lanes[0].id).stopOffset, 7.5);
+});
+
+test('topology: a free right turn can leave before the stop line and join after the target stop line', () => {
+  const m = T.create();
+  const d0 = T.exampleCrossing(m);
+  const north = d0.arms.find(a => a.name === 'Nord');
+  m.arms[north.key].slipBack = 8;
+  m.arms[north.key].slipAhead = 10;
+  const d = T.derive(m), arm = d.arms.find(a => a.key === north.key);
+  const pair = T.freeRightPair(d, arm);
+  const isl = T.freeRightIslands(d).find(i => i.armKey === north.key);
+  const S = isl.slipPath, a = T.pointAt(pair.slip.path, pair.slip.cl, 8), b = T.pointAt(pair.target.path, pair.target.cl, 10);
+  near(Math.hypot(S[0].x - a.x, S[0].y - a.y), 0, 1e-6, 'leaves 8 m before the stop line');
+  near(Math.hypot(S[S.length - 1].x - b.x, S[S.length - 1].y - b.y), 0, 1e-6, 'joins 10 m after the target stop line');
+  // the corner kerb follows the slip lane at its width, and no lane touches the island or a kerb
+  assert.strictEqual(T.junctionOutline(d.arms).filter(c => c.kerb).length, 1);
+  same(T.connectionIssues(m, d), []);
+  // the arm has no kerb on its edge before the slip lane leaves it
+  assert.strictEqual(arm.kerbFromIn, 8);
 });
 
 test('topology: insetting a polygon moves every edge inward by the distance', () => {

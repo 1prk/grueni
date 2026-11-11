@@ -60,7 +60,9 @@
       "A1:e": {
         "init": true,
         "stopDist": 22,
-        "freeRight": true
+        "freeRight": true,
+        "slipBack": 8,
+        "slipAhead": 14
       },
       "A1:s": {
         "init": true,
@@ -81,6 +83,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -92,6 +95,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -103,6 +107,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 7.4,
         "sgs": [],
         "detectors": []
       },
@@ -114,6 +119,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -125,6 +131,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -136,6 +143,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -147,6 +155,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -158,6 +167,7 @@
         "type": "bike",
         "width": 1.85,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -169,6 +179,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -180,6 +191,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -191,6 +203,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -202,6 +215,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -213,6 +227,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": null,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -224,6 +239,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": 25,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       },
@@ -235,6 +251,7 @@
         "type": "vehicle",
         "width": 3.25,
         "length": 20,
+        "stopOffset": 0,
         "sgs": [],
         "detectors": []
       }
@@ -281,6 +298,24 @@
         "id": "V7",
         "from": "L14",
         "to": "L15",
+        "sg": null
+      },
+      {
+        "id": "V8",
+        "from": "L5",
+        "to": "L2",
+        "sg": null
+      },
+      {
+        "id": "V9",
+        "from": "L5",
+        "to": "L13",
+        "sg": null
+      },
+      {
+        "id": "V10",
+        "from": "L7",
+        "to": "L4",
         "sg": null
       }
     ],
@@ -345,8 +380,29 @@
                 ]
               },
               "ingressApproach": 1,
-              "maneuvers": {},
-              "connectsTo": []
+              "maneuvers": {
+                "maneuverLeftAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 9,
+                    "maneuver": {
+                      "maneuverLeftAllowed": true
+                    }
+                  },
+                  "connectionID": 8
+                },
+                {
+                  "connectingLane": {
+                    "lane": 10,
+                    "maneuver": {
+                      "maneuverLeftAllowed": true
+                    }
+                  },
+                  "connectionID": 9
+                }
+              ]
             },
             {
               "laneID": 2,
@@ -392,6 +448,15 @@
                     }
                   },
                   "connectionID": 1
+                },
+                {
+                  "connectingLane": {
+                    "lane": 14,
+                    "maneuver": {
+                      "maneuverRightAllowed": true
+                    }
+                  },
+                  "connectionID": 10
                 }
               ]
             },
@@ -759,24 +824,16 @@
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -235,
-                        "y": -233
+                        "x": -964,
+                        "y": -295
                       }
                     }
                   },
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -1263,
-                        "y": -122
-                      }
-                    }
-                  },
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": -3036,
-                        "y": -391
+                        "x": -3570,
+                        "y": -451
                       }
                     }
                   }

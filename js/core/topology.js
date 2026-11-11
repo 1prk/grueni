@@ -30,6 +30,7 @@
     walk: 2.5,           // m, width of the footway drawn beside the road
     triRound: 0.9,       // m, radius of its rounded corners
     triTip: 1.6,         // m, width of the nose of the triangle island
+    rightRadius: 12.5,   // m, radius of a right turn (its tangent length is limited by it)
     triDepth: 0.6        // the tip of the triangle island is cut at this depth (times the base) behind its base
     ,collideSlack: 0.2   // m, a path may come this much closer to an island or kerb than half its lane width
   };
@@ -341,7 +342,7 @@
 
   function newLane(model, armKey, dir, order, type) {
     type = LANE_TYPES[type] ? type : 'vehicle';
-    return { id: nextId(model, 'L'), armKey, dir, order, type, width: LANE_TYPES[type].width, length: null, sgs: [], detectors: [] };
+    return { id: nextId(model, 'L'), armKey, dir, order, type, width: LANE_TYPES[type].width, length: null, stopOffset: 0, sgs: [], detectors: [] };
   }
 
   const lanesOf = (model, armKey, dir) =>
@@ -465,7 +466,24 @@
       arm.freeRight = !!cfg.freeRight;
       buildArmGeometry(model, arm);
     });
-    return { center, autoCenter: autoC, arms, axes: entries };
+    // Free right turn: the slip lane leaves its arm slipBack m before the stop line and joins the
+    // egress lane slipAhead m after the stop line of the target arm. The kerb of the corner and the
+    // triangle island follow. kerbFrom: the arm edge has no kerb (and no footway) before this distance.
+    const derived = { center, autoCenter: autoC, arms, axes: entries };
+    arms.forEach(arm => { arm.kerbFromIn = 0; arm.kerbFromOut = 0; });
+    arms.forEach(arm => {
+      if (!arm.freeRight) return;
+      const pair = freeRightPair(derived, arm);
+      if (!pair) return;
+      const cfg = model.arms[arm.key] || {};
+      const room = a => Math.max(0, a.length - a.stopDist - 3);
+      arm.slipBack = Math.min(room(arm), Math.max(0, +cfg.slipBack || 0));
+      arm.slipAhead = Math.min(room(pair.prev), Math.max(0, +cfg.slipAhead || 0));
+      arm.kerbFromIn = arm.slipBack;
+      pair.prev.kerbFromOut = arm.slipAhead;
+      pair.slip.slipStart = arm.slipBack;
+    });
+    return derived;
   }
 
   function buildArmGeometry(model, arm) {
@@ -487,10 +505,13 @@
         const n = laneList.length;
         const len = lane.length > 0 && n >= 2 && (i === 0 || i === n - 1) && lane.length < subTotal ? lane.length : null;
         const cut = len ? { len, anchor: i === 0 ? 'outer' : 'inner' } : null;
-        const part = cut ? subPoly(sub, scl, 0, Math.min(subTotal, cut.len + DEFAULTS.taper / 2)) : sub;
+        // An ingress lane can have its own stop line, set back from the stop line of the arm by stopOffset.
+        // Its centre line (and so its connections) starts there.
+        const stopOff = dir === 'in' ? Math.max(0, Math.min(subTotal - 2, lane.stopOffset || 0)) : 0;
+        const part = subPoly(sub, scl, stopOff, cut ? Math.min(subTotal, cut.len + DEFAULTS.taper / 2) : subTotal);
         const path = offsetPoly(part, side * (inner + lane.width / 2));
         const g = {
-          lane, arm, dir, index: i, path, cut,
+          lane, arm, dir, index: i, path, cut, stopOff,
           label: (dir === 'in' ? 'Z' : 'A') + (i + 1),
           inner, outer: inner + lane.width,
           startPt: { x: path[0].x, y: path[0].y },
@@ -523,6 +544,22 @@
   }
 
 
+  // Stop line pieces of an arm: one per group of neighbouring ingress lanes with the same stop line
+  // offset. skipId: a lane without stop line (the slip lane of a free right turn). Returns [[a, b]].
+  function stopLineSegments(arm, skipId) {
+    const out = [];
+    let cur = null;
+    arm.in.forEach((g, i) => {
+      if (g.lane.id === skipId) { cur = null; return; }
+      const p = pointAt(arm.path, arm.cl, arm.stopDist + g.stopOff), nl = { x: -p.ty, y: p.tx };
+      const from = i === 0 ? arm.gap / 2 : g.inner, to = g.outer;
+      const at = d => ({ x: p.x + nl.x * d, y: p.y + nl.y * d });
+      if (cur && cur.off === g.stopOff) cur.seg[1] = at(to);
+      else { cur = { off: g.stopOff, seg: [at(from), at(to)] }; out.push(cur.seg); }
+    });
+    return out;
+  }
+
   // Outline of a lane. A short lane gets a taper at its end: its free boundary moves
   // toward the anchored boundary until the width is zero.
   function laneOutline(g) {
@@ -552,10 +589,14 @@
     if (arm.sub.length < 2) return out;
     const half = arm.gap / 2, W = DEFAULTS.walk;
     const total = arm.subCl[arm.subCl.length - 1];
-    out.walk = offsetPoly(arm.sub, half + arm.widthIn + W).concat(offsetPoly(arm.sub, -(half + arm.widthOut + W)).reverse());
+    const fromIn = Math.min(total, arm.kerbFromIn || 0), fromOut = Math.min(total, arm.kerbFromOut || 0);
+    const walkIn = subPoly(arm.sub, arm.subCl, fromIn, total), walkOut = subPoly(arm.sub, arm.subCl, fromOut, total);
+    out.walk = offsetPoly(walkIn, half + arm.widthIn + W).concat(offsetPoly(walkOut, -(half + arm.widthOut + W)).reverse());
     if (arm.gap > 0.05) out.gapBase = offsetPoly(arm.sub, half).concat(offsetPoly(arm.sub, -half).reverse());
     if (arm.gap > 0.3 && arm.islandLen > 0) {
-      const a = Math.max(0, arm.stopDist - DEFAULTS.islandBack), b = Math.min(arm.length, arm.stopDist + arm.islandLen);
+      // the round end lies at the stop line of the innermost ingress lane (it may be set back)
+      const back = arm.in.length ? arm.in[0].stopOff : 0;
+      const a = Math.max(0, arm.stopDist + back - DEFAULTS.islandBack), b = Math.min(arm.length, arm.stopDist + back + arm.islandLen);
       const path = subPoly(arm.path, arm.cl, a, b);
       if (path.length >= 2) {
         out.island = stadiumPolygon(path, half);
@@ -567,7 +608,12 @@
       lanes.forEach((g, i) => {
         const o = laneOutline(g);
         if (!o.pts.length) return;
-        if (i === lanes.length - 1) out.kerbs.push(o.outerEdge);
+        if (i === lanes.length - 1) {
+          // a free right turn leaves (or joins) here: the kerb starts where its corner kerb ends
+          const from = dir === 'in' ? fromIn : fromOut;
+          const k = from > 0 ? o.outerEdge.filter((_, j) => o.cl[j] >= from) : o.outerEdge;
+          if (k.length > 1) out.kerbs.push(k);
+        }
         const next = lanes[i + 1];
         if (next && next.cut && next.cut.anchor === 'inner') {
           // the outer lane has ended: the edge of this lane is now the road edge
@@ -601,6 +647,12 @@
       // clockwise: right corner of arm a to left corner of the next arm b
       if (i === 0) cmds.push({ type: 'M', pts: [a.cornerLeft] }, { type: 'L', pts: [a.cornerRight] });
       else cmds.push({ type: 'L', pts: [a.cornerLeft] }, { type: 'L', pts: [a.cornerRight] });
+      const F = b.freeRight && b.slipBack != null && usable.length > 2 ? freeRightSlip(b, a) : null;
+      if (F) {
+        // the corner kerb is the kerb of the slip lane ('kerb' marks it for drawing and collision checks)
+        cmds.push({ type: 'L', pts: F.kerb, kerb: true }, { type: 'L', pts: [b.cornerLeft] });
+        return;
+      }
       const ctrl = lineIntersect(a.cornerRight, a.dir, b.cornerLeft, b.dir);
       const span = dist(a.cornerRight, b.cornerLeft);
       const ok = ctrl && dist(ctrl, a.cornerRight) < Math.max(25, span) && dist(ctrl, b.cornerLeft) < Math.max(25, span) &&
@@ -752,6 +804,52 @@
     return { prev, slip, target };
   }
 
+  // Slip lane of a free right turn between arm (slip lane) and prev (target arm). Its centre line S leaves
+  // the slip lane slipBack m before the stop line and joins the egress lane slipAhead m after the stop
+  // line of the target arm. S is straight - arc - straight like every right turn (radius
+  // DEFAULTS.rightRadius at most). The kerb (right of S) and the island edge (left of S) keep the lane
+  // width; the width goes smoothly from the slip lane to the egress lane.
+  // Returns { slip, target, S, curve (island edge), kerb (from prev to arm), dSlip, dEgress } or null.
+  function freeRightSlip(arm, prev) {
+    const veh = l => l.filter(isVehicle);
+    const ins = veh(arm.in), outs = veh(prev.out);
+    if (!ins.length || !outs.length) return null;
+    const slip = ins[ins.length - 1], target = outs[outs.length - 1];
+    if (slip.index < 1 || target.index < 1) return null;
+    const q0 = pointAt(slip.path, slip.cl, Math.min(arm.slipBack || 0, slip.cl[slip.cl.length - 1]));
+    const q1 = pointAt(target.path, target.cl, Math.min(arm.slipAhead || 0, target.cl[target.cl.length - 1]));
+    const p0 = { x: q0.x, y: q0.y }, h0 = { x: -q0.tx, y: -q0.ty }, p1 = { x: q1.x, y: q1.y }, h1 = { x: q1.tx, y: q1.ty };
+    const X = lineIntersect(p0, h0, p1, h1);
+    if (!X) return null;
+    const d0 = (X.x - p0.x) * h0.x + (X.y - p0.y) * h0.y, d1 = (p1.x - X.x) * h1.x + (p1.y - X.y) * h1.y;
+    if (d0 < 0.5 || d1 < 0.5) return null;
+    const angle = Math.abs(turnAngle(h0, h1));
+    const Lmax = DEFAULTS.rightRadius * Math.tan(angle * Math.PI / 360);
+    const S = arcPath(p0, h0, p1, h1, X, Math.min(d0, 1.3 * d1, Lmax), Math.min(d1, 1.3 * d0, Lmax), rightHandle(angle));
+    const scl = cumLen(S), total = scl[scl.length - 1];
+    const dSlip = (arm.gap / 2 + arm.widthIn) - slip.inner;            // kerb to the inner edge of the slip lane
+    const dEgress = (prev.gap / 2 + prev.widthOut) - target.inner;     // kerb to the inner edge of the egress lane
+    const wS = slip.lane.width, wT = target.lane.width;
+    const f = sv => sv / total;
+    const curve = offsetPoly(S, scl.map(sv => (wS + (wT - wS) * f(sv)) / 2));                       // left of S
+    const kerb = offsetPoly(S, scl.map(sv => -((dSlip - wS / 2) + ((dEgress - wT / 2) - (dSlip - wS / 2)) * f(sv)))).reverse();
+    return { slip, target, S, curve, kerb, dSlip, dEgress };
+  }
+
+  // Inner handle position of a right turn: 0.5 up to 65 degrees, rounder (down to 0.3) for sharper turns.
+  // Fitted to hand-drawn driving lines.
+  const rightHandle = angle => Math.max(0.3, Math.min(0.5, 0.7 - 0.0031 * angle));
+
+  // Straight - arc - straight from p0 (heading h0) to p1 (heading h1). X: where the two headings meet;
+  // L0, L1: tangent lengths of the arc at X; b: position of the inner handles of the quintic arc.
+  function arcPath(p0, h0, p1, h1, X, L0, L1, b) {
+    const a = 0.15, A = along(X, h0, -L0), B = along(X, h1, L1);
+    const arc = quintic([A, along(A, h0, a * L0), along(A, h0, b * L0), along(B, h1, -b * L1), along(B, h1, -a * L1), B], 48);
+    const pts = straightPart(p0, A).slice(0, -1).concat(arc, straightPart(B, p1)), line = [p0];
+    pts.forEach(q => { if (dist(line[line.length - 1], q) > 0.02) line.push(q); });
+    return line;
+  }
+
   // Island between the slip lane and the other lanes: a triangle with a concave long side.
   function freeRightIslands(derived) {
     const out = [];
@@ -767,19 +865,9 @@
       const inward = (p, from, dir) => (p.x - from.x) * dir.x + (p.y - from.y) * dir.y < -0.5;
       if (!inward(apex, v1, arm.dir) || !inward(apex, v2, prev.dir)) return;
 
-      // The curved side is the kerb curve moved inward by the width of the slip lane, so the lane keeps
-      // its width through the junction. The width goes smoothly from the slip lane to the egress lane.
-      const kerbCtrl = lineIntersect(prev.cornerRight, prev.dir, arm.cornerLeft, arm.dir);
-      if (!kerbCtrl) return;
-      const N = 48, kerb = [];
-      for (let i = 0; i <= N; i++) {
-        const t = i / N, u = 1 - t;
-        kerb.push({ x: u * u * prev.cornerRight.x + 2 * u * t * kerbCtrl.x + t * t * arm.cornerLeft.x, y: u * u * prev.cornerRight.y + 2 * u * t * kerbCtrl.y + t * t * arm.cornerLeft.y });
-      }
-      const dEgress = (prev.gap / 2 + prev.widthOut) - target.inner;    // kerb to the inner edge of the egress lane
-      const dSlip = (arm.gap / 2 + arm.widthIn) - slip.inner;            // kerb to the inner edge of the slip lane
-      const inset = kerb.map((_, i) => -(dEgress + (dSlip - dEgress) * (i / N)));   // right of the travel direction = junction side
-      const curve = offsetPoly(kerb, inset).reverse();                   // from the slip lane (v1) to the egress lane (v2)
+      const F = freeRightSlip(arm, prev);
+      if (!F) return;
+      const { curve, kerb, dSlip, dEgress } = F;
 
       // The island must never reach into a lane: its straight legs lie on the lane boundaries and
       // its curved side keeps the lane width to the kerb. The thin ends are cut where the island is
@@ -792,11 +880,16 @@
       const onLine = (q, v, d) => { const t = (q.x - v.x) * d.x + (q.y - v.y) * d.y; return { x: v.x + d.x * t, y: v.y + d.y * t }; };
       const pa = onLine(curve[k], v1, arm.dir), pb = onLine(curve[m], v2, prev.dir);
       let pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
+      // When the slip lane leaves before the stop line (or joins after it), the island lies between the
+      // slip lane and the two stop lines: its side toward the junction is the line from v2 to v1.
+      const outward = (q, v, dir) => (q.x - v.x) * dir.x + (q.y - v.y) * dir.y > 0.5;
+      const chord = (arm.slipBack || 0) > 0 || (arm.slipAhead || 0) > 0;
+      if (chord) pts = (outward(pa, v1, arm.dir) ? [v1, pa] : [pa]).concat(curve.slice(k, m + 1), outward(pb, v2, prev.dir) ? [pb, v2] : [pb]);
       // When the two arms meet at a sharp angle, the legs are long and the tip reaches into the through
       // lanes. The tip is then cut flat: no point lies deeper than DEFAULTS.triDepth times the base
       // (the line from v1 to v2) behind the base.
       const base = dist(v1, v2);
-      if (base > 0.5) {
+      if (base > 0.5 && !chord) {
         let n = { x: -(v2.y - v1.y) / base, y: (v2.x - v1.x) / base };
         if ((apex.x - v1.x) * n.x + (apex.y - v1.y) * n.y < 0) n = { x: -n.x, y: -n.y };
         pts = clipHalfPlane(pts, v1, n, DEFAULTS.triDepth * base);
@@ -804,9 +897,7 @@
       }
       // the radius must stay below half the width of the noses, or the inset polygon folds over
       const r = Math.min(fitRadius(pts, DEFAULTS.triRound), DEFAULTS.triTip * 0.47);
-      // centre line of the slip lane: kerb curve moved inward by (distance to the island edge - half the lane width)
-      const w = (slip.lane.width + target.lane.width) / 2;
-      const slipPath = offsetPoly(kerb, kerb.map((_, i) => -(dEgress + (dSlip - dEgress) * (i / N) - w / 2))).reverse();
+      const slipPath = F.S;
       out.push({ armKey: arm.key, polygon: insetPolygon(pts, r), r, outline: pts, curve, kerb, widths: [dSlip, dEgress], slipPath, slipFrom: slip.lane.id, slipTo: target.lane.id });
     });
     return out;
@@ -962,10 +1053,24 @@
       const d0 = (X.x - p0.x) * h0.x + (X.y - p0.y) * h0.y, d1 = (q.x - X.x) * hq.x + (q.y - X.y) * hq.y;
       return { X, d0, d1 };
     };
+    // Straight on (below 45 degrees): a nearly direct line between the two lane ends, with short
+    // handles (a smooth bend only near each end), like a vehicle drives across. Fitted to hand-drawn
+    // driving lines. Other S curves follow as fallbacks (islands at the far or near side).
+    const sLines = [];
+    if (angle < 45) {
+      const q = toG.startPt, hq = { x: toG.arm.dir.x, y: toG.arm.dir.y }, D = dist(p0, q);
+      const sLine = (a0, b0, b1, a1) => quintic([p0, along(p0, h0, a0 * D), along(p0, h0, b0 * D), along(q, hq, -b1 * D), along(q, hq, -a1 * D), q], 60);
+      [[0.05, 0.2, 0.2, 0.05], [0.15, 0.42, 0.42, 0.15], [0.06, 0.25, 1.0, 0.3], [0.03, 0.2, 1.2, 0.3], [0.3, 1.0, 0.25, 0.06]]
+        .forEach(f => sLines.push(() => sLine(...f)));
+    }
     let c = angle >= 12 && angle <= 160 ? corner(p1, h1) : null;
+    const right = turnAngle(h0, h1) < 0;
+    // A right turn sweeps with a radius of about DEFAULTS.rightRadius: its tangent length is limited.
+    const Lmax = right && angle >= 45 ? DEFAULTS.rightRadius * Math.tan(angle * Math.PI / 360) : Infinity;
     if (c && c.d0 > 0.5 && angle >= 45) {
-      // a turn continues into the egress lane when the egress leg is much shorter than the ingress leg
-      const want = 0.6 * c.d0;
+      // The turn continues into the egress lane when the egress leg is shorter than the wanted tangent
+      // (a vehicle finishes the turn after the crossing).
+      const want = right ? Math.min(c.d0, Lmax) : 0.6 * c.d0;
       const avail = (toG.cut ? Math.min(toG.cut.len, toG.cl[toG.cl.length - 1]) : toG.cl[toG.cl.length - 1]) - 1;
       if (c.d1 < want && avail > 0) {
         const q = pointAt(toG.path, toG.cl, Math.min(avail, want - c.d1, 15));
@@ -974,38 +1079,37 @@
       }
     }
     if (c && c.d0 > 0.5 && c.d1 > 0.5) {
-      // A right turn passes the kerb corner on the inside. The kerb is a quadratic curve, so the line
-      // takes the same shape (long inner handles, b = 0.82): then it keeps its distance to the kerb.
-      // A left turn has no kerb inside; it uses the handles of a near-circular arc.
-      const right = turnAngle(h0, h1) < 0;
-      const b = right ? 0.82 : Math.max(0.5, Math.min(0.75, 0.8 - 0.0025 * angle));
-      // ratio: how much longer one tangent may be than the other. 10 = one long, gentle curve over both
-      // legs; a smaller ratio leaves a straight part on the longer leg.
+      // The line is straight - arc - straight. The arc has the tangent lengths L0 (toward the ingress
+      // lane) and L1 (toward the egress lane) at the corner point X, where the two lane headings meet.
+      //  - left turn: the arc uses nearly the whole of both legs (each at most 1.3 times the other);
+      //  - right turn: both tangents are at most Lmax (radius DEFAULTS.rightRadius);
+      //  - small bend (below 45 degrees): one long, gentle curve over both legs.
+      // b: position of the inner handles (0.5 to 0.75 gives a near-circular arc with zero curvature at
+      // its ends; the values for turns are fitted to hand-drawn driving lines). Other shapes follow as fallbacks, for lines that would touch an island or a kerb.
+      const b = angle < 45 ? Math.max(0.5, Math.min(0.75, 0.8 - 0.0025 * angle)) : right ? rightHandle(angle) : 0.6;
       // run: a straight part before the arc (and after it), so the line can pass the round end of a
       // median island next to the lane. Lines with a shorter run are tried first.
       const island = g => g.index === 0 && g.arm.gap > 0.3 && g.arm.islandLen > 0;
-      const arcLine = (ratio, bb, run) => {
+      const arcLine = (lengths, bb, run) => {
         const e0 = Math.max(0.5, c.d0 - (island(fromG) ? run : 0)), e1 = Math.max(0.5, c.d1 - (island(toG) ? run : 0));
-        const L0 = Math.min(e0, ratio * e1), L1 = Math.min(e1, ratio * e0), a = 0.15;
-        const A = along(c.X, h0, -L0), B = along(c.X, h1, L1);
-        const arc = quintic([A, along(A, h0, a * L0), along(A, h0, bb * L0), along(B, h1, -bb * L1), along(B, h1, -a * L1), B], 48);
-        const pts = straightPart(p0, A).slice(0, -1).concat(arc, straightPart(B, p1)), line = [p0];
-        pts.forEach(q => { if (dist(line[line.length - 1], q) > 0.02) line.push(q); });
-        return line;
+        const [L0, L1] = lengths(e0, e1);
+        return arcPath(p0, h0, p1, h1, c.X, L0, L1, bb);
       };
-      const b2 = Math.min(0.92, b + 0.1), out = [];
-      [0, 1, 2, DEFAULTS.islandBack + 1].forEach(run => {
-        if (run && !island(fromG) && !island(toG)) return;
-        [[10, b], [10, b2], [1.6, b], [1.6, b2], [1, b], [1, b2], [10, b - 0.15]].forEach(([r, bb]) => out.push(() => arcLine(r, bb, run)));
+      const ratio = r => (e0, e1) => [Math.min(e0, r * e1, Lmax), Math.min(e1, r * e0, Lmax)];
+      const main = angle >= 45 ? ratio(1.3) : ratio(10);
+      const b2 = Math.min(0.92, b + 0.15), out = sLines.slice();
+      const maxRun = DEFAULTS.islandBack + 1 + (fromG.stopOff || 0);
+      [0, 1, 2, maxRun / 2, maxRun].forEach((run, k) => {
+        if (k && (!island(fromG) && !island(toG) || (k > 2 && run <= 2))) return;
+        out.push(() => arcLine(main, b, run), () => arcLine(main, b2, run), () => arcLine(main, 0.82, run));
+        [1, 1.6, 10].forEach(r => [b, b2].forEach(bb => out.push(() => arcLine(ratio(r), bb, run))));
       });
       return out;
     }
-    // No usable corner: one S curve, handles along the lane headings. Symmetric first; then shapes that
-    // do most of the sideways shift early (an island at the far side) or late (an island at the near side).
-    p1 = toG.startPt; h1 = { x: toG.arm.dir.x, y: toG.arm.dir.y };
+    // no usable corner: the S curves (a U-turn has none: it uses the direct curve)
+    if (sLines.length) return sLines;
     const D = dist(p0, p1);
-    const sLine = (a0, b0, b1, a1) => quintic([p0, along(p0, h0, a0 * D), along(p0, h0, b0 * D), along(p1, h1, -b1 * D), along(p1, h1, -a1 * D), p1], 60);
-    return [[0.15, 0.42, 0.42, 0.15], [0.06, 0.25, 1.0, 0.3], [0.03, 0.2, 1.2, 0.3], [0.3, 1.0, 0.25, 0.06]].map(f => () => sLine(...f));
+    return [() => quintic([p0, along(p0, h0, 0.4 * D), along(p0, h0, 0.8 * D), along(p1, h1, -0.8 * D), along(p1, h1, -0.4 * D), p1], 60)];
   }
 
   function pointPolygonDistance(p, poly) {
@@ -1027,6 +1131,7 @@
   function kerbPolylines(derived) {
     const cmds = junctionOutline(derived.arms), out = [];
     cmds.forEach((c, i) => {
+      if (c.kerb) { out.push(c.pts.slice()); return; }
       if (c.type !== 'Q') return;
       const p0 = cmds[i - 1].pts[cmds[i - 1].pts.length - 1], q = c.pts[0], p2 = c.pts[1], line = [];
       for (let j = 0; j <= 24; j++) { const t = j / 24, u = 1 - t; line.push({ x: u * u * p0.x + 2 * u * t * q.x + t * t * p2.x, y: u * u * p0.y + 2 * u * t * q.y + t * t * p2.y }); }
@@ -1146,6 +1251,7 @@
       id: String(l.id), armKey: String(l.armKey), dir: l.dir, order: num(l.order) || 0,
       type: LANE_TYPES[l.type] ? l.type : 'vehicle', width: num(l.width) || LANE_TYPES.vehicle.width,
       length: num(l.length) > 0 ? l.length : null,
+      stopOffset: num(l.stopOffset) > 0 ? l.stopOffset : 0,
       sgs: strList(l.sgs), detectors: strList(l.detectors)
     }));
     m.crosswalks = (cfg.crosswalks || []).filter(c => c && c.id && c.armKey).map(c => ({
@@ -1296,7 +1402,7 @@
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
     // geometry
-    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightPossible, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
+    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightPossible, freeRightSlip, arcPath, stopLineSegments, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
     placeBackground, scaleBackground, bgPixelToWorld, bgWorldToPixel,
