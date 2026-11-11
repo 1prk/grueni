@@ -371,5 +371,62 @@ test('topology: simplify keeps the end points and removes straight points', () =
   assert.strictEqual(s[0].x, 0); assert.strictEqual(s[2].y, 10);
 });
 
+test('topology: a short inner lane tapers to zero width and leaves an island', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -90 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const key = T.derive(m).arms.find(a => a.name === 'Nord').key;
+  T.setLaneCount(m, key, 'in', 3);
+  T.lanesOf(m, key, 'in')[0].length = 20;
+  const arm = T.derive(m).arms.find(a => a.key === key);
+  const g = arm.in[0];
+  assert.ok(g.cut && g.cut.anchor === 'outer');
+  near(T.polyLength(g.path), 20 + T.DEFAULTS.taper / 2, 0.6);
+  const o = T.laneOutline(g);
+  const width = i => Math.hypot(o.innerEdge[i].x - o.outerEdge[i].x, o.innerEdge[i].y - o.outerEdge[i].y);
+  near(width(0), 3.25, 1e-6, 'full width at the stop line');
+  near(width(o.innerEdge.length - 1), 0, 0.01, 'zero width at the end of the taper');
+  const surf = T.armSurfaces(arm);
+  assert.strictEqual(surf.freed.length, 1, 'the freed width becomes island');
+  // the middle lane can not be short, the outermost lane anchors at its inner side
+  T.lanesOf(m, key, 'in')[1].length = 10;
+  assert.strictEqual(T.derive(m).arms.find(a => a.key === key).in[1].cut, null);
+  T.lanesOf(m, key, 'in')[2].length = 15;
+  assert.strictEqual(T.derive(m).arms.find(a => a.key === key).in[2].cut.anchor, 'inner');
+  // a lane alone in its direction ignores the length
+  T.setLaneCount(m, key, 'out', 1);
+  T.lanesOf(m, key, 'out')[0].length = 10;
+  assert.strictEqual(T.derive(m).arms.find(a => a.key === key).out[0].cut, null);
+});
+
+test('topology: a median gap gives an island with pointed ends', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -90 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const key = T.derive(m).arms.find(a => a.name === 'Ost').key;
+  assert.strictEqual(T.armSurfaces(T.derive(m).arms.find(a => a.key === key)).island, null, 'no gap, no island');
+  m.arms[key].gap = 3;
+  const arm = T.derive(m).arms.find(a => a.key === key);
+  const surf = T.armSurfaces(arm);
+  assert.ok(surf.island && surf.gapBase && surf.walk);
+  const xs = surf.island.map(p => p.y);       // east arm: the island width runs along y
+  near(Math.max(...xs) - Math.min(...xs), 3, 0.05, 'island is as wide as the gap');
+  // lanes keep their place: the first ingress lane starts half the gap plus half a lane from the axis
+  near(arm.in[0].startPt.y, 1.5 + 3.25 / 2, 0.1);
+  near(Math.hypot(surf.island[0].x - surf.island[surf.island.length - 1].x, surf.island[0].y - surf.island[surf.island.length - 1].y), 0, 0.01, 'pointed nose');
+});
+
+test('topology: lane length and median settings survive the config round trip', () => {
+  const m = T.create();
+  T.exampleCrossing(m);
+  const lane = m.lanes.find(l => l.length);
+  assert.ok(lane, 'the example has a turning lane');
+  const m2 = T.fromConfig(JSON.parse(JSON.stringify(T.toConfig(m))));
+  assert.strictEqual(m2.lanes.find(l => l.id === lane.id).length, lane.length);
+  assert.ok(Object.values(m2.arms).some(a => a.gap === 3 && a.islandLen === 40));
+});
+
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }
 console.log('\nall tests passed');

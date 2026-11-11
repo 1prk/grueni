@@ -23,7 +23,12 @@
     minArmLen: 4,        // m; shorter arms are ignored
     maxCenterDist: 30,   // m; an axis farther away from the centre is not part of the intersection
     crossWidth: 4,       // m, distance between the two dashed lines of a pedestrian crossing
-    corridorTol: 8       // m; axes that do not cross but come this close still form an intersection
+    corridorTol: 8,      // m; axes that do not cross but come this close still form an intersection
+    islandLen: 30,       // m, length of a median island (Mittelinsel) from the stop line outward
+    islandNose: 6,       // m, length of the pointed ends of a median island
+    islandBack: 2,       // m, the island nose starts this far before the stop line
+    taper: 8,            // m, length of the taper at the end of a short (turning) lane
+    walk: 2.5            // m, width of the footway drawn beside the road
   };
 
   const LANE_TYPES = {
@@ -111,8 +116,10 @@
   }
 
   // Parallel curve. d > 0 is to the left of the direction of the polyline.
+  // d is one distance, or an array with one distance per vertex.
   function offsetPoly(poly, d) {
     const n = poly.length;
+    const dAt = i => (Array.isArray(d) ? d[i] : d);
     if (n < 2 || d === 0) return poly.map(p => ({ x: p.x, y: p.y }));
     const nrm = [];
     for (let i = 0; i < n - 1; i++) {
@@ -123,8 +130,8 @@
       const a = nrm[Math.max(0, i - 1)], b = nrm[Math.min(n - 2, i)];
       let mx = a.x + b.x, my = a.y + b.y;
       const m2 = mx * mx + my * my;
-      if (m2 < 0.09) { mx = b.x * d; my = b.y * d; }       // sharp corner: do not spike
-      else { const k = (2 * d) / m2; mx *= k; my *= k; }    // mitre join
+      if (m2 < 0.09) { mx = b.x * dAt(i); my = b.y * dAt(i); }       // sharp corner: do not spike
+      else { const k = (2 * dAt(i)) / m2; mx *= k; my *= k; }          // mitre join
       return { x: p.x + mx, y: p.y + my };
     });
   }
@@ -236,7 +243,7 @@
 
   function newLane(model, armKey, dir, order, type) {
     type = LANE_TYPES[type] ? type : 'vehicle';
-    return { id: nextId(model, 'L'), armKey, dir, order, type, width: LANE_TYPES[type].width, sgs: [], detectors: [] };
+    return { id: nextId(model, 'L'), armKey, dir, order, type, width: LANE_TYPES[type].width, length: null, sgs: [], detectors: [] };
   }
 
   const lanesOf = (model, armKey, dir) =>
@@ -356,6 +363,7 @@
       arm.name = cfg.name || (used[base] > 1 ? base + ' ' + used[base] : base);
       arm.stopDist = Math.max(1, Math.min(cfg.stopDist != null ? cfg.stopDist : DEFAULTS.stopDist, arm.length - 2));
       arm.gap = cfg.gap != null ? cfg.gap : DEFAULTS.gap;
+      arm.islandLen = cfg.islandLen != null ? cfg.islandLen : DEFAULTS.islandLen;
       buildArmGeometry(model, arm);
     });
     return { center, autoCenter: autoC, arms, axes: entries };
@@ -372,10 +380,18 @@
     ['in', 'out'].forEach(dir => {
       const side = dir === 'in' ? 1 : -1;
       let inner = arm.gap / 2;
-      arm[dir] = lanesOf(model, arm.key, dir).map((lane, i) => {
-        const path = offsetPoly(sub, side * (inner + lane.width / 2));
+      const laneList = lanesOf(model, arm.key, dir);
+      const subTotal = scl[scl.length - 1];
+      arm[dir] = laneList.map((lane, i) => {
+        // A short lane (turning lane) is only possible for the innermost and the outermost lane.
+        // It ends with a taper. The width it leaves becomes island (inner lane) or footway (outer lane).
+        const n = laneList.length;
+        const len = lane.length > 0 && n >= 2 && (i === 0 || i === n - 1) && lane.length < subTotal ? lane.length : null;
+        const cut = len ? { len, anchor: i === 0 ? 'outer' : 'inner' } : null;
+        const part = cut ? subPoly(sub, scl, 0, Math.min(subTotal, cut.len + DEFAULTS.taper / 2)) : sub;
+        const path = offsetPoly(part, side * (inner + lane.width / 2));
         const g = {
-          lane, arm, dir, index: i, path,
+          lane, arm, dir, index: i, path, cut,
           label: (dir === 'in' ? 'Z' : 'A') + (i + 1),
           inner, outer: inner + lane.width,
           startPt: { x: path[0].x, y: path[0].y },
@@ -405,6 +421,77 @@
         b: { x: p.x - nl.x * (right + 0.3), y: p.y - nl.y * (right + 0.3) }
       };
     }
+  }
+
+
+  // Outline of a lane. A short lane gets a taper at its end: its free boundary moves
+  // toward the anchored boundary until the width is zero.
+  function laneOutline(g) {
+    if (g._outline) return g._outline;
+    const arm = g.arm, side = g.dir === 'in' ? 1 : -1;
+    const total = arm.subCl[arm.subCl.length - 1];
+    const end = g.cut ? Math.min(total, g.cut.len + DEFAULTS.taper) : total;
+    const poly = subPoly(arm.sub, arm.subCl, 0, end);
+    if (poly.length < 2) return (g._outline = { pts: [], innerEdge: [], outerEdge: [], poly, cl: [] });
+    const cl = cumLen(poly), w = g.lane.width;
+    const f = s => (!g.cut || s <= g.cut.len ? 1 : Math.max(0, 1 - (s - g.cut.len) / DEFAULTS.taper));
+    const dIn = cl.map(s => side * (g.cut && g.cut.anchor === 'outer' ? g.outer - w * f(s) : g.inner));
+    const dOut = cl.map(s => side * (g.cut && g.cut.anchor === 'inner' ? g.inner + w * f(s) : g.outer));
+    const innerEdge = offsetPoly(poly, dIn), outerEdge = offsetPoly(poly, dOut);
+    return (g._outline = { pts: innerEdge.concat(outerEdge.slice().reverse()), innerEdge, outerEdge, poly, cl });
+  }
+
+  const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+
+  // Areas around the lanes of one arm (all polygons in world coordinates):
+  //   walk    footway band beside the road
+  //   gapBase road colour under the median
+  //   island  median island with pointed ends (when the median is wider than 0.3 m)
+  //   freed   area an inner short lane leaves behind (also island)
+  //   kerbs   polylines and polygons that get a kerb line
+  function armSurfaces(arm) {
+    const out = { walk: null, gapBase: null, island: null, freed: [], kerbs: [], kerbPolys: [] };
+    if (arm.sub.length < 2) return out;
+    const half = arm.gap / 2, W = DEFAULTS.walk;
+    const total = arm.subCl[arm.subCl.length - 1];
+    out.walk = offsetPoly(arm.sub, half + arm.widthIn + W).concat(offsetPoly(arm.sub, -(half + arm.widthOut + W)).reverse());
+    if (arm.gap > 0.05) out.gapBase = offsetPoly(arm.sub, half).concat(offsetPoly(arm.sub, -half).reverse());
+    if (arm.gap > 0.3 && arm.islandLen > 0) {
+      const a = Math.max(0, arm.stopDist - DEFAULTS.islandBack), b = Math.min(arm.length, arm.stopDist + arm.islandLen);
+      const path = subPoly(arm.path, arm.cl, a, b);
+      if (path.length >= 2) {
+        const cl = cumLen(path), L = cl[cl.length - 1];
+        const hw = cl.map(s => half * smooth(Math.min(s / DEFAULTS.islandNose, (L - s) / DEFAULTS.islandNose, 1)));
+        out.island = offsetPoly(path, hw).concat(offsetPoly(path, hw.map(h => -h)).reverse());
+        out.kerbPolys.push(out.island);
+      }
+    }
+    ['in', 'out'].forEach(dir => {
+      const side = dir === 'in' ? 1 : -1, lanes = arm[dir];
+      lanes.forEach((g, i) => {
+        const o = laneOutline(g);
+        if (!o.pts.length) return;
+        if (i === lanes.length - 1) out.kerbs.push(o.outerEdge);
+        const next = lanes[i + 1];
+        if (next && next.cut && next.cut.anchor === 'inner') {
+          // the outer lane has ended: the edge of this lane is now the road edge
+          const from = next.cut.len + DEFAULTS.taper;
+          if (from < total) out.kerbs.push(offsetPoly(subPoly(arm.sub, arm.subCl, from, total), side * g.outer));
+        }
+        if (g.cut && g.cut.anchor === 'outer') {
+          // the inner lane has ended: its free area becomes island
+          const part = subPoly(arm.sub, arm.subCl, g.cut.len, total);
+          if (part.length >= 2) {
+            const cl = cumLen(part), w = g.lane.width;
+            const dB = cl.map(s => side * (g.outer - w * Math.max(0, 1 - s / DEFAULTS.taper)));
+            const edgeB = offsetPoly(part, dB);
+            out.freed.push(offsetPoly(part, side * g.inner).concat(edgeB.slice().reverse()));
+            out.kerbs.push(edgeB);
+          }
+        }
+      });
+    });
+    return out;
   }
 
   // Closed outline of the junction area: arm corners joined by kerb curves.
@@ -537,8 +624,18 @@
     const d = derive(model);
     ensureDefaults(model, d);
     d.arms.forEach(arm => {
-      setLaneCount(model, arm.key, 'in', 2);
+      const main = arm.axisId === ew.id;
+      setLaneCount(model, arm.key, 'in', main ? 4 : 2);
       setCrosswalk(model, arm.key, true);
+      if (!main) { model.arms[arm.key].stopDist = 17; return; }   // behind the wide main road
+      // main road: median island, left turning lane (35 m), bike lanes on both sides
+      const cfg = model.arms[arm.key];
+      cfg.gap = 3; cfg.islandLen = 40; cfg.stopDist = 14;
+      const ins = lanesOf(model, arm.key, 'in');
+      ins[0].length = 35;
+      setLaneType(ins[ins.length - 1], 'bike');
+      setLaneCount(model, arm.key, 'out', 2);
+      setLaneType(lanesOf(model, arm.key, 'out')[1], 'bike');
     });
     const d2 = derive(model);
     proposeConnections(model, d2).forEach(c => addConnection(model, c.from, c.to));
@@ -569,6 +666,7 @@
     m.lanes = (cfg.lanes || []).filter(l => l && l.id && l.armKey && (l.dir === 'in' || l.dir === 'out')).map(l => ({
       id: String(l.id), armKey: String(l.armKey), dir: l.dir, order: num(l.order) || 0,
       type: LANE_TYPES[l.type] ? l.type : 'vehicle', width: num(l.width) || LANE_TYPES.vehicle.width,
+      length: num(l.length) > 0 ? l.length : null,
       sgs: strList(l.sgs), detectors: strList(l.detectors)
     }));
     m.crosswalks = (cfg.crosswalks || []).filter(c => c && c.id && c.armKey).map(c => ({
@@ -709,7 +807,7 @@
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
     // geometry
-    sampleSpline, cleanPoly, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
+    sampleSpline, cleanPoly, laneOutline, armSurfaces, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
     create, addAxis, removeAxis, setLaneCount, setLaneType, setCrosswalk, addConnection, removeConnection, ensureDefaults,

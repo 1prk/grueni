@@ -9,8 +9,9 @@
   --topo-ink:#2b3038;
   --topo-kerb:#2b3038;
   --topo-mark:#f5f7f9;
-  --topo-bike:#1d9ce2;
-  --topo-bus:rgba(196,74,74,.65);
+  --topo-bike:#cf4a43;
+  --topo-bus:#d8a63c;
+  --topo-island:#6c7076;
   --topo-sg-veh:#475569;
   --topo-sg-bike:#2f8f5b;
   --topo-sg-ped:#c2517a;
@@ -72,7 +73,9 @@
 /* canvas elements */
 .t-grid line{ stroke:var(--topo-grid); stroke-width:1; vector-effect:non-scaling-stroke; }
 .t-grid line.major{ stroke:var(--topo-grid-major); }
-.t-road{ fill:var(--topo-road); }
+.t-road{ fill:var(--topo-road); stroke:var(--topo-road); stroke-width:.06; stroke-linejoin:round; }
+.t-island{ fill:var(--topo-island); stroke:var(--topo-island); stroke-width:.05; }
+.t-walkfill{ fill:var(--topo-walk); stroke:var(--topo-walk); stroke-width:.05; }
 .t-kerb{ fill:none; stroke:var(--topo-kerb); stroke-width:.12; stroke-linejoin:round; stroke-linecap:round; }
 .t-mark{ fill:none; stroke:var(--topo-mark); stroke-width:.14; }
 .t-mark.dash{ stroke-dasharray:1.6 2.6; stroke-width:.14; }
@@ -172,3 +175,7 @@
 .topo-legend .sw.pill{ width:22px; height:12px; border-radius:6px; border:0; }
 .topo-legend .sw.det{ width:12px; background:var(--topo-det); border:1px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.2); }
 .topo-legend .sw.furt{ background:repeating-linear-gradient(90deg,#fff 0 4px,transparent 4px 8px); border-top:2px solid #fff; border-bottom:2px solid #fff; background-color:var(--topo-road); }
+
+.t-guide{ fill:none; stroke:#fff; stroke-width:.12; stroke-dasharray:.9 .7; opacity:.55; pointer-events:none; }
+.t-bike circle{ fill:none; stroke:#fff; stroke-width:.11; }
+.t-bike path{ fill:none; stroke:#fff; stroke-width:.11; stroke-linecap:round; }
