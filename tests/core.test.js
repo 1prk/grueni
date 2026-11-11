@@ -10,7 +10,7 @@ const root = path.join(__dirname, '..');
 const ctx = { window: {}, console, Date, Math };
 ctx.window.GZ = {};
 vm.createContext(ctx);
-['format', 'stats', 'parser', 'segments', 'wartezeitLogic', 'slices', 'greenTime', 'detectors', 'logParser', 'sampleData'].forEach(name => {
+['format', 'stats', 'parser', 'segments', 'wartezeitLogic', 'slices', 'greenTime', 'detectors', 'logParser', 'sampleData', 'topology'].forEach(name => {
   const file = path.join(root, 'js/core', name + '.js');
   vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: file });
 });
@@ -201,6 +201,174 @@ test('green time: a dark period without TX gives one irregular cycle that is lef
   const long = m2.cycles.filter(c => !c.regular)[0];
   assert.ok(long.tu > 1500 && long.tu < 2000);
   assert.ok(GZ.greenTime.cycleTimes(m2, null).max < 200);   // the dark block is not in the cycle time statistics
+});
+
+
+/* ---------- Topology ---------- */
+const T = GZ.topology;
+const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, (msg || '') + ` expected ${b} got ${a}`);
+
+test('topology: spline passes through the control points and has no gaps', () => {
+  const pts = [{ x: 0, y: 0 }, { x: 20, y: 10 }, { x: 40, y: 0 }];
+  const poly = T.cleanPoly(T.sampleSpline(pts, 1));
+  near(poly[0].x, 0, 1e-9); near(poly[poly.length - 1].x, 40, 1e-9);
+  assert.ok(poly.some(p => Math.hypot(p.x - 20, p.y - 10) < 1e-6), 'middle point on the curve');
+  for (let i = 1; i < poly.length; i++) assert.ok(Math.hypot(poly[i].x - poly[i - 1].x, poly[i].y - poly[i - 1].y) < 1.6);
+});
+
+test('topology: offset curve keeps the distance to the source', () => {
+  const poly = T.cleanPoly(T.sampleSpline([{ x: 0, y: 0 }, { x: 30, y: 8 }, { x: 60, y: 0 }], 1));
+  const cl = T.cumLen(poly);
+  const left = T.offsetPoly(poly, 3.5);
+  left.forEach(p => near(T.projectOnPoly(poly, cl, p).d, 3.5, 0.15, 'distance'));
+  // left of a line that runs east is north
+  const line = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+  near(T.offsetPoly(line, 2)[0].y, 2, 1e-9);
+});
+
+test('topology: crossing of two axes gives four arms, ordered clockwise from north', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -80, y: 0 }, { x: 0, y: 0 }, { x: 80, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -80 }, { x: 0, y: 0 }, { x: 0, y: 80 }]);
+  const d = T.derive(m);
+  near(d.center.x, 0, 1e-6); near(d.center.y, 0, 1e-6);
+  assert.strictEqual(d.arms.length, 4);
+  same(d.arms.map(a => a.name), ['Nord', 'Ost', 'Süd', 'West']);
+  same(d.arms.map(a => a.approachId), [1, 2, 3, 4]);
+});
+
+test('topology: a T junction gives three arms; one axis gives two', () => {
+  const t = T.create();
+  T.addAxis(t, [{ x: -80, y: 0 }, { x: 0, y: 0 }, { x: 80, y: 0 }]);
+  T.addAxis(t, [{ x: 0, y: 0 }, { x: 0, y: -80 }]);
+  assert.strictEqual(T.derive(t).arms.length, 3);
+  const one = T.create();
+  T.addAxis(one, [{ x: -50, y: 0 }, { x: 50, y: 0 }]);
+  assert.strictEqual(T.derive(one).arms.length, 2);
+});
+
+test('topology: ingress lanes are left, egress lanes right of the outward direction', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -80, y: 0 }, { x: 80, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -80 }, { x: 0, y: 80 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const d = T.derive(m);
+  const north = d.arms.find(a => a.name === 'Nord');
+  assert.ok(north.in[0].startPt.x < 0, 'ingress of the north arm is west of the axis');
+  assert.ok(north.out[0].startPt.x > 0, 'egress of the north arm is east of the axis');
+  near(north.in[0].startPt.y, north.stopDist, 0.05);
+  near(Math.abs(north.in[0].startPt.x), 3.25 / 2, 1e-6);
+});
+
+test('topology: lane counts, offsets and removal of connections', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -80, y: 0 }, { x: 80, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -80 }, { x: 0, y: 80 }]);
+  T.ensureDefaults(m, T.derive(m));
+  let d = T.derive(m);
+  const key = d.arms.find(a => a.name === 'Nord').key;
+  T.setLaneCount(m, key, 'in', 3);
+  d = T.derive(m);
+  const n = d.arms.find(a => a.key === key);
+  assert.strictEqual(n.in.length, 3);
+  near(Math.abs(n.in[2].startPt.x), 3.25 * 2.5, 1e-6);
+  const south = d.arms.find(a => a.name === 'Süd');
+  const c = T.addConnection(m, n.in[2].lane.id, south.out[0].lane.id);
+  assert.ok(c && m.connections.length === 1);
+  assert.strictEqual(T.addConnection(m, n.in[2].lane.id, south.out[0].lane.id), c, 'no duplicate');
+  assert.strictEqual(T.addConnection(m, south.out[0].lane.id, n.in[2].lane.id), null, 'wrong direction');
+  T.setLaneCount(m, key, 'in', 1);
+  assert.strictEqual(m.connections.length, 0, 'connection of a removed lane is removed');
+});
+
+test('topology: maneuver from the heading change', () => {
+  const m = T.create();
+  T.exampleCrossing(m);
+  const d = T.derive(m);
+  const north = d.arms.find(a => a.name === 'Nord');
+  const find = name => d.arms.find(a => a.name === name).out[0];
+  assert.strictEqual(T.connectionManeuver(north.in[0], find('Süd')), 'straight');
+  // coming from the north (driving south): west is on the right-hand side
+  assert.strictEqual(T.connectionManeuver(north.in[0], find('West')), 'right');
+  assert.strictEqual(T.connectionManeuver(north.in[0], find('Ost')), 'left');
+});
+
+test('topology: proposed connections give every ingress lane a target', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  d.arms.forEach(arm => arm.in.forEach(g => assert.ok(m.connections.some(c => c.from === g.lane.id), arm.name + ' ' + g.label)));
+  assert.ok(d.arms.every(a => a.cross), 'crossings');
+  // leftmost lane turns left, rightmost lane goes straight and right
+  const north = d.arms.find(a => a.name === 'Nord');
+  assert.ok(T.laneManeuvers(m, d, north.in[0].lane.id).has('left'));
+  assert.ok(T.laneManeuvers(m, d, north.in[1].lane.id).has('right'));
+  assert.ok(!T.laneManeuvers(m, d, north.in[1].lane.id).has('left'));
+});
+
+test('topology: junction outline is closed', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const cmds = T.junctionOutline(d.arms);
+  assert.strictEqual(cmds[0].type, 'M');
+  assert.strictEqual(cmds[cmds.length - 1].type, 'Z');
+  assert.strictEqual(cmds.filter(c => c.type === 'Q').length, 4);
+});
+
+test('topology: config round trip keeps the model and the id counters', () => {
+  const m = T.create();
+  T.exampleCrossing(m);
+  m.lanes[0].sgs = ['K1']; m.lanes[0].detectors = ['DF1'];
+  const cfg = JSON.parse(JSON.stringify(T.toConfig(m)));
+  const m2 = T.fromConfig(cfg);
+  same(T.toConfig(m2), cfg);
+  const lane = T.setLaneCount(m2, T.derive(m2).arms[0].key, 'in', 5);
+  const ids = m2.lanes.map(l => l.id);
+  assert.strictEqual(new Set(ids).size, ids.length, 'ids stay unique');
+  // broken input does not throw
+  T.fromConfig({ axes: [{ id: 'A1', points: [{ x: 1 }] }], lanes: [{ id: 'L1' }], connections: [{ id: 'V1', from: 'x', to: 'y' }] });
+  T.fromConfig(null);
+});
+
+test('topology: removing an axis removes its arms, lanes and connections', () => {
+  const m = T.create();
+  T.exampleCrossing(m);
+  T.removeAxis(m, 'A1');
+  assert.ok(m.lanes.every(l => !l.armKey.startsWith('A1:')));
+  assert.ok(m.crosswalks.every(c => !c.armKey.startsWith('A1:')));
+  const ids = new Set(m.lanes.map(l => l.id));
+  assert.ok(m.connections.every(c => ids.has(c.from) && ids.has(c.to)));
+});
+
+test('topology: MAPEM export has unique lane ids, delta nodes and signal groups', () => {
+  const m = T.create();
+  const d = T.exampleCrossing(m);
+  const north = d.arms.find(a => a.name === 'Nord');
+  north.in[0].lane.sgs = ['K2'];
+  north.in[1].lane.sgs = ['K3'];
+  d.arms.find(a => a.name === 'Süd').cross.cw.sgs = ['F1'];
+  m.refLat = 48.1; m.refLon = 11.5;
+  const out = T.toMapem(m, T.derive(m));
+  const set = out.map.intersections[0].laneSet;
+  const ids = set.map(l => l.laneID);
+  assert.strictEqual(new Set(ids).size, ids.length);
+  assert.ok(ids.every(i => i >= 1 && i <= 255));
+  assert.strictEqual(out.map.intersections[0].refPoint.lat, 481000000);
+  const lane = set.find(l => l.name === 'Nord Z1');
+  assert.strictEqual(lane.ingressApproach, 1);
+  assert.ok(lane.connectsTo.length > 0 && lane.connectsTo.every(c => c.signalGroup === 2));
+  assert.ok(lane.nodeList.nodes.length >= 2);
+  // the first node of an ingress lane is the stop line point (relative to the reference point, in cm)
+  const first = lane.nodeList.nodes[0].delta['node-XY'];
+  near(first.y, Math.round(north.in[0].startPt.y * 100), 1);
+  assert.ok(set.some(l => l.laneAttributes.laneType.crosswalk && l.connectsTo && l.connectsTo[0].signalGroup));
+  same(out.signalGroups.map(g => g.name), ['F1', 'K2', 'K3']);
+});
+
+test('topology: simplify keeps the end points and removes straight points', () => {
+  const poly = [{ x: 0, y: 0 }, { x: 5, y: 0.01 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
+  const s = T.simplify(poly, 0.1);
+  assert.strictEqual(s.length, 3);
+  assert.strictEqual(s[0].x, 0); assert.strictEqual(s[2].y, 10);
 });
 
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }

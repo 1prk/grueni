@@ -17,6 +17,7 @@
     pueOverrides: {},
     umlaufSpalten: [], // {id, label, expr} - formula columns, see tab "Umlaufstatistiken"
     detectors: null,   // {list, cache} - detector assignment, see GZ.detectors
+    topology: GZ.topology.create(), // intersection topology, see GZ.topology and the sub-tab "Topologie"
     log: null          // log markers, see GZ.logs
   };
 

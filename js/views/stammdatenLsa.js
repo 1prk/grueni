@@ -79,13 +79,16 @@
   */
   function saveConfig() {
     const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const sgNameByIndex = new Map(a.allStats.map(s => [s.col.index, s.col.name]));
-    const phases = GZ.state.data.phases;
+    const topo = GZ.state.data.topology;
+    const hasTopology = !!(topo && topo.axes.length);
+    // Phases and detectors refer to recording columns. Without a recording only the topology can be saved.
+    if (!a && !hasTopology) return;
+    const sgNameByIndex = a ? new Map(a.allStats.map(s => [s.col.index, s.col.name])) : new Map();
+    const phases = a ? GZ.state.data.phases : [];
     const kuerzelById = new Map(phases.map(p => [p.id, p.kuerzel]));
 
     const pueOverrides = {};
-    Object.entries(GZ.state.data.pueOverrides).forEach(([key, ov]) => {
+    Object.entries(a ? GZ.state.data.pueOverrides : {}).forEach(([key, ov]) => {
       const [fromId, toId] = key.split('→');
       const fromKuerzel = kuerzelById.get(fromId), toKuerzel = kuerzelById.get(toId);
       if (!fromKuerzel || !toKuerzel) return; // referenziert eine inzwischen gelöschte Phase
@@ -99,35 +102,55 @@
       if (rows.length || entry.endSec != null) pueOverrides[fromKuerzel + '→' + toKuerzel] = entry;
     });
 
+    // version 2 = version 1 + "topology" (see GZ.topology.toConfig)
     const cfg = {
-      version: 1,
-      knotenNr: a.knotenNr || null,
-      knotenName: a.knotenName || null,
+      version: 2,
+      knotenNr: a ? (a.knotenNr || null) : null,
+      knotenName: a ? (a.knotenName || null) : null,
       phases: phases.map(p => ({
         kuerzel: p.kuerzel, name: p.name,
         members: [...p.members].map(idx => sgNameByIndex.get(idx)).filter(Boolean)
       })),
       pueOverrides,
-      detectors: GZ.detectors.toConfig(a)
+      detectors: a ? GZ.detectors.toConfig(a) : { links: [], ignored: [] }
     };
-    const idPart = a.knotenNr ? String(a.knotenNr).trim().replace(/[^A-Za-z0-9_-]+/g, '-') : 'unbekannt';
+    if (hasTopology) {
+      cfg.topology = GZ.topology.toConfig(topo);
+      // MAPEM JSON, derived from the topology (the editor model above is the source)
+      const d = GZ.topology.derive(topo);
+      if (d.arms.length) cfg.mapem = GZ.topology.toMapem(topo, d, { sortFn: GZ.phases.compareSgNames });
+    }
+    const rawId = a && a.knotenNr ? String(a.knotenNr).trim() : (hasTopology && topo.name ? topo.name : '');
+    const idPart = rawId ? rawId.replace(/[^A-Za-z0-9_-]+/g, '-') : 'unbekannt';
     GZ.configIO.downloadJson(`phasen_knoten-${idPart}.json`, cfg);
   }
 
   async function loadConfigFile(file) {
     const a = GZ.state.data.currentAnalysis;
-    if (!a) {
-      els.loadHint.textContent = 'Bitte zuerst eine Aufzeichnung laden.';
-      els.loadHint.className = 'hint warn';
-      els.loadHint.style.display = '';
-      return;
-    }
     let cfg;
     try { cfg = await GZ.configIO.readJsonFile(file); }
     catch (e) {
       els.loadHint.textContent = e.message;
       els.loadHint.className = 'hint warn';
       els.loadHint.style.display = '';
+      GZ.snackbar.show('Konfiguration konnte nicht geladen werden', { type: 'warning', description: e.message });
+      return;
+    }
+
+    // The topology does not depend on a recording. Load it first.
+    let topoNote = '';
+    if (cfg.topology) {
+      GZ.views.stammdatenTopologie.setModel(GZ.topology.fromConfig(cfg.topology));
+      topoNote = 'Topologie geladen. ';
+    }
+    if (!a) {
+      const msg = topoNote
+        ? topoNote + 'Phasen und Detektorzuordnung werden erst nach dem Laden einer Aufzeichnung übernommen – Datei dann erneut laden.'
+        : 'Bitte zuerst eine Aufzeichnung laden.';
+      els.loadHint.textContent = msg;
+      els.loadHint.className = 'hint warn';
+      els.loadHint.style.display = '';
+      GZ.snackbar.show(topoNote ? 'Topologie geladen' : 'Keine Aufzeichnung geladen', { type: topoNote ? 'info' : 'warning', description: msg });
       return;
     }
 
@@ -176,7 +199,7 @@
     notifyChanged();
 
     const msgs = notes.concat(skipped.length ? [`${skipped.length} Referenz(en) übersprungen: ${skipped.join('; ')}`] : []);
-    els.loadHint.textContent = msgs.length ? msgs.join(' ') : `Phasenkonfiguration geladen (${newPhases.length} Phase(n)).`;
+    els.loadHint.textContent = msgs.length ? topoNote + msgs.join(' ') : `${topoNote}Phasenkonfiguration geladen (${newPhases.length} Phase(n)).`;
     els.loadHint.className = msgs.length ? 'hint warn' : 'hint';
     els.loadHint.style.display = '';
   }
@@ -576,5 +599,5 @@
   }
 
   GZ.views = GZ.views || {};
-  GZ.views.stammdatenLsa = { init, onAnalyzeComplete, jumpToTransition };
+  GZ.views.stammdatenLsa = { init, onAnalyzeComplete, jumpToTransition, saveConfig, loadConfigFile };
 })(window.GZ = window.GZ || {});

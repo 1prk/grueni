@@ -1,0 +1,155 @@
+/* Topology editor (tab "Stammdaten LSA" > "Topologie"). Uses the tokens from tokens.css.
+   Road colours are local tokens: a plan drawing keeps its look in every theme. */
+.topo{
+  --topo-paper:#f4f6f8;
+  --topo-grid:#e3e8ed;
+  --topo-grid-major:#d3dae1;
+  --topo-road:#3d4551;
+  --topo-road-2:#474f5c;
+  --topo-kerb:#aeb8c3;
+  --topo-mark:#f5f7f9;
+  --topo-bike:rgba(70,170,110,.55);
+  --topo-bus:rgba(200,70,70,.5);
+  --topo-sg-veh:#475569;
+  --topo-sg-bike:#2f8f5b;
+  --topo-sg-ped:#c2517a;
+  --topo-sg-transit:#b8860b;
+  --topo-det:var(--accent);
+}
+
+/* ---------- Sub-navigation inside the tab ---------- */
+.subnav{ display:flex; gap:4px; border-bottom:1px solid var(--border); }
+.subnav-btn{
+  appearance:none; background:transparent; border:0; border-bottom:2px solid transparent;
+  font:inherit; font-size:13px; font-weight:600; color:var(--text-muted);
+  padding:8px 16px; margin-bottom:-1px; cursor:pointer;
+}
+.subnav-btn:hover{ color:var(--text); }
+.subnav-btn.active{ color:var(--accent-strong); border-bottom-color:var(--accent); }
+.sd-pane{ display:flex; flex-direction:column; gap:var(--space-5); }
+
+/* ---------- Steps ---------- */
+.topo-steps{ display:flex; flex-wrap:wrap; gap:6px; padding:12px 16px 0; }
+.topo-step{
+  appearance:none; display:flex; align-items:center; gap:8px;
+  background:var(--bg-surface); border:1px solid var(--border); border-radius:999px;
+  padding:6px 14px 6px 6px; font:inherit; font-size:12.5px; font-weight:600; color:var(--text-muted); cursor:pointer;
+}
+.topo-step .no{
+  width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center;
+  background:var(--bg-surface-3); color:var(--text-muted); font-size:11.5px; font-weight:700;
+}
+.topo-step:hover{ border-color:var(--accent); color:var(--text); }
+.topo-step.active{ background:var(--accent-bg); border-color:var(--accent); color:var(--accent-strong); }
+.topo-step.active .no{ background:var(--accent); color:#fff; }
+.topo-step-hint{ padding:8px 16px 12px; font-size:12px; color:var(--text-muted); min-height:34px; }
+.topo-step-hint b{ color:var(--text); }
+
+/* ---------- Canvas and inspector ---------- */
+.topo-main{ display:grid; grid-template-columns:minmax(0,1fr) 340px; border-top:1px solid var(--border); }
+@media (max-width:1100px){ .topo-main{ grid-template-columns:minmax(0,1fr); } }
+.topo-canvas{ position:relative; height:660px; background:var(--topo-paper); overflow:hidden; }
+.topo-canvas svg{ width:100%; height:100%; display:block; touch-action:none; user-select:none; cursor:grab; outline:none; }
+.topo-canvas.drawing svg{ cursor:crosshair; }
+.topo-canvas.panning svg{ cursor:grabbing; }
+.topo-tools{
+  position:absolute; left:12px; bottom:12px; display:flex; gap:4px;
+  background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:3px; box-shadow:var(--shadow-sm);
+}
+.topo-tools button{ padding:3px 10px; font-size:12px; border-color:transparent; background:transparent; }
+.topo-empty{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
+  color:var(--text-faint); font-size:13px; text-align:center; padding:24px;
+}
+.topo-draw-bar{
+  position:absolute; top:12px; left:50%; transform:translateX(-50%);
+  background:var(--bg-header); color:var(--text-on-dark); border-radius:999px; padding:6px 8px 6px 16px;
+  display:flex; align-items:center; gap:12px; font-size:12px; box-shadow:var(--shadow-md);
+}
+.topo-draw-bar button{ padding:3px 12px; font-size:12px; }
+
+/* canvas elements */
+.t-grid line{ stroke:var(--topo-grid); stroke-width:1; vector-effect:non-scaling-stroke; }
+.t-grid line.major{ stroke:var(--topo-grid-major); }
+.t-road{ fill:var(--topo-road); }
+.t-kerb{ fill:none; stroke:var(--topo-kerb); stroke-width:.28; stroke-linejoin:round; stroke-linecap:round; }
+.t-mark{ fill:none; stroke:var(--topo-mark); stroke-width:.14; }
+.t-mark.dash{ stroke-dasharray:1.6 2.6; stroke-width:.14; }
+.t-stop{ stroke:var(--topo-mark); stroke-width:.5; }
+.t-zebra{ stroke:var(--topo-mark); fill:none; }
+.t-lane-fill.bike{ fill:var(--topo-bike); }
+.t-lane-fill.bus{ fill:var(--topo-bus); }
+.t-lane-fill.none{ fill:transparent; }
+.t-hit{ cursor:pointer; }
+.t-lane-hit{ fill:transparent; stroke:none; cursor:pointer; }
+.t-lane-hit:hover{ fill:rgba(255,255,255,.14); }
+.t-lane-hit.sel{ fill:rgba(47,111,163,.45); stroke:#9fd0f5; stroke-width:.2; }
+.t-lane-hit.target{ stroke:#ffd166; stroke-width:.22; stroke-dasharray:.7 .5; }
+.t-lane-hit.source{ fill:rgba(255,209,102,.3); stroke:#ffd166; stroke-width:.25; }
+.t-arrow{ fill:var(--topo-mark); stroke:none; opacity:.9; }
+.t-arrow-line{ fill:none; stroke:var(--topo-mark); stroke-width:.3; opacity:.9; }
+.t-conn{ fill:none; stroke-linecap:round; opacity:.92; }
+.t-conn-halo{ fill:none; stroke:#fff; stroke-linecap:round; opacity:.9; }
+.t-conn-hit{ fill:none; stroke:transparent; stroke-width:1.8; cursor:pointer; }
+.t-conn-hit:hover + .t-conn{ opacity:1; }
+.t-conn.unassigned{ stroke-dasharray:.9 .7; }
+.t-axis{ fill:none; stroke:#4aa3e8; stroke-width:.35; stroke-linecap:round; stroke-linejoin:round; }
+.t-axis.sel{ stroke:#7cc4ff; stroke-width:.5; }
+.t-axis-hit{ fill:none; stroke:transparent; cursor:pointer; }
+.t-label{ font-family:var(--sans); font-weight:600; paint-order:stroke; stroke-linejoin:round; pointer-events:none; }
+.t-label.light{ fill:#fff; stroke:rgba(30,36,44,.75); }
+.t-label.dark{ fill:var(--text); stroke:rgba(255,255,255,.9); }
+.t-sg rect{ stroke:rgba(255,255,255,.85); stroke-width:.1; }
+.t-sg text{ fill:#fff; font-family:var(--sans); font-weight:700; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
+.t-det rect{ fill:var(--topo-det); stroke:#fff; stroke-width:.12; }
+.t-center-mark{ fill:none; stroke:#ffd166; stroke-width:.2; }
+.topo-handle{ fill:#fff; stroke:var(--accent-strong); cursor:move; }
+.topo-handle.sel{ fill:var(--accent); stroke:#fff; }
+.topo-handle.center{ fill:#ffd166; stroke:#7a5a00; }
+.topo-handle.stop{ fill:#fff; stroke:#c2517a; }
+.t-hud text{ font-family:var(--sans); font-size:11px; fill:var(--text-muted); }
+.t-hud .bar{ stroke:var(--text-muted); stroke-width:2; fill:none; }
+
+/* ---------- Inspector ---------- */
+.topo-side{ border-left:1px solid var(--border); background:var(--bg-surface); overflow:auto; max-height:660px; font-size:12.5px; }
+@media (max-width:1100px){ .topo-side{ border-left:0; border-top:1px solid var(--border); max-height:none; } }
+.ts-sec{ padding:14px 16px; border-bottom:1px solid var(--border); }
+.ts-sec:last-child{ border-bottom:0; }
+.ts-title{ font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.ts-row{ display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.ts-row > label{ color:var(--text-muted); min-width:92px; }
+.ts-row input[type=text], .ts-row input[type=number], .ts-row select{ font:inherit; font-size:12.5px; padding:4px 7px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); color:var(--text); min-width:0; }
+.ts-row input[type=number]{ width:70px; }
+.ts-row input[type=text]{ flex:1; }
+.ts-note{ color:var(--text-faint); font-size:11.5px; line-height:1.45; }
+.ts-note.warn{ color:var(--warn-text); }
+.ts-list{ display:flex; flex-direction:column; gap:4px; }
+.ts-item{
+  display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:var(--radius-sm);
+  background:var(--bg-surface); cursor:pointer;
+}
+.ts-item:hover{ border-color:var(--accent); }
+.ts-item.sel{ background:var(--accent-bg); border-color:var(--accent); }
+.ts-item .grow{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ts-item input[type=text]{ flex:1; min-width:0; }
+.ts-item .x{ border:0; background:transparent; color:var(--text-faint); padding:0 4px; cursor:pointer; }
+.ts-item .x:hover{ color:var(--crit-text); background:transparent; }
+.ts-stepper{ display:inline-flex; align-items:center; gap:6px; }
+.ts-stepper button{ width:26px; height:26px; padding:0; font-size:15px; line-height:1; }
+.ts-stepper b{ min-width:16px; text-align:center; }
+.ts-chips{ display:flex; flex-wrap:wrap; gap:5px; }
+.ts-chip{
+  appearance:none; font:inherit; font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px;
+  border:1px solid var(--border-strong); background:var(--bg-surface); color:var(--text-muted); cursor:pointer;
+}
+.ts-chip:hover{ border-color:var(--chip, var(--accent)); color:var(--text); background:var(--bg-surface); }
+.ts-chip.on{ background:var(--chip, var(--accent)); border-color:var(--chip, var(--accent)); color:#fff; }
+.ts-chip.hint{ border-style:dashed; color:var(--accent-strong); }
+.ts-chip small{ opacity:.75; margin-left:4px; font-weight:500; }
+.ts-add{ display:flex; gap:6px; margin-top:8px; }
+.ts-add input{ flex:1; min-width:0; font:inherit; font-size:12px; padding:4px 7px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); }
+.ts-man{ font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--bg-surface-3); color:var(--text-muted); }
+.ts-btns{ display:flex; gap:6px; flex-wrap:wrap; }
+.ts-btns button{ font-size:12px; padding:5px 10px; }
+.ts-dot{ width:10px; height:10px; border-radius:50%; flex-shrink:0; border:1px solid rgba(0,0,0,.2); }
+.ts-item select{ font:inherit; font-size:12px; padding:3px 6px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); color:var(--text); min-width:0; }

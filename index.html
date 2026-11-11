@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/charts.css">
 <link rel="stylesheet" href="css/report.css">
+<link rel="stylesheet" href="css/topology.css">
 </head>
 <body>
 <div class="appshell">
@@ -133,6 +134,13 @@
     <div class="tab-panel" id="tab-sd">
       <div class="view">
 
+        <div class="subnav" id="sdSubnav">
+          <button type="button" class="subnav-btn active" data-sub="phasen">Phasen</button>
+          <button type="button" class="subnav-btn" data-sub="topologie">Topologie</button>
+        </div>
+
+        <div class="sd-pane" id="sdPanePhasen">
+
         <div class="panel">
           <div class="panel-head">
             <span>Stammdaten LSA — Phaseneinteilung</span>
@@ -168,6 +176,43 @@
             gilt dann für jeden Umlauf mit diesem Übergangstyp, nicht nur für das gezeigte Vorkommen.
           </div>
           <div class="panel-body" id="sdPueBody"></div>
+        </div>
+
+        </div><!-- /sdPanePhasen -->
+
+        <!-- Topologie: Achsen, Arme, Fahrstreifen, Verbindungen -->
+        <div class="sd-pane" id="sdPaneTopo" style="display:none;">
+          <div class="panel topo">
+            <div class="panel-head">
+              <span>Stammdaten LSA — Topologie</span>
+              <div class="panel-head-actions">
+                <button type="button" id="topoExample" class="btn" title="Beispiel-Kreuzung mit vier Armen laden">Beispiel-Kreuzung</button>
+                <button type="button" id="topoConfigSaveBtn" class="btn" title="Phasen, Topologie und Detektorzuordnung als JSON-Datei je Knoten speichern">Konfiguration speichern</button>
+                <label class="btn" for="topoConfigLoadInput">Konfiguration laden …</label>
+                <input type="file" id="topoConfigLoadInput" accept=".json" style="display:none;">
+                <button type="button" id="topoMapExport" class="primary" title="Topologie als MAPEM-JSON exportieren">MAP exportieren (JSON)</button>
+              </div>
+            </div>
+            <div class="topo-steps" id="topoSteps"></div>
+            <div class="topo-step-hint" id="topoStepHint"></div>
+            <div class="topo-main">
+              <div class="topo-canvas" id="topoCanvas">
+                <svg id="topoSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+                <div class="topo-empty" id="topoEmpty">Noch keine Achse. In Schritt 1 „Achse zeichnen“ wählen oder die Beispiel-Kreuzung laden.</div>
+                <div class="topo-draw-bar" id="topoDrawBar" style="display:none;">
+                  <span>Punkte anklicken · Doppelklick oder Enter beendet · Esc bricht ab</span>
+                  <button type="button" class="primary" id="topoDrawDone">Fertig</button>
+                  <button type="button" id="topoDrawCancel">Abbrechen</button>
+                </div>
+                <div class="topo-tools">
+                  <button type="button" id="topoZoomOut" title="Verkleinern">−</button>
+                  <button type="button" id="topoFit" title="Alles einpassen">Einpassen</button>
+                  <button type="button" id="topoZoomIn" title="Vergrößern">+</button>
+                </div>
+              </div>
+              <aside class="topo-side" id="topoSide"></aside>
+            </div>
+          </div>
         </div>
 
       </div>
@@ -675,6 +720,7 @@
 <script src="js/core/configIO.js"></script>
 <script src="js/core/xlsxWriter.js"></script>
 <script src="js/core/phases.js"></script>
+<script src="js/core/topology.js"></script>
 <script src="js/core/umlaufContext.js"></script>
 <script src="js/core/sampleData.js"></script>
 <script src="js/state.js"></script>
@@ -690,6 +736,7 @@
 <script src="js/views/logBar.js"></script>
 <script src="js/views/gruenzeitanalyse.js"></script>
 <script src="js/views/stammdatenLsa.js"></script>
+<script src="js/views/stammdatenTopologie.js"></script>
 <script src="js/views/phasenauswertung.js"></script>
 <script src="js/views/wartezeit.js"></script>
 <script src="js/views/oepnvQa.js"></script>

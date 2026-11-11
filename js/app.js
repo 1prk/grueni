@@ -10,6 +10,7 @@
   let resizeTimer = null;
 
   const TAB_REFRESH = {
+    sd: () => GZ.views.stammdatenTopologie.refresh(),
     gz: () => GZ.views.gruenzeitanalyse.refresh(),
     pa: () => GZ.views.phasenauswertung.refresh(),
     wz: () => GZ.views.wartezeit.refresh(),
@@ -23,7 +24,10 @@
     activeTab = name;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
-    if (GZ.state.data.currentAnalysis && TAB_REFRESH[name]) TAB_REFRESH[name]();
+    // The topology editor (tab "sd") works without a recording. All other tabs need one.
+    const hasData = !!GZ.state.data.currentAnalysis;
+    els.contentArea.classList.toggle('show', hasData || name === 'sd');
+    if ((hasData || name === 'sd') && TAB_REFRESH[name]) TAB_REFRESH[name]();
   }
 
   // A time outside the recording has no cycle. A jump to it is refused with a message.
@@ -122,6 +126,7 @@
     // Sichtbarkeit) beim eigenen onAnalyzeComplete() bereits den korrekten,
     // leeren Phasenstand der neuen Analyse sieht statt der alten Phasenliste.
     GZ.views.stammdatenLsa.onAnalyzeComplete();
+    GZ.views.stammdatenTopologie.onAnalyzeComplete();
     GZ.views.gruenzeitanalyse.onAnalyzeComplete();
     GZ.views.phasenauswertung.onAnalyzeComplete();
     GZ.views.wartezeit.onAnalyzeComplete();
@@ -147,6 +152,7 @@
     GZ.views.logBar.init(refreshActiveTab);
     GZ.views.gruenzeitanalyse.init(document.getElementById('tab-gz'));
     GZ.views.stammdatenLsa.init(document.getElementById('tab-sd'));
+    GZ.views.stammdatenTopologie.init(document.getElementById('tab-sd'));
     GZ.views.phasenauswertung.init(document.getElementById('tab-pa'));
     GZ.views.wartezeit.init(document.getElementById('tab-wz'));
     GZ.views.oepnvQa.init(document.getElementById('tab-oe'));
