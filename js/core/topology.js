@@ -36,8 +36,11 @@
   const LANE_TYPES = {
     vehicle: { label: 'Fahrzeug', width: 3.25 },
     bike: { label: 'Radfahrstreifen', width: 1.85 },
-    bus: { label: 'Busspur', width: 3.25 }
+    bus: { label: 'Busspur', width: 3.25 },
+    tram: { label: 'Straßenbahn', width: 3.0 }
   };
+  // Lanes for motor vehicles (the free right turn and the proposals use only these).
+  const isVehicle = g => g.lane.type === 'vehicle' || g.lane.type === 'bus';
 
   /* ---------------- Vector and polyline helpers ---------------- */
   const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
@@ -293,6 +296,8 @@
       lanes: [],         // { id, armKey, dir:'in'|'out', order, type, width, sgs:[], detectors:[] }
       crosswalks: [],    // { id, armKey, width, sgs:[], detectors:[] }
       connections: [],   // { id, from, to, sg|null }
+      background: null,  // { name, src (data URL), wPx, hPx, mPerPx, x, y (world position of the top left corner), opacity }
+      planOpacity: 1,    // opacity of the drawn plan over the background
       seq: {}
     };
   }
@@ -680,9 +685,10 @@
         let idx = m === 'left' ? 0 : m === 'right' ? pool.length - 1 : Math.min(throughIdx, pool.length - 1);
         return pool[Math.max(0, idx)];
       };
-      const vehicleIns = ins.filter(g => g.lane.type !== 'bike');
+      const vehicleIns = ins.filter(isVehicle);
       ins.forEach(g => {
         let wanted;
+        if (g.lane.type === 'tram') return;          // tracks are connected by hand
         if (g.lane.type === 'bike') wanted = ['straight'];
         else {
           const k = vehicleIns.indexOf(g), n = vehicleIns.length;
@@ -698,7 +704,7 @@
           const to = pick(g, targets[m].arm, m);
           if (to) out.push({ from: g.lane.id, to: to.lane.id });
         });
-        if (wanted.includes('straight') && g.lane.type !== 'bike') throughIdx++;
+        if (wanted.includes('straight') && isVehicle(g)) throughIdx++;
       });
     });
     return out;
@@ -713,7 +719,7 @@
     if (arms.length < 2) return null;
     const prev = arms[(arms.indexOf(arm) - 1 + arms.length) % arms.length];
     if (!prev || prev === arm) return null;
-    const veh = lanes => lanes.filter(g => g.lane.type !== 'bike');
+    const veh = lanes => lanes.filter(isVehicle);
     const ins = veh(arm.in), outs = veh(prev.out);
     // The slip lane needs its own egress lane: the receiving arm needs two vehicle egress lanes.
     if (arm.in.length < 2 || !ins.length || outs.length < 2) return null;
@@ -914,12 +920,48 @@
     return derive(model);
   }
 
+
+  /* ---------------- Background image (plan, aerial photo, PDF page) ---------------- */
+  // Places a new background. When the old background has the same pixel size, its position and scale are kept
+  // (the same plan imported again, or a configuration saved without the image data).
+  function placeBackground(model, img, center) {
+    const old = model.background;
+    if (old && old.wPx === img.wPx && old.hPx === img.hPx) {
+      model.background = Object.assign({}, old, { name: img.name, src: img.src });
+      return false;
+    }
+    const mPerPx = 0.1;
+    model.background = {
+      name: img.name, src: img.src, wPx: img.wPx, hPx: img.hPx, mPerPx,
+      x: center.x - (img.wPx * mPerPx) / 2, y: center.y + (img.hPx * mPerPx) / 2, opacity: 0.6
+    };
+    return true;
+  }
+
+  // Scale tool: the two points a and b (world metres, measured on the image) are "realLength" metres apart.
+  // The image is scaled around a, so a stays where it is.
+  function scaleBackground(model, a, b, realLength) {
+    const bg = model.background;
+    const measured = dist(a, b);
+    if (!bg || !(measured > 1e-6) || !(realLength > 0)) return null;
+    const f = realLength / measured;
+    bg.mPerPx *= f;
+    bg.x = a.x + (bg.x - a.x) * f;
+    bg.y = a.y + (bg.y - a.y) * f;
+    return f;
+  }
+
+  // World position of an image pixel and back (y of the world points north, y of the image points down).
+  function bgPixelToWorld(bg, px, py) { return { x: bg.x + px * bg.mPerPx, y: bg.y - py * bg.mPerPx }; }
+  function bgWorldToPixel(bg, p) { return { px: (p.x - bg.x) / bg.mPerPx, py: (bg.y - p.y) / bg.mPerPx }; }
+
   /* ---------------- Persistence (part of the node configuration file) ---------------- */
   function toConfig(model) {
     return JSON.parse(JSON.stringify({
       version: 1, name: model.name, refLat: model.refLat, refLon: model.refLon,
       axes: model.axes, center: model.center, arms: model.arms, lanes: model.lanes,
-      crosswalks: model.crosswalks, connections: model.connections
+      crosswalks: model.crosswalks, connections: model.connections,
+      background: model.background, planOpacity: model.planOpacity
     }));
   }
 
@@ -945,6 +987,16 @@
       id: String(c.id), armKey: String(c.armKey), width: num(c.width) || DEFAULTS.crossWidth,
       sgs: strList(c.sgs), detectors: strList(c.detectors)
     }));
+    const b = cfg.background;
+    if (b && typeof b === 'object' && num(b.wPx) > 0 && num(b.hPx) > 0 && num(b.mPerPx) > 0) {
+      m.background = {
+        name: typeof b.name === 'string' ? b.name : '',
+        src: typeof b.src === 'string' && /^data:(image\/|application\/pdf)/.test(b.src) ? b.src : null,
+        wPx: b.wPx, hPx: b.hPx, mPerPx: b.mPerPx, x: num(b.x) || 0, y: num(b.y) || 0,
+        opacity: num(b.opacity) != null ? Math.max(0, Math.min(1, b.opacity)) : 0.6
+      };
+    }
+    m.planOpacity = num(cfg.planOpacity) != null ? Math.max(0, Math.min(1, cfg.planOpacity)) : 1;
     const laneIds = new Set(m.lanes.map(l => l.id));
     m.connections = (cfg.connections || []).filter(c => c && c.id && laneIds.has(c.from) && laneIds.has(c.to))
       .map(c => ({ id: String(c.id), from: c.from, to: c.to, sg: typeof c.sg === 'string' && c.sg ? c.sg : null }));
@@ -1035,7 +1087,7 @@
           name: arm.name + ' ' + g.label,
           laneAttributes: {
             directionalUse: isIn ? { ingressPath: true } : { egressPath: true },
-            laneType: { [g.lane.type === 'bike' ? 'bikeLane' : 'vehicle']: {} }
+            laneType: { [g.lane.type === 'bike' ? 'bikeLane' : g.lane.type === 'tram' ? 'trackedVehicle' : 'vehicle']: {} }
           },
           nodeList: { nodes: nodeList(g.path, center) }
         };
@@ -1082,6 +1134,7 @@
     sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
+    placeBackground, scaleBackground, bgPixelToWorld, bgWorldToPixel,
     create, addAxis, removeAxis, setLaneCount, setLaneType, setCrosswalk, addConnection, removeConnection, ensureDefaults,
     lanesOf, derive, junctionOutline, allLaneGeoms, connectionCurve, cubicPoint, connectionManeuver, laneManeuvers, connectionSg,
     proposeConnections, exampleCrossing, toConfig, fromConfig, signalGroupIds, toMapem

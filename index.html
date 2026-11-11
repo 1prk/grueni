@@ -195,10 +195,22 @@
             </div>
             <div class="topo-steps" id="topoSteps"></div>
             <div class="topo-step-hint" id="topoStepHint"></div>
+            <div class="topo-bgbar" id="topoBgBar">
+              <span class="topo-bgbar-title">Hintergrund</span>
+              <label class="btn" for="topoBgInput" title="Lageplan, Luftbild oder PDF als Hintergrund laden. Bleibt im Browser.">Bild / PDF laden …</label>
+              <input type="file" id="topoBgInput" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" style="display:none;">
+              <button type="button" id="topoBgScale" title="Zwei Punkte mit bekanntem Abstand anklicken und die Länge eingeben">Maßstab setzen</button>
+              <button type="button" id="topoBgMove" title="Bild mit der Maus verschieben">Bild verschieben</button>
+              <label class="topo-range">Bild <input type="range" id="topoBgOpacity" min="0" max="100" value="60"></label>
+              <label class="topo-range">Plan <input type="range" id="topoPlanOpacity" min="0" max="100" value="100"></label>
+              <button type="button" id="topoBgRemove">Entfernen</button>
+              <span class="topo-bgbar-info" id="topoBgInfo"></span>
+            </div>
             <div class="topo-main">
               <div class="topo-canvas" id="topoCanvas">
                 <svg id="topoSvg" xmlns="http://www.w3.org/2000/svg"></svg>
                 <div class="topo-empty" id="topoEmpty">Noch keine Achse. In Schritt 1 „Achse zeichnen“ wählen oder die Beispiel-Kreuzung laden.</div>
+                <div class="topo-draw-bar topo-scale-bar" id="topoScaleBar" style="display:none;"></div>
                 <div class="topo-draw-bar" id="topoDrawBar" style="display:none;">
                   <span>Punkte anklicken · Doppelklick oder Enter beendet · Esc bricht ab</span>
                   <button type="button" class="primary" id="topoDrawDone">Fertig</button>
@@ -212,6 +224,7 @@
                   <div class="lg"><span class="sw" style="background:var(--topo-bus)"></span>Busspur</div>
                   <div class="lg"><span class="sw" style="background:var(--topo-island)"></span>Mittelinsel / Sperrfläche</div>
                   <div class="lg"><span class="sw" style="background:var(--topo-walk)"></span>Gehweg</div>
+                  <div class="lg"><span class="sw rail"></span>Straßenbahn (Gleis)</div>
                   <h5>Zeichen</h5>
                   <div class="lg"><span class="sw pill" style="background:var(--topo-sg-veh)"></span>Signalgruppe</div>
                   <div class="lg"><span class="sw det"></span>Detektor</div>

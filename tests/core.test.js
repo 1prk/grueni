@@ -587,5 +587,52 @@ test('topology: driving lines are smooth and leave and enter the lanes straight'
   });
 });
 
+test('topology: background placement, scale tool and round trip', () => {
+  const m = T.create();
+  const isNew = T.placeBackground(m, { name: 'plan.png', src: 'data:image/png;base64,AAAA', wPx: 1000, hPx: 500 }, { x: 0, y: 0 });
+  assert.ok(isNew);
+  const bg = m.background;
+  near(bg.x, -50, 1e-9); near(bg.y, 25, 1e-9);                     // centred, 0.1 m per pixel
+  // a scale bar of 73 pixels is 5 m long
+  const a = T.bgPixelToWorld(bg, 132, 465), b = T.bgPixelToWorld(bg, 205, 465);
+  T.scaleBackground(m, a, b, 5);
+  near(bg.mPerPx, 5 / 73, 1e-9);
+  const a2 = T.bgPixelToWorld(bg, 132, 465);
+  near(a2.x, a.x, 1e-9); near(a2.y, a.y, 1e-9);                    // the first point stays in place
+  const b2 = T.bgPixelToWorld(bg, 205, 465);
+  near(Math.hypot(b2.x - a2.x, b2.y - a2.y), 5, 1e-9);
+  const px = T.bgWorldToPixel(bg, b2);
+  near(px.px, 205, 1e-9); near(px.py, 465, 1e-9);
+  // the same image again keeps position and scale
+  assert.strictEqual(T.placeBackground(m, { name: 'x', src: 'data:image/png;base64,BBBB', wPx: 1000, hPx: 500 }, { x: 99, y: 99 }), false);
+  near(m.background.mPerPx, 5 / 73, 1e-9);
+  // round trip
+  m.planOpacity = 0.4;
+  const m2 = T.fromConfig(JSON.parse(JSON.stringify(T.toConfig(m))));
+  near(m2.background.mPerPx, 5 / 73, 1e-9);
+  assert.strictEqual(m2.background.src, 'data:image/png;base64,BBBB');
+  assert.strictEqual(m2.planOpacity, 0.4);
+  // a configuration without image data keeps the placement, and rejects foreign URLs
+  const m3 = T.fromConfig({ background: { wPx: 10, hPx: 10, mPerPx: 1, src: 'https://example.com/x.png' } });
+  assert.strictEqual(m3.background.src, null);
+});
+
+test('topology: tram lanes are not part of the proposals and are exported as tracked vehicle lanes', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -80, y: 0 }, { x: 80, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -80 }, { x: 0, y: 80 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const d = T.derive(m);
+  const north = d.arms.find(a => a.name === 'Nord');
+  T.setLaneCount(m, north.key, 'in', 2);
+  T.setLaneType(T.lanesOf(m, north.key, 'in')[0], 'tram');
+  const d2 = T.derive(m);
+  const tramId = T.lanesOf(m, north.key, 'in')[0].id;
+  T.proposeConnections(m, d2).forEach(c => T.addConnection(m, c.from, c.to));
+  assert.ok(!m.connections.some(c => c.from === tramId));
+  const set = T.toMapem(m, T.derive(m)).map.intersections[0].laneSet;
+  assert.ok(set.some(l => l.laneAttributes.laneType.trackedVehicle));
+});
+
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }
 console.log('\nall tests passed');

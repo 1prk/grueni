@@ -33,6 +33,11 @@
   let derived = null;
   let fitted = false;
 let linkStops = false;     // move all stop lines together
+  let bgMode = null;         // null | 'scale' | 'move' (background tools)
+  let scalePts = [];         // scale tool: picked points (world metres)
+  let scaleCursor = null;
+  let bgObj = null;          // { src, url }: object URL of the imported file (faster to draw than the data URL)
+  let bgImg = null, planG = null;
   const manualSg = new Set(), manualDet = new Set();
 
   const M = () => GZ.state.data.topology;
@@ -50,8 +55,36 @@ let linkStops = false;     // move all stop lines together
       svg: root.querySelector('#topoSvg'),
       empty: root.querySelector('#topoEmpty'),
       drawBar: root.querySelector('#topoDrawBar'),
-      side: root.querySelector('#topoSide')
+      side: root.querySelector('#topoSide'),
+      scaleBar: root.querySelector('#topoScaleBar'),
+      bgInput: root.querySelector('#topoBgInput'),
+      bgScale: root.querySelector('#topoBgScale'),
+      bgMove: root.querySelector('#topoBgMove'),
+      bgOpacity: root.querySelector('#topoBgOpacity'),
+      planOpacity: root.querySelector('#topoPlanOpacity'),
+      bgRemove: root.querySelector('#topoBgRemove'),
+      bgInfo: root.querySelector('#topoBgInfo')
     };
+    els.bgInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (file) importBackground(file);
+      e.target.value = '';
+    });
+    els.bgScale.addEventListener('click', () => setBgMode(bgMode === 'scale' ? null : 'scale'));
+    els.bgMove.addEventListener('click', () => setBgMode(bgMode === 'move' ? null : 'move'));
+    els.bgOpacity.addEventListener('input', () => { const bg = M().background; if (bg) { bg.opacity = els.bgOpacity.value / 100; renderBackground(); } });
+    els.planOpacity.addEventListener('input', () => { M().planOpacity = els.planOpacity.value / 100; renderBackground(); });
+    els.bgRemove.addEventListener('click', () => {
+      if (!M().background || !window.confirm('Hintergrund entfernen?')) return;
+      M().background = null; setBgMode(null); renderBackground(); renderBgBar();
+    });
+    els.scaleBar.addEventListener('click', e => {
+      const b = e.target.closest('[data-scale]');
+      if (!b) return;
+      if (b.dataset.scale === 'apply') applyScale();
+      else setBgMode(null);
+    });
+    els.scaleBar.addEventListener('keydown', e => { if (e.key === 'Enter') applyScale(); if (e.key === 'Escape') setBgMode(null); });
     els.subBtns.forEach(b => b.addEventListener('click', () => showSub(b.dataset.sub)));
     root.querySelector('#topoExample').addEventListener('click', loadExample);
     root.querySelector('#topoMapExport').addEventListener('click', exportMap);
@@ -77,6 +110,7 @@ let linkStops = false;     // move all stop lines together
 
     initCanvas();
     initSideEvents();
+    renderBgBar();
     document.addEventListener('keydown', onKey);
     window.addEventListener('resize', () => { if (isVisible()) renderCanvas(); });
     setStep(1);
@@ -153,9 +187,31 @@ let linkStops = false;     // move all stop lines together
     const defs = svg.append('defs');
     defs.append('clipPath').attr('id', 'topoClip').append('rect').attr('id', 'topoClipRect');
     worldG = svg.append('g').attr('class', 'topo-world');
-    ['grid', 'walk', 'roads', 'laneFill', 'marks', 'cross', 'conns', 'lanes', 'labels', 'axes', 'handles', 'overlay'].forEach(name => {
+    layers.grid = worldG.append('g').attr('class', 'layer-grid');
+    layers.bg = worldG.append('g').attr('class', 'layer-bg');
+    bgImg = layers.bg.append('image').attr('class', 't-bg').attr('preserveAspectRatio', 'none').style('display', 'none');
+    // the drawn plan: one group, so its opacity can be set over the background
+    planG = worldG.append('g').attr('class', 'layer-plan');
+    ['walk', 'roads', 'laneFill', 'marks', 'cross', 'conns', 'lanes', 'labels'].forEach(name => {
+      layers[name] = planG.append('g').attr('class', 'layer-' + name);
+    });
+    ['axes', 'handles', 'overlay'].forEach(name => {
       layers[name] = worldG.append('g').attr('class', 'layer-' + name);
     });
+    // move the background with the mouse (tool "Bild verschieben")
+    let dragOff = null;
+    bgImg.call(d3.drag().container(els.svg).filter(e => bgMode === 'move' && !e.button)
+      .on('start', e => {
+        e.sourceEvent.stopPropagation();
+        const bg = M().background, w = worldOf(e.sourceEvent);
+        dragOff = { dx: w.x - bg.x, dy: w.y - bg.y };
+      })
+      .on('drag', e => {
+        const bg = M().background, w = worldOf(e.sourceEvent);
+        if (!bg || !dragOff) return;
+        bg.x = w.x - dragOff.dx; bg.y = w.y - dragOff.dy;
+        renderBackground();
+      }));
     hudG = svg.append('g').attr('class', 't-hud');
 
     zoomBehavior = d3.zoom().scaleExtent([1.2, 80]).on('zoom', e => {
@@ -169,6 +225,7 @@ let linkStops = false;     // move all stop lines together
     svg.on('click', onCanvasClick);
     svg.on('dblclick', onCanvasDblClick);
     svg.on('mousemove', e => {
+      if (bgMode === 'scale' && scalePts.length === 1) { scaleCursor = worldOf(e); renderOverlay(); return; }
       if (!draft) return;
       draft.cursor = snap(worldOf(e));
       renderOverlay();
@@ -193,6 +250,8 @@ let linkStops = false;     // move all stop lines together
       derived.axes.forEach(e => pts = pts.concat(e.poly));
       derived.arms.forEach(a => { pts = pts.concat(a.edgeLeft, a.edgeRight); });
     }
+    const bg = M() && M().background;
+    if (!pts.length && bg) pts = [{ x: bg.x, y: bg.y }, { x: bg.x + bg.wPx * bg.mPerPx, y: bg.y - bg.hPx * bg.mPerPx }];
     if (!pts.length) pts = [{ x: -70, y: -45 }, { x: 70, y: 45 }];
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -235,6 +294,7 @@ let linkStops = false;     // move all stop lines together
     const { w, h } = size();
     worldG.attr('transform', `translate(${f2(tr.x)},${f2(tr.y)}) scale(${tr.k})`);
     renderGrid(w, h);
+    renderBackground();
     renderRoads();
     renderLaneLayers();
     renderCross();
@@ -244,7 +304,7 @@ let linkStops = false;     // move all stop lines together
     renderHandles();
     renderOverlay();
     renderHud(w, h);
-    els.empty.style.display = M().axes.length || draft ? 'none' : '';
+    els.empty.style.display = M().axes.length || draft || (M().background && M().background.src) ? 'none' : '';
     els.canvas.classList.toggle('drawing', !!draft);
     els.drawBar.style.display = draft ? '' : 'none';
   }
@@ -332,6 +392,14 @@ let linkStops = false;     // move all stop lines together
         if (fr) b = { x: arm.stopPt.x + arm.normal.x * fr.slip.inner, y: arm.stopPt.y + arm.normal.y * fr.slip.inner };
         mk += `<line class="t-stop" x1="${f2(a.x)}" y1="${f2(-a.y)}" x2="${f2(b.x)}" y2="${f2(-b.y)}"/>`;
       }
+    });
+    // tram tracks: two rails along each tram lane and along each tram connection
+    const rails = line => (line.length > 1 ? [0.72, -0.72].map(o => `<path class="t-rail" d="${polyD(T.offsetPoly(line, o))}"/>`).join('') : '');
+    derived.arms.forEach(arm => arm.in.concat(arm.out).forEach(g => { if (g.lane.type === 'tram') mk += rails(g.path); }));
+    const geomsAll = T.allLaneGeoms(derived), isl = T.freeRightIslands(derived);
+    M().connections.forEach(c => {
+      const a = geomsAll.get(c.from);
+      if (a && a.lane.type === 'tram') mk += rails(T.connectionPolyline(M(), derived, c, isl));
     });
     layers.marks.html(mk);
   }
@@ -587,6 +655,11 @@ let linkStops = false;     // move all stop lines together
 
   function renderOverlay() {
     let html = '';
+    if (bgMode === 'scale' && scalePts.length) {
+      const pts = scalePts.concat(scalePts.length === 1 && scaleCursor ? [scaleCursor] : []);
+      if (pts.length === 2) html += `<path class="t-scale-line" stroke-width="${f2(2.5 / tr.k)}" d="M${pt(pts[0])} L${pt(pts[1])}"/>`;
+      scalePts.forEach(p => { html += `<circle class="t-scale-pt" cx="${f2(p.x)}" cy="${f2(-p.y)}" r="${f2(5 / tr.k)}" stroke-width="${f2(2 / tr.k)}"/>`; });
+    }
     if (draft) {
       const pts = draft.points.concat(draft.cursor ? [draft.cursor] : []);
       if (pts.length >= 2) {
@@ -615,6 +688,8 @@ let linkStops = false;     // move all stop lines together
   /* ---------------- Canvas input ---------------- */
   function onCanvasClick(e) {
     if (e.defaultPrevented) return;
+    if (bgMode === 'scale') { if (scalePts.length < 2) { scalePts.push(worldOf(e)); renderOverlay(); renderScaleBar(); } return; }
+    if (bgMode === 'move') return;
     if (draft) { draftAdd(snap(worldOf(e))); return; }
     const t = e.target.closest ? e.target.closest('[data-kind]') : null;
     if (!t) { if (sel) { sel = null; renderCanvas(); renderSide(); } return; }
@@ -694,6 +769,7 @@ let linkStops = false;     // move all stop lines together
     if (!isVisible()) return;
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    if (e.key === 'Escape' && bgMode) { setBgMode(null); return; }
     if (e.key === 'Escape' && draft) { cancelDraft(); return; }
     if (e.key === 'Enter' && draft) { finishDraft(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
@@ -985,11 +1061,145 @@ let linkStops = false;     // move all stop lines together
     changed(true);
   }
 
+
+  /* ---------------- Background: import, opacity, scale, move ---------------- */
+  function renderBackground() {
+    if (!bgImg) return;
+    const m = M(), bg = m.background;
+    planG.attr('opacity', m.planOpacity != null ? m.planOpacity : 1)
+      .style('pointer-events', bgMode ? 'none' : null);
+    if (!bg || !bg.src) { bgImg.style('display', 'none'); return; }
+    const href = bgObj && bgObj.src === bg.src ? bgObj.url : bg.src;
+    if (bgImg.attr('href') !== href) bgImg.attr('href', href);
+    bgImg.style('display', null)
+      .attr('x', f2(bg.x)).attr('y', f2(-bg.y))
+      .attr('width', bg.wPx * bg.mPerPx).attr('height', bg.hPx * bg.mPerPx)
+      .attr('opacity', bg.opacity)
+      .style('pointer-events', bgMode === 'move' ? 'all' : 'none')
+      .style('cursor', bgMode === 'move' ? 'move' : null);
+  }
+
+  function renderBgBar() {
+    const m = M(), bg = m.background, has = !!(bg && bg.src);
+    els.bgScale.disabled = !has; els.bgMove.disabled = !has; els.bgRemove.disabled = !bg; els.bgOpacity.disabled = !has;
+    els.bgScale.classList.toggle('on', bgMode === 'scale');
+    els.bgMove.classList.toggle('on', bgMode === 'move');
+    els.bgOpacity.value = Math.round((bg ? bg.opacity : 0.6) * 100);
+    els.planOpacity.value = Math.round((m.planOpacity != null ? m.planOpacity : 1) * 100);
+    els.bgInfo.textContent = !bg ? 'Kein Hintergrund'
+      : !bg.src ? `Bild fehlt (${bg.wPx}×${bg.hPx} px) – dasselbe Bild laden, Lage und Maßstab werden übernommen`
+      : `${bg.name || 'Bild'} · ${bg.wPx}×${bg.hPx} px · 1 m = ${f2(1 / bg.mPerPx)} px`;
+    els.canvas.classList.toggle('bg-scale', bgMode === 'scale');
+    els.canvas.classList.toggle('bg-move', bgMode === 'move');
+  }
+
+  function setBgMode(mode) {
+    if (mode && draft) cancelDraft(true);
+    bgMode = mode; scalePts = []; scaleCursor = null;
+    renderBgBar(); renderScaleBar(); renderBackground(); renderOverlay();
+  }
+
+  function renderScaleBar() {
+    if (bgMode !== 'scale') { els.scaleBar.style.display = 'none'; return; }
+    els.scaleBar.style.display = '';
+    const cancel = '<button type="button" data-scale="cancel">Abbrechen</button>';
+    if (scalePts.length === 0) els.scaleBar.innerHTML = `<span>Maßstab: <b>ersten Punkt</b> anklicken (z. B. Anfang der Maßstabsleiste). Vorher heranzoomen.</span>${cancel}`;
+    else if (scalePts.length === 1) els.scaleBar.innerHTML = `<span>Jetzt den <b>zweiten Punkt</b> anklicken.</span>${cancel}`;
+    else {
+      const d = Math.hypot(scalePts[1].x - scalePts[0].x, scalePts[1].y - scalePts[0].y);
+      els.scaleBar.innerHTML = `<span>Gemessen ${f2(d)} m · wirklicher Abstand</span><input type="number" step="any" min="0" id="topoScaleLen" value="5"> <span>m</span>
+        <button type="button" class="primary" data-scale="apply">Übernehmen</button>${cancel}`;
+      const inp = els.scaleBar.querySelector('#topoScaleLen');
+      inp.focus(); inp.select();
+    }
+  }
+
+  function applyScale() {
+    if (scalePts.length !== 2) return;
+    const inp = els.scaleBar.querySelector('#topoScaleLen');
+    const len = inp ? Number(String(inp.value).replace(',', '.')) : NaN;
+    if (!(len > 0)) { GZ.snackbar.show('Bitte eine Länge in Metern eingeben', { type: 'warning' }); return; }
+    const f = T.scaleBackground(M(), scalePts[0], scalePts[1], len);
+    if (!f) return;
+    setBgMode(null);
+    GZ.snackbar.show('Maßstab gesetzt', { description: `1 m = ${f2(1 / M().background.mPerPx)} px im Bild. Der Plan bleibt in Metern; das Bild wurde angepasst.` });
+    renderCanvas();
+  }
+
+  const readAsDataUrl = file => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result); r.onerror = () => rej(new Error('Datei konnte nicht gelesen werden.'));
+    r.readAsDataURL(file);
+  });
+  const imageSize = src => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => rej(new Error('Bild konnte nicht gelesen werden.'));
+    img.src = src;
+  });
+  const loadScript = src => new Promise((res, rej) => {
+    const el = document.createElement('script');
+    el.src = src; el.onload = res; el.onerror = () => rej(new Error('PDF-Bibliothek fehlt: ' + src));
+    document.head.appendChild(el);
+  });
+
+  // PDF: first (or chosen) page as a picture. pdf.js runs in the page itself (no worker), so it also works from file://.
+  async function renderPdf(file) {
+    if (!window.pdfjsLib) {
+      await loadScript('js/vendor/pdfjs/pdf.worker.min.js');   // defines pdfjsWorker: pdf.js then runs without a worker
+      await loadScript('js/vendor/pdfjs/pdf.min.js');
+    }
+    const lib = window.pdfjsLib;
+    lib.GlobalWorkerOptions.workerSrc = 'js/vendor/pdfjs/pdf.worker.min.js';
+    const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+    let pageNo = 1;
+    if (doc.numPages > 1) {
+      const v = parseInt(window.prompt(`Welche Seite als Hintergrund? (1–${doc.numPages})`, '1'), 10);
+      if (v >= 1 && v <= doc.numPages) pageNo = v;
+    }
+    const page = await doc.getPage(pageNo);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(6, 4000 / Math.max(base.width, base.height));    // about 4000 px on the long side
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    return { src: canvas.toDataURL('image/png'), w: canvas.width, h: canvas.height, name: `${file.name} (S. ${pageNo})` };
+  }
+
+  async function importBackground(file) {
+    const isPdf = /pdf$/i.test(file.type) || /\.pdf$/i.test(file.name);
+    try {
+      let img;
+      if (isPdf) img = await renderPdf(file);
+      else {
+        const src = await readAsDataUrl(file);
+        const { w, h } = await imageSize(src);
+        img = { src, w, h, name: file.name };
+        bgObj = { src, url: URL.createObjectURL(file) };
+      }
+      const { w, h } = size();
+      const center = { x: (w / 2 - tr.x) / tr.k, y: -(h / 2 - tr.y) / tr.k };
+      const isNew = T.placeBackground(M(), { name: img.name, src: img.src, wPx: img.w, hPx: img.h }, center);
+      setBgMode(null);
+      if (isNew && !M().axes.length) { fitted = true; update(); fitView(); }
+      renderCanvas(); renderBgBar();
+      GZ.snackbar.show(isNew ? 'Hintergrund geladen – jetzt den Maßstab setzen' : 'Hintergrund geladen – Lage und Maßstab übernommen', {
+        description: isNew ? '„Maßstab setzen“: zwei Punkte mit bekanntem Abstand anklicken (z. B. die Maßstabsleiste) und die Länge eingeben.' : ''
+      });
+    } catch (err) {
+      GZ.snackbar.show('Hintergrund konnte nicht geladen werden', { type: 'warning', description: err.message });
+    }
+  }
+
   /* ---------------- Commands ---------------- */
   function loadExample() {
     const m = M();
     if (m.axes.length && !window.confirm('Die vorhandene Topologie wird durch das Beispiel ersetzt. Fortfahren?')) return;
-    GZ.state.data.topology = T.create();
+    const keep = { background: m.background, planOpacity: m.planOpacity };
+    GZ.state.data.topology = Object.assign(T.create(), keep);
     T.exampleCrossing(M());
     sel = null; armSel = null; draft = null;
     update();
@@ -1010,7 +1220,8 @@ let linkStops = false;     // move all stop lines together
   // Replaces the model (after a configuration was loaded) and redraws.
   function setModel(model) {
     GZ.state.data.topology = model;
-    sel = null; armSel = null; draft = null; fitted = false;
+    sel = null; armSel = null; draft = null; fitted = false; bgMode = null; scalePts = [];
+    if (els) renderBgBar();
     if (els && els.paneTopo.style.display !== 'none') { update(); refresh(); }
   }
 
