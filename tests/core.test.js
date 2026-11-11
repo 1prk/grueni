@@ -466,10 +466,23 @@ test('topology: a free right turn gives a triangle island between slip lane and 
   // the island lies between the slip lane and the through lane: x between the lane boundary and the slip lane
   const isl = islands.find(i => i.armKey === north.key).polygon;
   const slipInner = Math.abs(north.in[1].startPt.x) - 3.25 / 2;   // inner edge of the slip lane
-  isl.forEach(p => assert.ok(p.x <= -slipInner + 0.3, 'island is west of the through lane boundary'));
+  isl.forEach(p => assert.ok(p.x <= -slipInner + T.DEFAULTS.triTip, 'island stays at the lane boundary (the noses may reach a little into the through lane)'));
   assert.ok(isl.length > 10);
   const info = T.freeRightIslands(d).find(i => i.armKey === north.key);
   assert.ok(info.r > 0.3 && info.r <= T.DEFAULTS.triRound, 'rounding radius');
+  // the slip lane keeps its width: the curved side stays at the lane width from the kerb
+  const [dSlip, dEgress] = info.widths;
+  near(dSlip, 3.25, 1e-6);
+  const lo = Math.min(dSlip, dEgress) - 0.2, hi = Math.max(dSlip, dEgress) + 0.2;
+  info.curve.forEach(q => {
+    const dd = Math.min(...info.kerb.map(k => Math.hypot(k.x - q.x, k.y - q.y)));
+    assert.ok(dd >= lo && dd <= hi, `distance to the kerb ${dd.toFixed(2)} should be between ${lo.toFixed(2)} and ${hi.toFixed(2)}`);
+  });
+  // the receiving arm needs two vehicle egress lanes
+  const west = d.arms.find(a => a.name === 'West');
+  T.setLaneCount(m, west.key, 'out', 2);          // vehicle + bike: only one vehicle lane
+  assert.strictEqual(T.freeRightPair(T.derive(m), T.derive(m).arms.find(a => a.key === north.key)), null);
+  T.setLaneCount(m, west.key, 'out', 3);
   // an arm with one ingress lane has no free right turn
   const south = d.arms.find(a => a.name === 'Süd');
   T.setLaneCount(m, south.key, 'in', 1);
@@ -483,6 +496,7 @@ test('topology: applyFreeRight rewires the slip lane and can be switched off', (
   T.ensureDefaults(m, T.derive(m));
   const key = T.derive(m).arms.find(a => a.name === 'Nord').key;
   T.setLaneCount(m, key, 'in', 2);
+  T.setLaneCount(m, T.derive(m).arms.find(a => a.name === 'West').key, 'out', 2);   // the slip lane needs its own egress lane
   let d = T.derive(m);
   T.proposeConnections(m, d).forEach(c => T.addConnection(m, c.from, c.to));
   const slipId = d.arms.find(a => a.key === key).in[1].lane.id;

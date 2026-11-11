@@ -29,7 +29,7 @@
     taper: 8,            // m, length of the taper at the end of a short (turning) lane
     walk: 2.5,           // m, width of the footway drawn beside the road
     triRound: 0.9,       // m, radius of its rounded corners
-    triTip: 1.7          // m, width of the nose of the triangle island
+    triTip: 1.6          // m, width of the nose of the triangle island
   };
 
   const LANE_TYPES = {
@@ -702,7 +702,8 @@
     if (!prev || prev === arm) return null;
     const veh = lanes => lanes.filter(g => g.lane.type !== 'bike');
     const ins = veh(arm.in), outs = veh(prev.out);
-    if (arm.in.length < 2 || !ins.length || !outs.length) return null;
+    // The slip lane needs its own egress lane: the receiving arm needs two vehicle egress lanes.
+    if (arm.in.length < 2 || !ins.length || outs.length < 2) return null;
     return { prev, slip: ins[ins.length - 1], target: outs[outs.length - 1] };
   }
 
@@ -720,29 +721,43 @@
       if (!apex) return;
       const inward = (p, from, dir) => (p.x - from.x) * dir.x + (p.y - from.y) * dir.y < -0.5;
       if (!inward(apex, v1, arm.dir) || !inward(apex, v2, prev.dir)) return;
-      // Shape: tip at the stop line, straight leg along the lane boundary, a flat base,
-      // a straight leg along the egress lane and a gently curved side facing the slip lane.
-      // The legs are cut after DEFAULTS.triLeg metres, so the island stays small.
-      // The curved side leaves the tip at an angle (about 10 to 15 degrees), not along the leg:
-      // its control point is halfway between the apex and the middle of the chord.
-      const c = { x: (apex.x + (v1.x + v2.x) / 2) / 2, y: (apex.y + (v1.y + v2.y) / 2) / 2 };
-      const curve = [];
-      for (let i = 0; i <= 18; i++) {
-        const t = i / 18, u = 1 - t;
-        curve.push({ x: u * u * v1.x + 2 * u * t * c.x + t * t * v2.x, y: u * u * v1.y + 2 * u * t * c.y + t * t * v2.y });
+
+      // The curved side is the kerb curve moved inward by the width of the slip lane, so the lane keeps
+      // its width through the junction. The width goes smoothly from the slip lane to the egress lane.
+      const kerbCtrl = lineIntersect(prev.cornerRight, prev.dir, arm.cornerLeft, arm.dir);
+      if (!kerbCtrl) return;
+      const N = 48, kerb = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, u = 1 - t;
+        kerb.push({ x: u * u * prev.cornerRight.x + 2 * u * t * kerbCtrl.x + t * t * arm.cornerLeft.x, y: u * u * prev.cornerRight.y + 2 * u * t * kerbCtrl.y + t * t * arm.cornerLeft.y });
       }
-      // Both thin ends are cut where the island is DEFAULTS.triTip wide (a thinner end can not
-      // be rounded). The flat ends are then rounded, so the noses look like bullets.
+      const dEgress = (prev.gap / 2 + prev.widthOut) - target.inner;    // kerb to the inner edge of the egress lane
+      const dSlip = (arm.gap / 2 + arm.widthIn) - slip.inner;            // kerb to the inner edge of the slip lane
+      const inset = kerb.map((_, i) => -(dEgress + (dSlip - dEgress) * (i / N)));   // right of the travel direction = junction side
+      const curve = offsetPoly(kerb, inset).reverse();                   // from the slip lane (v1) to the egress lane (v2)
+
+      // The island runs from the crossing of one arm to the crossing of the other arm (or 4 m from the
+      // stop line when there is no crossing). The curved side keeps the lane width. The two noses
+      // are DEFAULTS.triTip wide: where the curved side is closer to the straight leg, the nose edge
+      // is moved a little into the through lane. The flat noses are rounded afterwards.
       const gapTo = (q, v, d) => Math.abs((q.x - v.x) * d.y - (q.y - v.y) * d.x);   // distance of q to the line through v along d
-      const k = curve.findIndex(q => gapTo(q, v1, arm.dir) >= DEFAULTS.triTip);
+      const reach = a => (a.cross ? Math.max(1, a.stopDist - (a.cross.s - a.cross.cw.width / 2)) : 4);   // stop line to the near crossing line
+      const tA = reach(arm), tB = reach(prev);
+      const k = curve.findIndex(q => (v1.x - q.x) * arm.dir.x + (v1.y - q.y) * arm.dir.y >= tA);
       let m = -1;
-      curve.forEach((q, i) => { if (gapTo(q, v2, prev.dir) >= DEFAULTS.triTip) m = i; });
+      curve.forEach((q, i) => { if ((v2.x - q.x) * prev.dir.x + (v2.y - q.y) * prev.dir.y >= tB) m = i; });
       if (k < 0 || m <= k) return;
       const onLine = (q, v, d) => { const t = (q.x - v.x) * d.x + (q.y - v.y) * d.y; return { x: v.x + d.x * t, y: v.y + d.y * t }; };
+      const dA = Math.max(0, DEFAULTS.triTip - gapTo(curve[k], v1, arm.dir)), dB = Math.max(0, DEFAULTS.triTip - gapTo(curve[m], v2, prev.dir));
       const pa = onLine(curve[k], v1, arm.dir), pb = onLine(curve[m], v2, prev.dir);
-      const pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
-      const r = fitRadius(pts, DEFAULTS.triRound);
-      out.push({ armKey: arm.key, polygon: insetPolygon(pts, r), r, outline: pts });
+      const na = { x: pa.x - arm.normal.x * dA, y: pa.y - arm.normal.y * dA };          // toward the through lanes of the arm
+      const nb = { x: pb.x + prev.normal.x * dB, y: pb.y + prev.normal.y * dB };        // toward the through lanes of the receiving arm
+      // both legs stay straight: they run through the (moved) noses, the corner is where they meet
+      const corner = lineIntersect(na, arm.dir, nb, prev.dir) || apex;
+      const pts = [na].concat(curve.slice(k, m + 1), [nb, corner]);
+      // the radius must stay below half the width of the noses, or the inset polygon folds over
+      const r = Math.min(fitRadius(pts, DEFAULTS.triRound), DEFAULTS.triTip * 0.47);
+      out.push({ armKey: arm.key, polygon: insetPolygon(pts, r), r, outline: pts, curve, kerb, widths: [dSlip, dEgress] });
     });
     return out;
   }
@@ -771,15 +786,15 @@
       const main = arm.axisId === ew.id;
       setLaneCount(model, arm.key, 'in', main ? 4 : 2);
       setCrosswalk(model, arm.key, true);
-      if (!main) { model.arms[arm.key].stopDist = 17; model.arms[arm.key].freeRight = true; return; }   // behind the wide main road
+      if (!main) { model.arms[arm.key].stopDist = 20; model.arms[arm.key].freeRight = true; return; }   // behind the wide main road
       // main road: median island, left turning lane (35 m), bike lanes on both sides
       const cfg = model.arms[arm.key];
-      cfg.gap = 3; cfg.islandLen = 40; cfg.stopDist = 14;
+      cfg.gap = 3; cfg.islandLen = 40; cfg.stopDist = 18;
       const ins = lanesOf(model, arm.key, 'in');
       ins[0].length = 35;
       setLaneType(ins[ins.length - 1], 'bike');
-      setLaneCount(model, arm.key, 'out', 2);
-      setLaneType(lanesOf(model, arm.key, 'out')[1], 'bike');
+      setLaneCount(model, arm.key, 'out', 3);       // two vehicle lanes (one for the free right turn) and a bike lane
+      setLaneType(lanesOf(model, arm.key, 'out')[2], 'bike');
     });
     const d2 = derive(model);
     proposeConnections(model, d2).forEach(c => addConnection(model, c.from, c.to));
