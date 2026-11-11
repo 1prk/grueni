@@ -681,7 +681,9 @@
         const free = targetArm.out.filter(o => !reserved.has(o.lane.id) || g.lane.id === reservedBy.get(o.lane.id));
         const outs = free.length ? free : targetArm.out;
         const same = outs.filter(o => o.lane.type === g.lane.type);
-        const pool = same.length ? same : outs;
+        // a motor vehicle may use a shared tram lane, never a bike lane
+        const motor = outs.filter(o => o.lane.type !== 'bike');
+        const pool = same.length ? same : (g.lane.type !== 'bike' && motor.length ? motor : outs);
         let idx = m === 'left' ? 0 : m === 'right' ? pool.length - 1 : Math.min(throughIdx, pool.length - 1);
         return pool[Math.max(0, idx)];
       };
@@ -692,12 +694,18 @@
         if (g.lane.type === 'bike') wanted = ['straight'];
         else {
           const k = vehicleIns.indexOf(g), n = vehicleIns.length;
-          if (arm.freeRight && n >= 2) wanted = k === n - 1 ? ['right'] : (k === 0 ? ['left'] : ['straight']);
-          else if (n === 1) wanted = ['left', 'straight', 'right'];
-          else if (k === 0) wanted = ['left'];
-          else if (k === n - 1) wanted = ['straight', 'right'];
-          else wanted = ['straight'];
-          if (n === 2 && k === 0 && !arm.freeRight) wanted = ['left', 'straight'];
+          const has = mv => !!targets[mv];
+          if (n === 1) wanted = ['left', 'straight', 'right'];
+          else if (k === n - 1) {
+            // outermost lane: a free right turn or a short (widened) lane turns right only
+            wanted = arm.freeRight || (g.cut && g.cut.anchor === 'inner') ? ['right'] : ['straight', 'right'];
+          } else if (k === 0 && has('left')) {
+            // innermost lane: a short lane turns left only
+            wanted = g.cut && g.cut.anchor === 'outer' ? ['left'] : (n === 2 && !arm.freeRight ? ['left', 'straight'] : ['left']);
+          } else wanted = ['straight'];
+          // only movements that exist at this junction; a lane without any keeps the nearest one
+          wanted = wanted.filter(has);
+          if (!wanted.length) wanted = ['straight', 'right', 'left'].filter(has).slice(0, 1);
         }
         wanted.forEach(m => {
           if (!targets[m]) return;
@@ -721,9 +729,12 @@
     if (!prev || prev === arm) return null;
     const veh = lanes => lanes.filter(isVehicle);
     const ins = veh(arm.in), outs = veh(prev.out);
-    // The slip lane needs its own egress lane: the receiving arm needs two vehicle egress lanes.
-    if (arm.in.length < 2 || !ins.length || outs.length < 2) return null;
-    return { prev, slip: ins[ins.length - 1], target: outs[outs.length - 1] };
+    // The island lies between the slip lane and the next lane inside it. So the slip lane and its egress
+    // lane must not be the innermost lanes (another lane of any type, e.g. a tram lane, lies inside).
+    if (!ins.length || !outs.length) return null;
+    const slip = ins[ins.length - 1], target = outs[outs.length - 1];
+    if (slip.index < 1 || target.index < 1) return null;
+    return { prev, slip, target };
   }
 
   // Island between the slip lane and the other lanes: a triangle with a concave long side.
@@ -808,7 +819,9 @@
   function drivingPath(c) {
     const chord = dist(c.p0, c.p1), turn = Math.abs(c.angle);
     const through = turn < 30;
-    const f = through ? { a0: 0.03, b0: 0.2, a1: 0.3, b1: 1.2 } : { a0: 0.16, b0: 0.46, a1: 0.16, b1: 0.46 };
+    // right turns pass the kerb corner on the inside, so they sweep a little less than left turns
+    const f = through ? { a0: 0.03, b0: 0.2, a1: 0.3, b1: 1.2 }
+      : c.angle < 0 ? { a0: 0.12, b0: 0.38, a1: 0.12, b1: 0.38 } : { a0: 0.16, b0: 0.46, a1: 0.16, b1: 0.46 };
     const P = [
       c.p0,
       { x: c.p0.x + c.h0.x * chord * f.a0, y: c.p0.y + c.h0.y * chord * f.a0 },
@@ -871,9 +884,10 @@
     });
     const kerbs = kerbPolylines(derived), geoms = allLaneGeoms(derived), out = [];
     model.connections.forEach(conn => {
-      const g = geoms.get(conn.from);
-      if (!g) return;
-      const need = g.lane.width / 2 - DEFAULTS.collideSlack;
+      const g = geoms.get(conn.from), h = geoms.get(conn.to);
+      if (!g || !h) return;
+      // the path ends in the middle of its egress lane: a narrow egress lane may be closer to the kerb
+      const need = Math.min(g.lane.width, h.lane.width) / 2 - DEFAULTS.collideSlack - 0.01;
       const line = connectionPolyline(model, derived, conn, islands);
       let worstIsland = Infinity, worstKerb = Infinity;
       line.forEach(p => {

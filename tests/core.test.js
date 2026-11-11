@@ -634,5 +634,17 @@ test('topology: tram lanes are not part of the proposals and are exported as tra
   assert.ok(set.some(l => l.laneAttributes.laneType.trackedVehicle));
 });
 
+test('topology: the Rödelstraße reconstruction loads and has no collisions', () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(root, 'examples/topologie_roedelstrasse-leipzig.json'), 'utf8'));
+  const m = T.fromConfig(cfg.topology);
+  const d = T.derive(m);
+  assert.strictEqual(d.arms.length, 3);
+  assert.strictEqual(m.background.src, null, 'no image data in the repository');
+  assert.strictEqual(m.background.wPx, 1380);
+  near(m.background.mPerPx, 5 / 73, 1e-9);
+  same(T.connectionIssues(m, d).map(i => i.connId), []);
+  assert.ok(m.lanes.some(l => l.type === 'tram'));
+});
+
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }
 console.log('\nall tests passed');

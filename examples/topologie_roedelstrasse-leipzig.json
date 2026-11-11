@@ -1,0 +1,380 @@
+{
+ "version": 2,
+ "knotenNr": null,
+ "knotenName": "Rödelstraße / Könneritzstraße / Antonienstraße (Leipzig)",
+ "phases": [],
+ "pueOverrides": {},
+ "detectors": {
+  "links": [],
+  "ignored": []
+ },
+ "topology": {
+  "version": 1,
+  "name": "Rödelstraße / Könneritzstraße / Antonienstraße (Leipzig)",
+  "refLat": null,
+  "refLon": null,
+  "axes": [
+   {
+    "id": "A1",
+    "name": "Rödelstraße / Antonienstraße",
+    "points": [
+     {
+      "x": -45.273972602739725,
+      "y": -9.315068493150685
+     },
+     {
+      "x": -24.72602739726027,
+      "y": -8.63013698630137
+     },
+     {
+      "x": -13.082191780821917,
+      "y": -7.534246575342466
+     },
+     {
+      "x": -6.575342465753424,
+      "y": -4.4520547945205475
+     },
+     {
+      "x": 0,
+      "y": 0
+     },
+     {
+      "x": 8.835616438356164,
+      "y": 1.2328767123287672
+     },
+     {
+      "x": 17.397260273972602,
+      "y": 2.2602739726027394
+     },
+     {
+      "x": 44.726027397260275,
+      "y": 6.301369863013698
+     },
+     {
+      "x": 49.24657534246575,
+      "y": 7.0547945205479445
+     }
+    ]
+   },
+   {
+    "id": "A2",
+    "name": "Könneritzstraße",
+    "points": [
+     {
+      "x": 13.904109589041095,
+      "y": 43.83561643835616
+     },
+     {
+      "x": 9.863013698630137,
+      "y": 30.136986301369863
+     },
+     {
+      "x": 7.123287671232877,
+      "y": 21.91780821917808
+     },
+     {
+      "x": 5.205479452054794,
+      "y": 16.43835616438356
+     },
+     {
+      "x": 2.671232876712329,
+      "y": 8.21917808219178
+     },
+     {
+      "x": -0.410958904109589,
+      "y": -1.7123287671232876
+     }
+    ]
+   }
+  ],
+  "center": null,
+  "arms": {
+   "A2:s": {
+    "init": true,
+    "stopDist": 15
+   },
+   "A1:e": {
+    "init": true,
+    "stopDist": 17.5
+   },
+   "A1:s": {
+    "init": true,
+    "stopDist": 12
+   }
+  },
+  "lanes": [
+   {
+    "id": "L1",
+    "armKey": "A2:s",
+    "dir": "in",
+    "order": 0,
+    "type": "tram",
+    "width": 3,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L2",
+    "armKey": "A2:s",
+    "dir": "out",
+    "order": 0,
+    "type": "tram",
+    "width": 3.6,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L3",
+    "armKey": "A1:e",
+    "dir": "in",
+    "order": 0,
+    "type": "vehicle",
+    "width": 3.15,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L4",
+    "armKey": "A1:e",
+    "dir": "out",
+    "order": 0,
+    "type": "vehicle",
+    "width": 3.15,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L5",
+    "armKey": "A1:s",
+    "dir": "in",
+    "order": 0,
+    "type": "tram",
+    "width": 3,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L6",
+    "armKey": "A1:s",
+    "dir": "out",
+    "order": 0,
+    "type": "tram",
+    "width": 3,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L7",
+    "armKey": "A2:s",
+    "dir": "in",
+    "order": 1,
+    "type": "vehicle",
+    "width": 2.9,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L8",
+    "armKey": "A2:s",
+    "dir": "in",
+    "order": 2,
+    "type": "bike",
+    "width": 1.4,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L9",
+    "armKey": "A2:s",
+    "dir": "out",
+    "order": 1,
+    "type": "bike",
+    "width": 1.8,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L10",
+    "armKey": "A1:e",
+    "dir": "in",
+    "order": 1,
+    "type": "vehicle",
+    "width": 3.15,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L11",
+    "armKey": "A1:e",
+    "dir": "in",
+    "order": 2,
+    "type": "vehicle",
+    "width": 3,
+    "length": 18,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L12",
+    "armKey": "A1:e",
+    "dir": "out",
+    "order": 1,
+    "type": "vehicle",
+    "width": 3.15,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L13",
+    "armKey": "A1:s",
+    "dir": "in",
+    "order": 1,
+    "type": "vehicle",
+    "width": 3.2,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L14",
+    "armKey": "A1:s",
+    "dir": "in",
+    "order": 2,
+    "type": "vehicle",
+    "width": 3.2,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L15",
+    "armKey": "A1:s",
+    "dir": "out",
+    "order": 1,
+    "type": "vehicle",
+    "width": 2.3,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "L16",
+    "armKey": "A1:s",
+    "dir": "out",
+    "order": 2,
+    "type": "vehicle",
+    "width": 2.3,
+    "length": null,
+    "sgs": [],
+    "detectors": []
+   }
+  ],
+  "crosswalks": [
+   {
+    "id": "C1",
+    "armKey": "A2:s",
+    "width": 4,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "C2",
+    "armKey": "A1:e",
+    "width": 4,
+    "sgs": [],
+    "detectors": []
+   },
+   {
+    "id": "C3",
+    "armKey": "A1:s",
+    "width": 4,
+    "sgs": [],
+    "detectors": []
+   }
+  ],
+  "connections": [
+   {
+    "id": "V1",
+    "from": "L7",
+    "to": "L4",
+    "sg": null
+   },
+   {
+    "id": "V2",
+    "from": "L7",
+    "to": "L16",
+    "sg": null
+   },
+   {
+    "id": "V3",
+    "from": "L3",
+    "to": "L15",
+    "sg": null
+   },
+   {
+    "id": "V4",
+    "from": "L10",
+    "to": "L16",
+    "sg": null
+   },
+   {
+    "id": "V5",
+    "from": "L11",
+    "to": "L2",
+    "sg": null
+   },
+   {
+    "id": "V6",
+    "from": "L13",
+    "to": "L2",
+    "sg": null
+   },
+   {
+    "id": "V7",
+    "from": "L13",
+    "to": "L4",
+    "sg": null
+   },
+   {
+    "id": "V8",
+    "from": "L14",
+    "to": "L12",
+    "sg": null
+   },
+   {
+    "id": "V9",
+    "from": "L1",
+    "to": "L6",
+    "sg": null
+   },
+   {
+    "id": "V10",
+    "from": "L5",
+    "to": "L2",
+    "sg": null
+   }
+  ],
+  "background": {
+   "name": "Luftbild Rödelstraße (1380×1043 px, 5 m = 73 px) – Bild selbst laden",
+   "src": null,
+   "wPx": 1380,
+   "hPx": 1043,
+   "mPerPx": 0.0684931506849315,
+   "x": -45.273972602739725,
+   "y": 43.83561643835616,
+   "opacity": 0.7
+  },
+  "planOpacity": 0.6
+ }
+}
