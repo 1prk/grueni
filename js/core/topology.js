@@ -29,7 +29,8 @@
     taper: 8,            // m, length of the taper at the end of a short (turning) lane
     walk: 2.5,           // m, width of the footway drawn beside the road
     triRound: 0.9,       // m, radius of its rounded corners
-    triTip: 1.6          // m, width of the nose of the triangle island
+    triTip: 1.6,         // m, width of the nose of the triangle island
+    triDepth: 0.6        // the tip of the triangle island is cut at this depth (times the base) behind its base
     ,collideSlack: 0.2   // m, a path may come this much closer to an island or kerb than half its lane width
   };
 
@@ -133,6 +134,20 @@
 
   // Ring (closed polygon) moved inward by d with mitre joins. Used to build rounded shapes:
   // draw the inset ring with a round stroke of width 2*d and every corner becomes a true arc.
+  // Keeps the part of a polygon where (p - o) . n <= depth (Sutherland-Hodgman with one edge).
+  function clipHalfPlane(pts, o, n, depth) {
+    const f = p => (p.x - o.x) * n.x + (p.y - o.y) * n.y - depth, out = [];
+    pts.forEach((p, i) => {
+      const q = pts[(i + 1) % pts.length], fp = f(p), fq = f(q);
+      if (fp <= 0) out.push(p);
+      if ((fp < 0 && fq > 0) || (fp > 0 && fq < 0)) {
+        const t = fp / (fp - fq);
+        out.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+      }
+    });
+    return out;
+  }
+
   function polygonArea(pts) {
     let a = 0;
     for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; }
@@ -776,7 +791,17 @@
       if (k < 0 || m <= k) return;
       const onLine = (q, v, d) => { const t = (q.x - v.x) * d.x + (q.y - v.y) * d.y; return { x: v.x + d.x * t, y: v.y + d.y * t }; };
       const pa = onLine(curve[k], v1, arm.dir), pb = onLine(curve[m], v2, prev.dir);
-      const pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
+      let pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
+      // When the two arms meet at a sharp angle, the legs are long and the tip reaches into the through
+      // lanes. The tip is then cut flat: no point lies deeper than DEFAULTS.triDepth times the base
+      // (the line from v1 to v2) behind the base.
+      const base = dist(v1, v2);
+      if (base > 0.5) {
+        let n = { x: -(v2.y - v1.y) / base, y: (v2.x - v1.x) / base };
+        if ((apex.x - v1.x) * n.x + (apex.y - v1.y) * n.y < 0) n = { x: -n.x, y: -n.y };
+        pts = clipHalfPlane(pts, v1, n, DEFAULTS.triDepth * base);
+        if (pts.length < 3) return;
+      }
       // the radius must stay below half the width of the noses, or the inset polygon folds over
       const r = Math.min(fitRadius(pts, DEFAULTS.triRound), DEFAULTS.triTip * 0.47);
       // centre line of the slip lane: kerb curve moved inward by (distance to the island edge - half the lane width)
@@ -787,16 +812,60 @@
     return out;
   }
 
+  // The arm that receives the free right turn of an arm (the next arm counterclockwise, on the kerb side).
+  function freeRightTarget(derived, arm) {
+    const arms = derived.arms;
+    if (arms.length < 2) return null;
+    const prev = arms[(arms.indexOf(arm) - 1 + arms.length) % arms.length];
+    return prev && prev !== arm ? prev : null;
+  }
+  // True when a free right turn can be switched on: the arm has a vehicle ingress lane and a neighbour arm.
+  // Missing lanes are added when it is switched on (see applyFreeRight).
+  function freeRightPossible(derived, arm) {
+    return !!freeRightPair(derived, arm) || (!!freeRightTarget(derived, arm) && arm.in.some(isVehicle));
+  }
+
+  // Inserts a lane after the last vehicle lane of an arm side (a bike lane at the kerb stays outside).
+  function insertVehicleLane(model, derived, armKey, dir, length) {
+    const arm = derived.arms.find(a => a.key === armKey);
+    const list = arm ? arm[dir] : [];
+    let at = 0;
+    list.forEach((g, i) => { if (isVehicle(g)) at = i + 1; });
+    lanesOf(model, armKey, dir).forEach(l => { if (l.order >= at) l.order += 1; });
+    const lane = newLane(model, armKey, dir, at, 'vehicle');
+    // only the outermost lane can be short (it ends with a taper)
+    lane.length = at === list.length ? length : null;
+    model.lanes.push(lane);
+    return lane;
+  }
+
   // Switches the free right turn of an arm. The slip lane then only turns right.
+  // When switched on and lanes are missing, they are added:
+  //  - a short slip lane at the kerb, when the arm has only one vehicle ingress lane, or when its
+  //    outermost vehicle lane also has movements that are not a right turn into the target arm;
+  //  - a short merge lane at the target arm, when that arm has only one vehicle egress lane.
+  // Returns the list of added lanes.
   function applyFreeRight(model, derived, armKey, on) {
     const cfg = model.arms[armKey] || (model.arms[armKey] = {});
     cfg.freeRight = !!on;
-    if (!on) return;
-    const arm = derived.arms.find(a => a.key === armKey);
-    const pair = arm ? freeRightPair(derived, arm) : null;
-    if (!pair) return;
+    const added = [];
+    if (!on) return added;
+    let arm = derived.arms.find(a => a.key === armKey);
+    const prev = arm && freeRightTarget(derived, arm);
+    if (!arm || !prev || !arm.in.some(isVehicle)) return added;
+    const ins = arm.in.filter(isVehicle), outs = prev.out.filter(isVehicle);
+    const outer = ins[ins.length - 1];
+    const prevOut = new Set(prev.out.map(g => g.lane.id));
+    const otherMoves = model.connections.some(c => c.from === outer.lane.id && !prevOut.has(c.to));
+    if (outer.index < 1 || otherMoves) added.push(insertVehicleLane(model, derived, arm.key, 'in', 25));
+    if (!outs.length || outs[outs.length - 1].index < 1) added.push(insertVehicleLane(model, derived, prev.key, 'out', 20));
+    const d = added.length ? derive(model) : derived;
+    arm = d.arms.find(a => a.key === armKey);
+    const pair = arm ? freeRightPair(d, arm) : null;
+    if (!pair) return added;
     model.connections = model.connections.filter(c => c.from !== pair.slip.lane.id);
     addConnection(model, pair.slip.lane.id, pair.target.lane.id);
+    return added;
   }
 
 
@@ -809,31 +878,48 @@
     if (!a || !b) return [];
     const isl = (islands || freeRightIslands(derived)).find(i => i.slipFrom === conn.from && i.slipTo === conn.to);
     if (isl) return isl.slipPath;
-    return drivingPath(connectionCurve(a, b));
+    const cands = drivingPaths(a, b);
+    // the first shape that keeps the lane clear of islands and kerbs; else the one with the most room
+    const need = clearanceNeed(a, b), obst = obstacles(derived, islands);
+    let best = null, bestRoom = -Infinity;
+    for (const make of cands) {
+      const line = make(), room = clearance(line, obst);
+      if (room >= need) return line;
+      if (room > bestRoom + 0.05) { best = line; bestRoom = room; }
+    }
+    return best;
   }
 
-  // Driving line of a connection: a quintic Bezier curve. The two inner handles at each end lie on the
-  // lane heading, so the curvature is zero where the line meets the lane (straight in, arc, straight out)
-  // and the line has no kinks. A through movement starts to shift early (short handle at the start,
-  // long handle at the end), so it is in line before it reaches an island.
-  function drivingPath(c) {
-    const chord = dist(c.p0, c.p1), turn = Math.abs(c.angle);
-    const through = turn < 30;
-    // right turns pass the kerb corner on the inside, so they sweep a little less than left turns
-    const f = through ? { a0: 0.03, b0: 0.2, a1: 0.3, b1: 1.2 }
-      : c.angle < 0 ? { a0: 0.12, b0: 0.38, a1: 0.12, b1: 0.38 } : { a0: 0.16, b0: 0.46, a1: 0.16, b1: 0.46 };
-    const P = [
-      c.p0,
-      { x: c.p0.x + c.h0.x * chord * f.a0, y: c.p0.y + c.h0.y * chord * f.a0 },
-      { x: c.p0.x + c.h0.x * chord * f.b0, y: c.p0.y + c.h0.y * chord * f.b0 },
-      { x: c.p1.x - c.h1.x * chord * f.b1, y: c.p1.y - c.h1.y * chord * f.b1 },
-      { x: c.p1.x - c.h1.x * chord * f.a1, y: c.p1.y - c.h1.y * chord * f.a1 },
-      c.p1
-    ];
+  // Islands (polygons) and curved kerbs (polylines) a connection must not touch. Cached on the derived data.
+  function obstacles(derived, islands) {
+    if (derived._obstacles) return derived._obstacles;
+    const solid = [];
+    (islands || freeRightIslands(derived)).forEach(i => solid.push(i.outline));
+    derived.arms.forEach(arm => {
+      const sf = armSurfaces(arm);
+      if (sf.island) solid.push(sf.island);
+      sf.freed.forEach(f => solid.push(f));
+    });
+    return (derived._obstacles = { solid, kerbs: kerbPolylines(derived) });
+  }
+  // The path ends in the middle of its egress lane: a narrow egress lane may be closer to the kerb.
+  const clearanceNeed = (g, h) => Math.min(g.lane.width, h.lane.width) / 2 - DEFAULTS.collideSlack - 0.01;
+  // Smallest distance of a centre line to the obstacles: { island, kerb } and min of both as a number.
+  function clearanceParts(line, obst) {
+    let island = Infinity, kerb = Infinity;
+    line.forEach(p => {
+      obst.solid.forEach(poly => { island = Math.min(island, pointPolygonDistance(p, poly)); });
+      obst.kerbs.forEach(k => { kerb = Math.min(kerb, pointPolylineDistance(p, k)); });
+    });
+    return { island, kerb };
+  }
+  function clearance(line, obst) { const c = clearanceParts(line, obst); return Math.min(c.island, c.kerb); }
+
+  // Quintic Bezier curve through 6 control points, sampled at n + 1 points.
+  function quintic(P, n) {
     const W = [1, 5, 10, 10, 5, 1], out = [];
-    const N = 60;
-    for (let i = 0; i <= N; i++) {
-      const t = i / N, u = 1 - t;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, u = 1 - t;
       let x = 0, y = 0;
       for (let j = 0; j < 6; j++) {
         const w = W[j] * Math.pow(t, j) * Math.pow(u, 5 - j);
@@ -842,6 +928,84 @@
       out.push({ x, y });
     }
     return out;
+  }
+  const along = (p, h, s) => ({ x: p.x + h.x * s, y: p.y + h.y * s });
+
+  // Straight line from a to b, sampled about every metre (start point not included).
+  function straightPart(a, b) {
+    const n = Math.max(1, Math.ceil(dist(a, b))), out = [];
+    for (let i = 1; i <= n; i++) out.push({ x: a.x + (b.x - a.x) * i / n, y: a.y + (b.y - a.y) * i / n });
+    return out;
+  }
+
+  // Driving line of a connection, like a vehicle drives it: straight out of the ingress lane, one
+  // smooth arc, straight into the egress lane.
+  //  - The two lane headings meet at the corner point X. The arc uses a tangent length on each side
+  //    (L0 toward the ingress lane, L1 toward the egress lane); the rest of each leg is straight.
+  //  - The arc is a quintic Bezier curve with its inner handles on the lane headings. Its curvature is
+  //    zero at both ends, so the line has no kinks and no jumps in curvature. Handles of 0.15 L and
+  //    about 0.6 L give a peak curvature near that of a circle with the same tangent length.
+  //  - When the egress lane starts very close to the corner, the arc continues into the egress lane,
+  //    so the turning radius stays realistic (a vehicle finishes the turn after the crossing).
+  //  - A movement without a usable corner (straight on, with or without a small sideways shift) is
+  //    one symmetric S curve.
+  // Returns candidate lines as functions (computed only when needed), the preferred shape first;
+  // connectionPolyline uses the first that is clear.
+  function drivingPaths(fromG, toG) {
+    const p0 = fromG.startPt;
+    const h0 = { x: -fromG.arm.dir.x, y: -fromG.arm.dir.y };
+    let p1 = toG.startPt, h1 = { x: toG.arm.dir.x, y: toG.arm.dir.y };
+    const angle = Math.abs(turnAngle(h0, h1));
+    const corner = (q, hq) => {
+      const X = lineIntersect(p0, h0, q, hq);
+      if (!X) return null;
+      const d0 = (X.x - p0.x) * h0.x + (X.y - p0.y) * h0.y, d1 = (q.x - X.x) * hq.x + (q.y - X.y) * hq.y;
+      return { X, d0, d1 };
+    };
+    let c = angle >= 12 && angle <= 160 ? corner(p1, h1) : null;
+    if (c && c.d0 > 0.5 && angle >= 45) {
+      // a turn continues into the egress lane when the egress leg is much shorter than the ingress leg
+      const want = 0.6 * c.d0;
+      const avail = (toG.cut ? Math.min(toG.cut.len, toG.cl[toG.cl.length - 1]) : toG.cl[toG.cl.length - 1]) - 1;
+      if (c.d1 < want && avail > 0) {
+        const q = pointAt(toG.path, toG.cl, Math.min(avail, want - c.d1, 15));
+        p1 = { x: q.x, y: q.y }; h1 = { x: q.tx, y: q.ty };
+        c = corner(p1, h1);
+      }
+    }
+    if (c && c.d0 > 0.5 && c.d1 > 0.5) {
+      // A right turn passes the kerb corner on the inside. The kerb is a quadratic curve, so the line
+      // takes the same shape (long inner handles, b = 0.82): then it keeps its distance to the kerb.
+      // A left turn has no kerb inside; it uses the handles of a near-circular arc.
+      const right = turnAngle(h0, h1) < 0;
+      const b = right ? 0.82 : Math.max(0.5, Math.min(0.75, 0.8 - 0.0025 * angle));
+      // ratio: how much longer one tangent may be than the other. 10 = one long, gentle curve over both
+      // legs; a smaller ratio leaves a straight part on the longer leg.
+      // run: a straight part before the arc (and after it), so the line can pass the round end of a
+      // median island next to the lane. Lines with a shorter run are tried first.
+      const island = g => g.index === 0 && g.arm.gap > 0.3 && g.arm.islandLen > 0;
+      const arcLine = (ratio, bb, run) => {
+        const e0 = Math.max(0.5, c.d0 - (island(fromG) ? run : 0)), e1 = Math.max(0.5, c.d1 - (island(toG) ? run : 0));
+        const L0 = Math.min(e0, ratio * e1), L1 = Math.min(e1, ratio * e0), a = 0.15;
+        const A = along(c.X, h0, -L0), B = along(c.X, h1, L1);
+        const arc = quintic([A, along(A, h0, a * L0), along(A, h0, bb * L0), along(B, h1, -bb * L1), along(B, h1, -a * L1), B], 48);
+        const pts = straightPart(p0, A).slice(0, -1).concat(arc, straightPart(B, p1)), line = [p0];
+        pts.forEach(q => { if (dist(line[line.length - 1], q) > 0.02) line.push(q); });
+        return line;
+      };
+      const b2 = Math.min(0.92, b + 0.1), out = [];
+      [0, 1, 2, DEFAULTS.islandBack + 1].forEach(run => {
+        if (run && !island(fromG) && !island(toG)) return;
+        [[10, b], [10, b2], [1.6, b], [1.6, b2], [1, b], [1, b2], [10, b - 0.15]].forEach(([r, bb]) => out.push(() => arcLine(r, bb, run)));
+      });
+      return out;
+    }
+    // No usable corner: one S curve, handles along the lane headings. Symmetric first; then shapes that
+    // do most of the sideways shift early (an island at the far side) or late (an island at the near side).
+    p1 = toG.startPt; h1 = { x: toG.arm.dir.x, y: toG.arm.dir.y };
+    const D = dist(p0, p1);
+    const sLine = (a0, b0, b1, a1) => quintic([p0, along(p0, h0, a0 * D), along(p0, h0, b0 * D), along(p1, h1, -b1 * D), along(p1, h1, -a1 * D), p1], 60);
+    return [[0.15, 0.42, 0.42, 0.15], [0.06, 0.25, 1.0, 0.3], [0.03, 0.2, 1.2, 0.3], [0.3, 1.0, 0.25, 0.06]].map(f => () => sLine(...f));
   }
 
   function pointPolygonDistance(p, poly) {
@@ -874,28 +1038,15 @@
   // Rule: the lane of a connection must never touch an island or a kerb inside the junction.
   // Returns [{ connId, kind: 'island'|'kerb', dist }] (dist = smallest distance of the centre line).
   function connectionIssues(model, derived) {
-    const islands = freeRightIslands(derived);
-    const solid = [];
-    islands.forEach(i => solid.push(i.outline));
-    derived.arms.forEach(arm => {
-      const sf = armSurfaces(arm);
-      if (sf.island) solid.push(sf.island);
-      sf.freed.forEach(f => solid.push(f));
-    });
-    const kerbs = kerbPolylines(derived), geoms = allLaneGeoms(derived), out = [];
+    const islands = freeRightIslands(derived), obst = obstacles(derived, islands);
+    const geoms = allLaneGeoms(derived), out = [];
     model.connections.forEach(conn => {
       const g = geoms.get(conn.from), h = geoms.get(conn.to);
       if (!g || !h) return;
-      // the path ends in the middle of its egress lane: a narrow egress lane may be closer to the kerb
-      const need = Math.min(g.lane.width, h.lane.width) / 2 - DEFAULTS.collideSlack - 0.01;
-      const line = connectionPolyline(model, derived, conn, islands);
-      let worstIsland = Infinity, worstKerb = Infinity;
-      line.forEach(p => {
-        solid.forEach(poly => { worstIsland = Math.min(worstIsland, pointPolygonDistance(p, poly)); });
-        kerbs.forEach(k => { worstKerb = Math.min(worstKerb, pointPolylineDistance(p, k)); });
-      });
-      if (worstIsland < need) out.push({ connId: conn.id, kind: 'island', dist: worstIsland });
-      else if (worstKerb < need) out.push({ connId: conn.id, kind: 'kerb', dist: worstKerb });
+      const need = clearanceNeed(g, h);
+      const c = clearanceParts(connectionPolyline(model, derived, conn, islands), obst);
+      if (c.island < need) out.push({ connId: conn.id, kind: 'island', dist: c.island });
+      else if (c.kerb < need) out.push({ connId: conn.id, kind: 'kerb', dist: c.kerb });
     });
     return out;
   }
@@ -1145,7 +1296,7 @@
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
     // geometry
-    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
+    sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightPossible, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
     // model
     placeBackground, scaleBackground, bgPixelToWorld, bgWorldToPixel,

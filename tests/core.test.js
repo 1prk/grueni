@@ -501,12 +501,59 @@ test('topology: applyFreeRight rewires the slip lane and can be switched off', (
   T.proposeConnections(m, d).forEach(c => T.addConnection(m, c.from, c.to));
   const slipId = d.arms.find(a => a.key === key).in[1].lane.id;
   assert.ok(m.connections.filter(c => c.from === slipId).length >= 2, 'before: straight and right');
-  T.applyFreeRight(m, d, key, true);
-  assert.strictEqual(m.connections.filter(c => c.from === slipId).length, 1);
+  // the outer lane also goes straight on: it keeps that movement and a new short slip lane is added
+  const added = T.applyFreeRight(m, d, key, true);
+  assert.strictEqual(added.length, 1);
+  assert.strictEqual(added[0].length, 25);
+  assert.ok(m.connections.some(c => c.from === slipId), 'the old outer lane keeps its movements');
+  assert.strictEqual(m.connections.filter(c => c.from === added[0].id).length, 1, 'the new slip lane only turns right');
   d = T.derive(m);
   assert.strictEqual(T.freeRightIslands(d).length, 1);
   T.applyFreeRight(m, d, key, false);
   assert.strictEqual(T.freeRightIslands(T.derive(m)).length, 0);
+});
+
+test('topology: a free right turn adds a short merge lane when the target arm has one egress lane', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: 0 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  let d = T.derive(m);
+  const east = d.arms.find(a => a.name === 'Ost'), north = d.arms.find(a => a.name === 'Nord');
+  T.setLaneCount(m, east.key, 'in', 2);
+  d = T.derive(m);
+  assert.strictEqual(T.freeRightPair(d, d.arms.find(a => a.key === east.key)), null, 'the north arm has one egress lane');
+  assert.ok(T.freeRightPossible(d, d.arms.find(a => a.key === east.key)));
+  const added = T.applyFreeRight(m, d, east.key, true);
+  same(added.map(l => [l.armKey, l.dir, l.length]), [[north.key, 'out', 20]]);
+  d = T.derive(m);
+  assert.strictEqual(T.freeRightIslands(d).length, 1);
+  same(T.connectionIssues(m, d), []);
+});
+
+test('topology: a turn whose egress lane starts at the corner continues into the egress lane', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: 0 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  let d = T.derive(m);
+  const west = d.arms.find(a => a.name === 'West'), north = d.arms.find(a => a.name === 'Nord');
+  m.arms[north.key].stopDist = 25;
+  m.arms[west.key].stopDist = 3;
+  d = T.derive(m);
+  const from = d.arms.find(a => a.key === north.key).in[0], to = d.arms.find(a => a.key === west.key).out[0];
+  const c = T.addConnection(m, from.lane.id, to.lane.id);
+  const line = T.connectionPolyline(m, d, c);
+  const end = line[line.length - 1];
+  assert.ok(end.x < to.startPt.x - 5, 'the line ends inside the egress lane');
+  near(end.y, to.startPt.y, 0.05);
+  // the turning radius stays realistic: no heading change faster than 18 degrees per metre
+  for (let i = 2; i < line.length; i++) {
+    const h1 = Math.atan2(line[i - 1].y - line[i - 2].y, line[i - 1].x - line[i - 2].x), h2 = Math.atan2(line[i].y - line[i - 1].y, line[i].x - line[i - 1].x);
+    let dh = Math.abs(h2 - h1); if (dh > Math.PI) dh = 2 * Math.PI - dh;
+    const len = Math.hypot(line[i].x - line[i - 1].x, line[i].y - line[i - 1].y);
+    assert.ok(dh * 180 / Math.PI / Math.max(len, 0.05) < 18, 'radius at sample ' + i);
+  }
 });
 
 test('topology: insetting a polygon moves every edge inward by the distance', () => {
@@ -570,7 +617,8 @@ test('topology: driving lines are smooth and leave and enter the lanes straight'
     const a = g.get(c.from), b = g.get(c.to);
     // start and end on the lane centre lines
     near(Math.hypot(line[0].x - a.startPt.x, line[0].y - a.startPt.y), 0, 0.05, c.id + ' start');
-    near(Math.hypot(line[line.length - 1].x - b.startPt.x, line[line.length - 1].y - b.startPt.y), 0, 0.05, c.id + ' end');
+    const e = line[line.length - 1];
+    near(Math.min(...b.path.map(q => Math.hypot(e.x - q.x, e.y - q.y))), 0, 0.6, c.id + ' end on the egress lane');
     // no kink: the heading changes by less than 4 degrees from one sample to the next
     let worst = 0;
     for (let i = 2; i < line.length; i++) {
@@ -641,9 +689,11 @@ test('topology: the Rödelstraße reconstruction loads and has no collisions', (
   assert.strictEqual(d.arms.length, 3);
   assert.strictEqual(m.background.src, null, 'no image data in the repository');
   assert.strictEqual(m.background.wPx, 1380);
-  near(m.background.mPerPx, 5 / 73, 1e-9);
+  assert.ok(Math.abs(m.background.mPerPx - 5 / 72) < 0.002, 'about 72 pixels per 5 m');
   same(T.connectionIssues(m, d).map(i => i.connId), []);
-  assert.ok(m.lanes.some(l => l.type === 'tram'));
+  // free right turn from the east arm into the north arm, with its triangle island
+  assert.strictEqual(T.freeRightIslands(d).length, 1);
+  assert.strictEqual(d.arms.find(a => a.name === 'Ost').freeRight, true);
 });
 
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }

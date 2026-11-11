@@ -1,380 +1,1015 @@
 {
- "version": 2,
- "knotenNr": null,
- "knotenName": "Rödelstraße / Könneritzstraße / Antonienstraße (Leipzig)",
- "phases": [],
- "pueOverrides": {},
- "detectors": {
-  "links": [],
-  "ignored": []
- },
- "topology": {
-  "version": 1,
-  "name": "Rödelstraße / Könneritzstraße / Antonienstraße (Leipzig)",
-  "refLat": null,
-  "refLon": null,
-  "axes": [
-   {
-    "id": "A1",
-    "name": "Rödelstraße / Antonienstraße",
-    "points": [
-     {
-      "x": -45.273972602739725,
-      "y": -9.315068493150685
-     },
-     {
-      "x": -24.72602739726027,
-      "y": -8.63013698630137
-     },
-     {
-      "x": -13.082191780821917,
-      "y": -7.534246575342466
-     },
-     {
-      "x": -6.575342465753424,
-      "y": -4.4520547945205475
-     },
-     {
-      "x": 0,
-      "y": 0
-     },
-     {
-      "x": 8.835616438356164,
-      "y": 1.2328767123287672
-     },
-     {
-      "x": 17.397260273972602,
-      "y": 2.2602739726027394
-     },
-     {
-      "x": 44.726027397260275,
-      "y": 6.301369863013698
-     },
-     {
-      "x": 49.24657534246575,
-      "y": 7.0547945205479445
-     }
-    ]
-   },
-   {
-    "id": "A2",
-    "name": "Könneritzstraße",
-    "points": [
-     {
-      "x": 13.904109589041095,
-      "y": 43.83561643835616
-     },
-     {
-      "x": 9.863013698630137,
-      "y": 30.136986301369863
-     },
-     {
-      "x": 7.123287671232877,
-      "y": 21.91780821917808
-     },
-     {
-      "x": 5.205479452054794,
-      "y": 16.43835616438356
-     },
-     {
-      "x": 2.671232876712329,
-      "y": 8.21917808219178
-     },
-     {
-      "x": -0.410958904109589,
-      "y": -1.7123287671232876
-     }
-    ]
-   }
-  ],
-  "center": null,
-  "arms": {
-   "A2:s": {
-    "init": true,
-    "stopDist": 15
-   },
-   "A1:e": {
-    "init": true,
-    "stopDist": 17.5
-   },
-   "A1:s": {
-    "init": true,
-    "stopDist": 12
-   }
+  "version": 2,
+  "knotenNr": null,
+  "knotenName": null,
+  "phases": [],
+  "pueOverrides": {},
+  "detectors": {
+    "links": [],
+    "ignored": []
   },
-  "lanes": [
-   {
-    "id": "L1",
-    "armKey": "A2:s",
-    "dir": "in",
-    "order": 0,
-    "type": "tram",
-    "width": 3,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L2",
-    "armKey": "A2:s",
-    "dir": "out",
-    "order": 0,
-    "type": "tram",
-    "width": 3.6,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L3",
-    "armKey": "A1:e",
-    "dir": "in",
-    "order": 0,
-    "type": "vehicle",
-    "width": 3.15,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L4",
-    "armKey": "A1:e",
-    "dir": "out",
-    "order": 0,
-    "type": "vehicle",
-    "width": 3.15,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L5",
-    "armKey": "A1:s",
-    "dir": "in",
-    "order": 0,
-    "type": "tram",
-    "width": 3,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L6",
-    "armKey": "A1:s",
-    "dir": "out",
-    "order": 0,
-    "type": "tram",
-    "width": 3,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L7",
-    "armKey": "A2:s",
-    "dir": "in",
-    "order": 1,
-    "type": "vehicle",
-    "width": 2.9,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L8",
-    "armKey": "A2:s",
-    "dir": "in",
-    "order": 2,
-    "type": "bike",
-    "width": 1.4,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L9",
-    "armKey": "A2:s",
-    "dir": "out",
-    "order": 1,
-    "type": "bike",
-    "width": 1.8,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L10",
-    "armKey": "A1:e",
-    "dir": "in",
-    "order": 1,
-    "type": "vehicle",
-    "width": 3.15,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L11",
-    "armKey": "A1:e",
-    "dir": "in",
-    "order": 2,
-    "type": "vehicle",
-    "width": 3,
-    "length": 18,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L12",
-    "armKey": "A1:e",
-    "dir": "out",
-    "order": 1,
-    "type": "vehicle",
-    "width": 3.15,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L13",
-    "armKey": "A1:s",
-    "dir": "in",
-    "order": 1,
-    "type": "vehicle",
-    "width": 3.2,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L14",
-    "armKey": "A1:s",
-    "dir": "in",
-    "order": 2,
-    "type": "vehicle",
-    "width": 3.2,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L15",
-    "armKey": "A1:s",
-    "dir": "out",
-    "order": 1,
-    "type": "vehicle",
-    "width": 2.3,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "L16",
-    "armKey": "A1:s",
-    "dir": "out",
-    "order": 2,
-    "type": "vehicle",
-    "width": 2.3,
-    "length": null,
-    "sgs": [],
-    "detectors": []
-   }
-  ],
-  "crosswalks": [
-   {
-    "id": "C1",
-    "armKey": "A2:s",
-    "width": 4,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "C2",
-    "armKey": "A1:e",
-    "width": 4,
-    "sgs": [],
-    "detectors": []
-   },
-   {
-    "id": "C3",
-    "armKey": "A1:s",
-    "width": 4,
-    "sgs": [],
-    "detectors": []
-   }
-  ],
-  "connections": [
-   {
-    "id": "V1",
-    "from": "L7",
-    "to": "L4",
-    "sg": null
-   },
-   {
-    "id": "V2",
-    "from": "L7",
-    "to": "L16",
-    "sg": null
-   },
-   {
-    "id": "V3",
-    "from": "L3",
-    "to": "L15",
-    "sg": null
-   },
-   {
-    "id": "V4",
-    "from": "L10",
-    "to": "L16",
-    "sg": null
-   },
-   {
-    "id": "V5",
-    "from": "L11",
-    "to": "L2",
-    "sg": null
-   },
-   {
-    "id": "V6",
-    "from": "L13",
-    "to": "L2",
-    "sg": null
-   },
-   {
-    "id": "V7",
-    "from": "L13",
-    "to": "L4",
-    "sg": null
-   },
-   {
-    "id": "V8",
-    "from": "L14",
-    "to": "L12",
-    "sg": null
-   },
-   {
-    "id": "V9",
-    "from": "L1",
-    "to": "L6",
-    "sg": null
-   },
-   {
-    "id": "V10",
-    "from": "L5",
-    "to": "L2",
-    "sg": null
-   }
-  ],
-  "background": {
-   "name": "Luftbild Rödelstraße (1380×1043 px, 5 m = 73 px) – Bild selbst laden",
-   "src": null,
-   "wPx": 1380,
-   "hPx": 1043,
-   "mPerPx": 0.0684931506849315,
-   "x": -45.273972602739725,
-   "y": 43.83561643835616,
-   "opacity": 0.7
+  "topology": {
+    "version": 1,
+    "name": "Rödelstraße / Könneritzstraße / Antonienstraße (Leipzig)",
+    "refLat": null,
+    "refLon": null,
+    "axes": [
+      {
+        "id": "A1",
+        "name": "Achse 1",
+        "points": [
+          {
+            "x": -67.4,
+            "y": -16.9
+          },
+          {
+            "x": -30.9,
+            "y": -12.3
+          },
+          {
+            "x": -12.7,
+            "y": -10.8
+          },
+          {
+            "x": 0.4,
+            "y": -8.2
+          },
+          {
+            "x": 24.9,
+            "y": -0.1
+          }
+        ]
+      },
+      {
+        "id": "A2",
+        "name": "Achse 2",
+        "points": [
+          {
+            "x": -8.5,
+            "y": 23.7
+          },
+          {
+            "x": -21.9,
+            "y": -11.5
+          }
+        ]
+      }
+    ],
+    "center": null,
+    "arms": {
+      "A1:e": {
+        "init": true,
+        "stopDist": 22,
+        "freeRight": true
+      },
+      "A1:s": {
+        "init": true,
+        "stopDist": 2.5,
+        "gap": 1
+      },
+      "A2:s": {
+        "init": true,
+        "stopDist": 20.5
+      }
+    },
+    "lanes": [
+      {
+        "id": "L1",
+        "armKey": "A1:e",
+        "dir": "in",
+        "order": 0,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L2",
+        "armKey": "A1:e",
+        "dir": "out",
+        "order": 0,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L3",
+        "armKey": "A1:s",
+        "dir": "in",
+        "order": 0,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L4",
+        "armKey": "A1:s",
+        "dir": "out",
+        "order": 0,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L5",
+        "armKey": "A2:s",
+        "dir": "in",
+        "order": 0,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L6",
+        "armKey": "A2:s",
+        "dir": "out",
+        "order": 0,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L7",
+        "armKey": "A2:s",
+        "dir": "in",
+        "order": 1,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L8",
+        "armKey": "A2:s",
+        "dir": "in",
+        "order": 2,
+        "type": "bike",
+        "width": 1.85,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L9",
+        "armKey": "A1:s",
+        "dir": "out",
+        "order": 1,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L10",
+        "armKey": "A1:s",
+        "dir": "in",
+        "order": 1,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L11",
+        "armKey": "A1:s",
+        "dir": "in",
+        "order": 2,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L12",
+        "armKey": "A1:e",
+        "dir": "in",
+        "order": 1,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L13",
+        "armKey": "A1:e",
+        "dir": "out",
+        "order": 1,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": null,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L14",
+        "armKey": "A1:e",
+        "dir": "in",
+        "order": 2,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": 25,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L15",
+        "armKey": "A2:s",
+        "dir": "out",
+        "order": 1,
+        "type": "vehicle",
+        "width": 3.25,
+        "length": 20,
+        "sgs": [],
+        "detectors": []
+      }
+    ],
+    "crosswalks": [],
+    "connections": [
+      {
+        "id": "V1",
+        "from": "L7",
+        "to": "L9",
+        "sg": null
+      },
+      {
+        "id": "V2",
+        "from": "L12",
+        "to": "L9",
+        "sg": null
+      },
+      {
+        "id": "V3",
+        "from": "L1",
+        "to": "L4",
+        "sg": null
+      },
+      {
+        "id": "V4",
+        "from": "L10",
+        "to": "L2",
+        "sg": null
+      },
+      {
+        "id": "V5",
+        "from": "L11",
+        "to": "L13",
+        "sg": null
+      },
+      {
+        "id": "V6",
+        "from": "L3",
+        "to": "L6",
+        "sg": null
+      },
+      {
+        "id": "V7",
+        "from": "L14",
+        "to": "L15",
+        "sg": null
+      }
+    ],
+    "background": {
+      "name": "image-1794403052491.webp",
+      "src": null,
+      "wPx": 1380,
+      "hPx": 1043,
+      "mPerPx": 0.06941746085516175,
+      "x": -64.9270249776409,
+      "y": 37.88312513423814,
+      "opacity": 0.6
+    },
+    "planOpacity": 1
   },
-  "planOpacity": 0.6
- }
+  "mapem": {
+    "map": {
+      "msgIssueRevision": 1,
+      "intersections": [
+        {
+          "id": {
+            "region": 0,
+            "id": 0
+          },
+          "name": "Rödelstraße / Könneritzstraße / Antonienstraße (Leipzig)",
+          "revision": 1,
+          "refPoint": {
+            "lat": 0,
+            "long": 0
+          },
+          "laneWidth": 325,
+          "laneSet": [
+            {
+              "laneID": 1,
+              "name": "Nord Z1",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 567,
+                        "y": 1978
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 611,
+                        "y": 1604
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 1,
+              "maneuvers": {},
+              "connectsTo": []
+            },
+            {
+              "laneID": 2,
+              "name": "Nord Z2",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 263,
+                        "y": 2094
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 611,
+                        "y": 1604
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 1,
+              "maneuvers": {
+                "maneuverRightAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 15,
+                    "maneuver": {
+                      "maneuverRightAllowed": true
+                    }
+                  },
+                  "connectionID": 1
+                }
+              ]
+            },
+            {
+              "laneID": 3,
+              "name": "Nord Z3",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "bikeLane": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 25,
+                        "y": 2185
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 611,
+                        "y": 1604
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 1,
+              "maneuvers": {},
+              "connectsTo": []
+            },
+            {
+              "laneID": 4,
+              "name": "Nord A1",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 871,
+                        "y": 1863
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 611,
+                        "y": 1604
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 1
+            },
+            {
+              "laneID": 5,
+              "name": "Nord A2",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1174,
+                        "y": 1747
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 611,
+                        "y": 1604
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 1
+            },
+            {
+              "laneID": 6,
+              "name": "Ost Z1",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 2131,
+                        "y": 480
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 738,
+                        "y": 220
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1749,
+                        "y": 599
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 2,
+              "maneuvers": {
+                "maneuverStraightAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 14,
+                    "maneuver": {
+                      "maneuverStraightAllowed": true
+                    }
+                  },
+                  "connectionID": 3
+                }
+              ]
+            },
+            {
+              "laneID": 7,
+              "name": "Ost Z2",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 2049,
+                        "y": 794
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 718,
+                        "y": 215
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1748,
+                        "y": 599
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 2,
+              "maneuvers": {
+                "maneuverStraightAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 15,
+                    "maneuver": {
+                      "maneuverStraightAllowed": true
+                    }
+                  },
+                  "connectionID": 2
+                }
+              ]
+            },
+            {
+              "laneID": 8,
+              "name": "Ost Z3",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1968,
+                        "y": 1109
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 790,
+                        "y": 239
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1656,
+                        "y": 568
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 2,
+              "maneuvers": {
+                "maneuverRightAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 5,
+                    "maneuver": {
+                      "maneuverRightAllowed": true
+                    }
+                  },
+                  "connectionID": 7
+                }
+              ]
+            },
+            {
+              "laneID": 9,
+              "name": "Ost A1",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 2213,
+                        "y": 165
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 757,
+                        "y": 226
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1751,
+                        "y": 599
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 2
+            },
+            {
+              "laneID": 10,
+              "name": "Ost A2",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 2294,
+                        "y": -150
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 777,
+                        "y": 232
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": 1752,
+                        "y": 600
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 2
+            },
+            {
+              "laneID": 11,
+              "name": "West Z1",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -235,
+                        "y": -233
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -1263,
+                        "y": -122
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -3036,
+                        "y": -391
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 3,
+              "maneuvers": {
+                "maneuverLeftAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 4,
+                    "maneuver": {
+                      "maneuverLeftAllowed": true
+                    }
+                  },
+                  "connectionID": 6
+                }
+              ]
+            },
+            {
+              "laneID": 12,
+              "name": "West Z2",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -214,
+                        "y": -557
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -1245,
+                        "y": -121
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -3033,
+                        "y": -391
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 3,
+              "maneuvers": {
+                "maneuverStraightAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 9,
+                    "maneuver": {
+                      "maneuverStraightAllowed": true
+                    }
+                  },
+                  "connectionID": 4
+                }
+              ]
+            },
+            {
+              "laneID": 13,
+              "name": "West Z3",
+              "laneAttributes": {
+                "directionalUse": {
+                  "ingressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -193,
+                        "y": -882
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -1228,
+                        "y": -119
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -3031,
+                        "y": -390
+                      }
+                    }
+                  }
+                ]
+              },
+              "ingressApproach": 3,
+              "maneuvers": {
+                "maneuverStraightAllowed": true
+              },
+              "connectsTo": [
+                {
+                  "connectingLane": {
+                    "lane": 10,
+                    "maneuver": {
+                      "maneuverStraightAllowed": true
+                    }
+                  },
+                  "connectionID": 5
+                }
+              ]
+            },
+            {
+              "laneID": 14,
+              "name": "West A1",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -263,
+                        "y": 191
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -557,
+                        "y": -44
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -728,
+                        "y": -81
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -3039,
+                        "y": -391
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 3
+            },
+            {
+              "laneID": 15,
+              "name": "West A2",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "vehicle": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -284,
+                        "y": 515
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -567,
+                        "y": -45
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -736,
+                        "y": -81
+                      }
+                    }
+                  },
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -3041,
+                        "y": -391
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 3
+            }
+          ]
+        }
+      ]
+    },
+    "signalGroups": []
+  }
 }

@@ -845,7 +845,7 @@ let linkStops = false;     // move all stop lines together
         ${stepper('in', 'Zufahrten')}${stepper('out', 'Ausfahrten')}
         <div class="ts-row"><label>Mittelinsel</label><input type="number" step="0.5" min="0" max="12" data-field="gap" data-key="${arm.key}" value="${arm.gap}" title="Breite zwischen Zu- und Ausfahrt. 0 = keine Insel"><span class="ts-note">m breit</span></div>
         ${arm.gap > 0.3 ? `<div class="ts-row"><label></label><input type="number" step="1" min="5" data-field="islandLen" data-key="${arm.key}" value="${arm.islandLen}"><span class="ts-note">m lang</span></div>` : ''}
-        <div class="ts-row"><label>Freie Rechtsabb.</label><input type="checkbox" data-field="freeRight" data-key="${arm.key}" ${arm.freeRight ? 'checked' : ''} ${T.freeRightPair(derived, arm) ? '' : 'disabled'}><span class="ts-note">${T.freeRightPair(derived, arm) ? 'Dreiecksinsel, Rechtsabbiegestreifen' : 'braucht innen einen weiteren Fahrstreifen (Zufahrt und Ausfahrt am Nachbararm)'}</span></div>
+        <div class="ts-row"><label>Freie Rechtsabb.</label><input type="checkbox" data-field="freeRight" data-key="${arm.key}" ${arm.freeRight ? 'checked' : ''} ${T.freeRightPossible(derived, arm) ? '' : 'disabled'}><span class="ts-note">${T.freeRightPair(derived, arm) ? 'Dreiecksinsel, Rechtsabbiegestreifen' : T.freeRightPossible(derived, arm) ? 'fügt fehlende Fahrstreifen hinzu (Abbiege- und Einfädelstreifen)' : 'braucht einen Kfz-Zufahrtsstreifen'}</span></div>
         <div class="ts-row"><label>Fußgängerfurt</label><input type="checkbox" data-field="cross" data-key="${arm.key}" ${cw ? 'checked' : ''}>
           ${cw ? `<input type="number" step="0.5" min="1.5" max="8" data-field="crossWidth" data-id="${cw.id}" value="${cw.width}"><span class="ts-note">m Linienabstand</span>` : ''}</div>
         <div class="ts-list" style="margin-top:6px">${arm.in.map(laneRow).join('')}${arm.out.map(laneRow).join('')}</div>
@@ -1038,7 +1038,11 @@ let linkStops = false;     // move all stop lines together
         case 'armName': { (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).name = el.value.trim() || undefined; changed(true); return; }
         case 'stopDist': { const v = num(); const arm = derived.arms.find(a => a.key === el.dataset.key); if (v != null && arm) setStopDist(arm, v); changed(true); return; }
         case 'gap': { const v = num(); if (v != null) (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).gap = Math.max(0, Math.min(12, v)); changed(true); return; }
-        case 'freeRight': T.applyFreeRight(m, derived, el.dataset.key, el.checked); changed(true); return;
+        case 'freeRight': {
+          const added = T.applyFreeRight(m, derived, el.dataset.key, el.checked);
+          if (added.length) GZ.snackbar.show('Freier Rechtsabbieger', { description: `${added.length} Fahrstreifen hinzugefügt (kurzer Abbiege- bzw. Einfädelstreifen). Länge im Fahrstreifen anpassbar.` });
+          changed(true); return;
+        }
         case 'cross': T.setCrosswalk(m, el.dataset.key, el.checked); changed(true); return;
         case 'crossWidth': { const c = m.crosswalks.find(x => x.id === el.dataset.id); const v = num(); if (c && v != null) c.width = Math.max(1.5, Math.min(8, v)); changed(true); return; }
         case 'laneType': { const l = m.lanes.find(x => x.id === el.dataset.id); if (l) T.setLaneType(l, el.value); changed(true); return; }
