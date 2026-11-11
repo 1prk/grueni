@@ -61,17 +61,19 @@
         "init": true,
         "stopDist": 22,
         "freeRight": true,
-        "slipBack": 8,
-        "slipAhead": 14
+        "slipBack": 12,
+        "slipAhead": 11
       },
       "A1:s": {
         "init": true,
         "stopDist": 2.5,
-        "gap": 1
+        "gap": 1,
+        "outStart": 7.5
       },
       "A2:s": {
         "init": true,
-        "stopDist": 20.5
+        "stopDist": 20.5,
+        "cornerRadius": 8.5
       }
     },
     "lanes": [
@@ -232,18 +234,6 @@
         "detectors": []
       },
       {
-        "id": "L14",
-        "armKey": "A1:e",
-        "dir": "in",
-        "order": 2,
-        "type": "vehicle",
-        "width": 3.25,
-        "length": 25,
-        "stopOffset": 0,
-        "sgs": [],
-        "detectors": []
-      },
-      {
         "id": "L15",
         "armKey": "A2:s",
         "dir": "out",
@@ -251,6 +241,18 @@
         "type": "vehicle",
         "width": 3.25,
         "length": 20,
+        "stopOffset": 0,
+        "sgs": [],
+        "detectors": []
+      },
+      {
+        "id": "L16",
+        "armKey": "A1:s",
+        "dir": "out",
+        "order": 2,
+        "type": "bike",
+        "width": 1.5,
+        "length": null,
         "stopOffset": 0,
         "sgs": [],
         "detectors": []
@@ -295,12 +297,6 @@
         "sg": null
       },
       {
-        "id": "V7",
-        "from": "L14",
-        "to": "L15",
-        "sg": null
-      },
-      {
         "id": "V8",
         "from": "L5",
         "to": "L2",
@@ -316,6 +312,12 @@
         "id": "V10",
         "from": "L7",
         "to": "L4",
+        "sg": null
+      },
+      {
+        "id": "V11",
+        "from": "L12",
+        "to": "L15",
         "sg": null
       }
     ],
@@ -386,7 +388,7 @@
               "connectsTo": [
                 {
                   "connectingLane": {
-                    "lane": 9,
+                    "lane": 8,
                     "maneuver": {
                       "maneuverLeftAllowed": true
                     }
@@ -395,7 +397,7 @@
                 },
                 {
                   "connectingLane": {
-                    "lane": 10,
+                    "lane": 9,
                     "maneuver": {
                       "maneuverLeftAllowed": true
                     }
@@ -442,7 +444,7 @@
               "connectsTo": [
                 {
                   "connectingLane": {
-                    "lane": 15,
+                    "lane": 14,
                     "maneuver": {
                       "maneuverRightAllowed": true
                     }
@@ -451,7 +453,7 @@
                 },
                 {
                   "connectingLane": {
-                    "lane": 14,
+                    "lane": 13,
                     "maneuver": {
                       "maneuverRightAllowed": true
                     }
@@ -607,7 +609,7 @@
               "connectsTo": [
                 {
                   "connectingLane": {
-                    "lane": 14,
+                    "lane": 13,
                     "maneuver": {
                       "maneuverStraightAllowed": true
                     }
@@ -657,64 +659,19 @@
               },
               "ingressApproach": 2,
               "maneuvers": {
-                "maneuverStraightAllowed": true
+                "maneuverStraightAllowed": true,
+                "maneuverRightAllowed": true
               },
               "connectsTo": [
                 {
                   "connectingLane": {
-                    "lane": 15,
+                    "lane": 14,
                     "maneuver": {
                       "maneuverStraightAllowed": true
                     }
                   },
                   "connectionID": 2
-                }
-              ]
-            },
-            {
-              "laneID": 8,
-              "name": "Ost Z3",
-              "laneAttributes": {
-                "directionalUse": {
-                  "ingressPath": true
                 },
-                "laneType": {
-                  "vehicle": {}
-                }
-              },
-              "nodeList": {
-                "nodes": [
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": 1968,
-                        "y": 1109
-                      }
-                    }
-                  },
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": 790,
-                        "y": 239
-                      }
-                    }
-                  },
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": 1656,
-                        "y": 568
-                      }
-                    }
-                  }
-                ]
-              },
-              "ingressApproach": 2,
-              "maneuvers": {
-                "maneuverRightAllowed": true
-              },
-              "connectsTo": [
                 {
                   "connectingLane": {
                     "lane": 5,
@@ -722,12 +679,12 @@
                       "maneuverRightAllowed": true
                     }
                   },
-                  "connectionID": 7
+                  "connectionID": 11
                 }
               ]
             },
             {
-              "laneID": 9,
+              "laneID": 8,
               "name": "Ost A1",
               "laneAttributes": {
                 "directionalUse": {
@@ -768,7 +725,7 @@
               "egressApproach": 2
             },
             {
-              "laneID": 10,
+              "laneID": 9,
               "name": "Ost A2",
               "laneAttributes": {
                 "directionalUse": {
@@ -809,7 +766,7 @@
               "egressApproach": 2
             },
             {
-              "laneID": 11,
+              "laneID": 10,
               "name": "West Z1",
               "laneAttributes": {
                 "directionalUse": {
@@ -856,7 +813,7 @@
               ]
             },
             {
-              "laneID": 12,
+              "laneID": 11,
               "name": "West Z2",
               "laneAttributes": {
                 "directionalUse": {
@@ -901,7 +858,7 @@
               "connectsTo": [
                 {
                   "connectingLane": {
-                    "lane": 9,
+                    "lane": 8,
                     "maneuver": {
                       "maneuverStraightAllowed": true
                     }
@@ -911,7 +868,7 @@
               ]
             },
             {
-              "laneID": 13,
+              "laneID": 12,
               "name": "West Z3",
               "laneAttributes": {
                 "directionalUse": {
@@ -956,7 +913,7 @@
               "connectsTo": [
                 {
                   "connectingLane": {
-                    "lane": 10,
+                    "lane": 9,
                     "maneuver": {
                       "maneuverStraightAllowed": true
                     }
@@ -966,7 +923,7 @@
               ]
             },
             {
-              "laneID": 14,
+              "laneID": 13,
               "name": "West A1",
               "laneAttributes": {
                 "directionalUse": {
@@ -981,32 +938,16 @@
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -263,
-                        "y": 191
+                        "x": -1019,
+                        "y": 127
                       }
                     }
                   },
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -557,
-                        "y": -44
-                      }
-                    }
-                  },
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": -728,
-                        "y": -81
-                      }
-                    }
-                  },
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": -3039,
-                        "y": -391
+                        "x": -3568,
+                        "y": -451
                       }
                     }
                   }
@@ -1015,7 +956,7 @@
               "egressApproach": 3
             },
             {
-              "laneID": 15,
+              "laneID": 14,
               "name": "West A2",
               "laneAttributes": {
                 "directionalUse": {
@@ -1030,32 +971,49 @@
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -284,
-                        "y": 515
+                        "x": -1054,
+                        "y": 450
                       }
                     }
                   },
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -567,
-                        "y": -45
+                        "x": -3574,
+                        "y": -452
+                      }
+                    }
+                  }
+                ]
+              },
+              "egressApproach": 3
+            },
+            {
+              "laneID": 15,
+              "name": "West A3",
+              "laneAttributes": {
+                "directionalUse": {
+                  "egressPath": true
+                },
+                "laneType": {
+                  "bikeLane": {}
+                }
+              },
+              "nodeList": {
+                "nodes": [
+                  {
+                    "delta": {
+                      "node-XY": {
+                        "x": -1080,
+                        "y": 686
                       }
                     }
                   },
                   {
                     "delta": {
                       "node-XY": {
-                        "x": -736,
-                        "y": -81
-                      }
-                    }
-                  },
-                  {
-                    "delta": {
-                      "node-XY": {
-                        "x": -3041,
-                        "y": -391
+                        "x": -3578,
+                        "y": -453
                       }
                     }
                   }

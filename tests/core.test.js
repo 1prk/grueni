@@ -311,9 +311,25 @@ test('topology: junction outline is closed', () => {
   const cmds = T.junctionOutline(d.arms);
   assert.strictEqual(cmds[0].type, 'M');
   assert.strictEqual(cmds[cmds.length - 1].type, 'Z');
-  // three rounded corners and one corner that follows the slip lane of the free right turn
-  assert.strictEqual(cmds.filter(c => c.type === 'Q').length, 3);
-  assert.strictEqual(cmds.filter(c => c.kerb).length, 1);
+  // four kerb corners: three circle arcs and one that follows the slip lane of the free right turn
+  assert.strictEqual(cmds.filter(c => c.kerb).length, 4);
+  assert.strictEqual(d.arms.filter(a => a.corner).length, 3);
+});
+
+test('topology: a junction corner is a circle of the corner radius that touches both arm edges', () => {
+  const m = T.create();
+  T.addAxis(m, [{ x: -90, y: 0 }, { x: 90, y: 0 }]);
+  T.addAxis(m, [{ x: 0, y: -90 }, { x: 0, y: 90 }]);
+  T.ensureDefaults(m, T.derive(m));
+  const key = T.derive(m).arms.find(a => a.name === 'Nord').key;
+  m.arms[key].cornerRadius = 10;
+  const d = T.derive(m), north = d.arms.find(a => a.key === key);
+  // one lane each way (3.25 m): the edges are x = -3.25 (Nord, left) and y = 3.25 (West, right)
+  const c = north.corner, arcPts = c.pts.filter(p => p.x < -3.26 && p.y > 3.26);
+  arcPts.forEach(p => near(Math.hypot(p.x + 13.25, p.y - 13.25), 10, 0.05));
+  near(c.sb, 13.25, 0.05);     // touches the Nord edge 13.25 m from the centre
+  // the stop line lies at 12 m: the first 1.25 m of the arm edge has no kerb
+  near(north.kerbFromIn, 1.25, 0.05);
 });
 
 test('topology: config round trip keeps the model and the id counters', () => {
@@ -592,7 +608,7 @@ test('topology: a free right turn can leave before the stop line and join after 
   near(Math.hypot(S[0].x - a.x, S[0].y - a.y), 0, 1e-6, 'leaves 8 m before the stop line');
   near(Math.hypot(S[S.length - 1].x - b.x, S[S.length - 1].y - b.y), 0, 1e-6, 'joins 10 m after the target stop line');
   // the corner kerb follows the slip lane at its width, and no lane touches the island or a kerb
-  assert.strictEqual(T.junctionOutline(d.arms).filter(c => c.kerb).length, 1);
+  assert.ok(T.junctionOutline(d.arms).some(c => c.kerb && c.pts.length > 20));
   same(T.connectionIssues(m, d), []);
   // the arm has no kerb on its edge before the slip lane leaves it
   assert.strictEqual(arm.kerbFromIn, 8);
@@ -735,7 +751,12 @@ test('topology: the Rödelstraße reconstruction loads and has no collisions', (
   same(T.connectionIssues(m, d).map(i => i.connId), []);
   // free right turn from the east arm into the north arm, with its triangle island
   assert.strictEqual(T.freeRightIslands(d).length, 1);
-  assert.strictEqual(d.arms.find(a => a.name === 'Ost').freeRight, true);
+  const east = d.arms.find(a => a.name === 'Ost');
+  assert.strictEqual(east.freeRight, true);
+  // two ingress lanes; the slip lane branches off the outer one, which also goes straight on
+  assert.strictEqual(east.in.length, 2);
+  assert.strictEqual(east.slipShared, true);
+  assert.ok(m.connections.filter(c => c.from === east.in[1].lane.id).length >= 2);
 });
 
 if (failures) { console.log(`\n${failures} test(s) failed`); process.exit(1); }

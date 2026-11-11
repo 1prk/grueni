@@ -339,6 +339,7 @@ let linkStops = false;     // move all stop lines together
     const dark = [];
     surf.forEach(({ arm, s: sf }) => {
       if (sf.gapBase) html += `<polygon class="t-road" points="${polyPts(sf.gapBase)}"/>`;
+      if (sf.outBase) html += `<polygon class="t-road" points="${polyPts(sf.outBase)}"/>`;
       arm.in.concat(arm.out).forEach(g => {
         const o = T.laneOutline(g);
         if (o.pts.length >= 3) html += `<polygon class="t-road" points="${polyPts(o.pts)}"/>`;
@@ -352,7 +353,7 @@ let linkStops = false;     // move all stop lines together
     dark.forEach(d => { html += `<polygon class="t-island" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.02)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
     // kerb lines
     jp.cmds.forEach((c, i) => {
-      if (c.kerb) { html += `<path class="t-kerb" d="${polyD(c.pts)}"/>`; return; }
+      if (c.kerb) { if (c.kerb.length > 1) html += `<path class="t-kerb" d="${polyD(c.kerb)}"/>`; return; }
       if (c.type !== 'Q') return;
       const prev = jp.cmds[i - 1];
       html += `<path class="t-kerb" d="M${pt(prev.pts[prev.pts.length - 1])} Q${c.pts.map(pt).join(' ')}"/>`;
@@ -377,14 +378,15 @@ let linkStops = false;     // move all stop lines together
         const lanes = arm[dir];
         // a free right turn: no lines where the triangle island lies (before the slip lane leaves or joins)
         const kerbFrom = dir === 'in' ? arm.kerbFromIn : arm.kerbFromOut;
+        const laneFrom = dir === 'out' ? arm.outStart || 0 : 0;     // egress lanes can start further out
         lanes.forEach((g, i) => {
           if (i < lanes.length - 1) {
             const nx = lanes[i + 1];
             const solid = g.lane.type === 'bike' || nx.lane.type === 'bike';
             const cut = g.cut || nx.cut;
-            mk += line(side * g.outer, solid ? '' : 'dash', cut ? cut.len : null, i === lanes.length - 2 ? kerbFrom : 0);
+            mk += line(side * g.outer, solid ? '' : 'dash', cut ? cut.len : null, Math.max(laneFrom, i === lanes.length - 2 ? kerbFrom : 0));
           } else if (!(g.cut)) {
-            mk += line(side * (g.outer - 0.2), '', null, kerbFrom);
+            mk += line(side * (g.outer - 0.2), '', null, Math.max(laneFrom, kerbFrom));
           }
         });
       });
@@ -850,6 +852,8 @@ let linkStops = false;     // move all stop lines together
         <div class="ts-row"><label>Mittelinsel</label><input type="number" step="0.5" min="0" max="12" data-field="gap" data-key="${arm.key}" value="${arm.gap}" title="Breite zwischen Zu- und Ausfahrt. 0 = keine Insel"><span class="ts-note">m breit</span></div>
         ${arm.gap > 0.3 ? `<div class="ts-row"><label></label><input type="number" step="1" min="5" data-field="islandLen" data-key="${arm.key}" value="${arm.islandLen}"><span class="ts-note">m lang</span></div>` : ''}
         <div class="ts-row"><label>Freie Rechtsabb.</label><input type="checkbox" data-field="freeRight" data-key="${arm.key}" ${arm.freeRight ? 'checked' : ''} ${T.freeRightPossible(derived, arm) ? '' : 'disabled'}><span class="ts-note">${T.freeRightPair(derived, arm) ? 'Dreiecksinsel, Rechtsabbiegestreifen' : T.freeRightPossible(derived, arm) ? 'fügt fehlende Fahrstreifen hinzu (Abbiege- und Einfädelstreifen)' : 'braucht einen Kfz-Zufahrtsstreifen'}</span></div>
+        <div class="ts-row" title="Bordsteinradius der Ecke links der Zufahrt (Kreisbogen, der beide Fahrbahnränder berührt)"><label>Eckradius</label><input type="number" step="0.5" min="0" max="40" data-field="cornerRadius" data-key="${arm.key}" value="${arm.cornerRadius}"><span class="ts-note">m (Ecke links der Zufahrt)</span></div>
+        <div class="ts-row" title="Die Ausfahrtsstreifen beginnen so weit hinter der Haltlinie (z. B. hinter einer großen Ecke)"><label>Ausfahrt ab</label><input type="number" step="0.5" min="0" max="40" data-field="outStart" data-key="${arm.key}" value="${arm.outStart || 0}"><span class="ts-note">m hinter der Haltlinie</span></div>
         ${arm.freeRight && T.freeRightPair(derived, arm) ? `<div class="ts-row" title="Wo der Rechtsabbiegestreifen den Arm verlässt (vor der Haltlinie) und wo er in die Ausfahrt mündet (nach deren Haltlinie)"><label></label>
           ab <input type="number" step="1" min="0" style="width:52px" data-field="slipBack" data-key="${arm.key}" value="${arm.slipBack || 0}"> m vor, bis <input type="number" step="1" min="0" style="width:52px" data-field="slipAhead" data-key="${arm.key}" value="${arm.slipAhead || 0}"> m nach der Haltlinie</div>` : ''}
         <div class="ts-row"><label>Fußgängerfurt</label><input type="checkbox" data-field="cross" data-key="${arm.key}" ${cw ? 'checked' : ''}>
@@ -1053,6 +1057,7 @@ let linkStops = false;     // move all stop lines together
         case 'crossWidth': { const c = m.crosswalks.find(x => x.id === el.dataset.id); const v = num(); if (c && v != null) c.width = Math.max(1.5, Math.min(8, v)); changed(true); return; }
         case 'laneType': { const l = m.lanes.find(x => x.id === el.dataset.id); if (l) T.setLaneType(l, el.value); changed(true); return; }
         case 'islandLen': { const v = num(); if (v != null) (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {})).islandLen = Math.max(5, v); changed(true); return; }
+        case 'cornerRadius': case 'outStart': { const v = num(); (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {}))[f] = v == null ? undefined : Math.max(0, Math.min(40, v)); changed(true); return; }
         case 'slipBack': case 'slipAhead': { const v = num(); (m.arms[el.dataset.key] || (m.arms[el.dataset.key] = {}))[f] = v == null ? 0 : Math.max(0, Math.min(40, v)); changed(true); return; }
         case 'laneStopOffset': { const l = m.lanes.find(x => x.id === el.dataset.id); const v = num(); if (l) l.stopOffset = v == null ? 0 : Math.max(0, Math.min(30, v)); changed(true); return; }
         case 'laneLength': { const l = m.lanes.find(x => x.id === el.dataset.id); const v = num(); if (l) l.length = el.value.trim() === '' || v == null ? null : Math.max(5, v); changed(true); return; }
