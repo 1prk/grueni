@@ -81,12 +81,17 @@
   }
   function clearError() { els.errorBox.style.display = 'none'; }
 
+  // Pasted text or sample data: the text box is the source.
   function analyze() {
     clearError();
     let parsed;
-    try { parsed = GZ.parser.parseOcitText(els.rawInput.value); }
+    try { parsed = GZ.csvImport.importText(els.rawInput.value); }
     catch (e) { showError(e.message); return; }
+    analyzeParsed(parsed);
+  }
 
+  // `parsed` comes from GZ.csvImport (same shape as GZ.parser.parseOcitText, plus `table`).
+  function analyzeParsed(parsed) {
     const { columns, otherColumns, times, seriesByCol, totalRows, skippedRows, knotenName, knotenNr, cycleStarts } = parsed;
     const tMin = times[0], tMax = times[times.length - 1] + GZ.parser.estimateStep(times);
 
@@ -177,12 +182,28 @@
       reader.readAsText(file, 'utf-8');
       e.target.value = '';
     });
-    document.getElementById('fileInput').addEventListener('change', e => {
+    // A file goes straight to the importer. It does not pass through the text box,
+    // so a big recording is not held a second time in the page.
+    document.getElementById('fileInput').addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => { els.rawInput.value = reader.result; analyze(); };
-      reader.readAsText(file, 'utf-8');
+      clearError();
+      const previousSummary = els.dataPanelSummary.innerHTML;
+      els.rawInput.value = '';
+      els.dataPanelSummary.textContent = 'Lese ' + file.name + ' …';
+      let parsed;
+      try {
+        parsed = await GZ.csvImport.importFile(file, {
+          onProgress: p => { els.dataPanelSummary.textContent = 'Lese ' + file.name + ' … ' + Math.round(p * 100) + ' %'; }
+        });
+      } catch (err) {
+        els.dataPanelSummary.innerHTML = previousSummary;
+        showError(err.message);
+        e.target.value = '';
+        return;
+      }
+      analyzeParsed(parsed);
+      e.target.value = '';
     });
     els.btnExport.addEventListener('click', () => GZ.views.gruenzeitanalyse.exportStatsCSV());
     els.dataPanelHead.addEventListener('click', () => els.dataPanel.classList.toggle('open'));

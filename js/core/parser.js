@@ -118,15 +118,9 @@
     return out;
   }
 
-  function parseOcitText(text) {
-    const lines = text.replace(/\r/g, '').split('\n');
-    while (lines.length && lines[lines.length - 1].length === 0) lines.pop();
-    if (lines.length < 8) {
-      throw new Error('Zu wenige Zeilen – erwartet 7 Kopfzeilen + mindestens 1 Messzeile.');
-    }
-    const rows = lines.map(splitLine);
-    const header = rows.slice(0, 7);
-    const dataRows = rows.slice(7);
+  // Header analysis, shared by parseOcitText and GZ.csvImport.
+  // `header` holds the first 7 lines, each split into fields.
+  function analyzeHeader(header) {
     const nameRow = header[4] || [];   // Zeile 5: Kurzname der Spalte (K1, K2, DF1, ...)
     const beschrRow = header[5] || []; // Zeile 6: Klartext-Beschreibung
     const colCount = Math.max(...header.map(r => r.length));
@@ -170,6 +164,19 @@
         otherColumns.push({ index: c, kuerzel, name, beschreibung });
       }
     }
+    return { colCount, knotenName, knotenNr, txCol, tcCol, splCol, columns, otherColumns };
+  }
+
+  function parseOcitText(text) {
+    const lines = text.replace(/\r/g, '').split('\n');
+    while (lines.length && lines[lines.length - 1].length === 0) lines.pop();
+    if (lines.length < 8) {
+      throw new Error('Zu wenige Zeilen – erwartet 7 Kopfzeilen + mindestens 1 Messzeile.');
+    }
+    const rows = lines.map(splitLine);
+    const header = rows.slice(0, 7);
+    const dataRows = rows.slice(7);
+    const { knotenName, knotenNr, txCol, tcCol, splCol, columns, otherColumns } = analyzeHeader(header);
     if (columns.length === 0) {
       throw new Error('Keine Signalgruppen gefunden – kein bekannter OCIT-Typname (z. B. „veh“, „ped“, „tram“) in den Kopfzeilen erkannt.');
     }
@@ -225,7 +232,7 @@
 
   GZ.parser = {
     STATE_CAT, CAT_LABEL, TYPNAME_TO_KUERZEL, DETECTOR_NAME_RE,
-    parseOcitText, parseTimestamp, looksLikeTimeOnly,
+    parseOcitText, parseTimestamp, looksLikeTimeOnly, splitLine, analyzeHeader,
     extractLabeledValue, findColumnByLabel, estimateStep,
     categorizeSgRaw, categorizeDetRaw
   };

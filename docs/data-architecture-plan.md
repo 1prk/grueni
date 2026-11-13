@@ -1,6 +1,6 @@
 # Data architecture plan
 
-Status: approved. Phase 0 is done. Phase 1 is next.
+Status: approved. Phases 0 and 1 are done. Phase 2 is next.
 
 ## Hard constraints
 
@@ -61,13 +61,35 @@ Sizes: S small, M medium, L large. Each phase leaves the app working.
 - A test page that runs from disk, under the strict CSP, and a Node runner that runs the same suite.
 - Deterministic fixtures: the sample data, a wide synthetic recording and edge cases.
 
-### Phase 1: data layer (L)
+### Phase 1: data layer (L). Done.
 
-- `domain/table`: typed columns (`u8`, `u16`, `u32`, dictionary for text, a sparse list for `INV`),
-  and an implicit time axis (start, 1 s step, gap list).
-- `io/csvImport`: streaming byte-level importer. The file goes straight to the importer, not through the textarea.
-- A compatibility adapter gives views the same shape as `seriesByCol` today.
-- Exit: differential tests show cell-for-cell equal results against `parseOcitText`.
+- `js/core/table.js` (`GZ.table`): typed columns (`u8`, `u16`, `u32`, dictionary for text, a sparse exception list for `INV`
+  and other cells that are not a plain number).
+  At run time the time axis is a `Float64Array`. The implicit axis (start, 1 s step, gap list) is part of the file format (Phase 2).
+- `js/io/csvImport.js` (`GZ.csvImport`): streaming byte-level importer.
+  A fast path reads numbers from the bytes. Lines with quotes, a carriage return, no tab or an unusual time format use a slow path
+  that calls the reference functions of `GZ.parser`, so odd lines behave as before.
+- Compatibility: the result has the same fields as `parseOcitText`. `seriesByCol` is a lazy map that builds a text array per column
+  when a view asks for it. The new field `table` holds the typed columns.
+- The header analysis is now one function, `GZ.parser.analyzeHeader`, used by both parsers.
+- The app: a file goes straight to `importFile`. Pasted text and the sample use `importText`. The textarea no longer holds a file.
+- Tests: `tests/suite/csvImport.js` compares the importer with `parseOcitText` for all fixtures, for every chunk size,
+  for 300 random odd files and for clock-change days. The suite passes in UTC, Europe/Berlin and Asia/Kolkata.
+  Breaking the importer in seven ways made tests fail every time.
+- Known differences to `parseOcitText`: a leading byte order mark is removed, and text that is not valid UTF-8 is decoded per cell.
+
+Results, Chromium, synthetic recordings with 100 value columns, 24 h at 1 Hz:
+
+| | 25 MiB | 74 MiB |
+|---|---|---|
+| Old parser: time, memory kept | 934 ms, 151 MB | 2,721 ms, 434 MB |
+| New importer: time, memory kept | 250 ms, 12 MB | 714 ms, 39 MB |
+| With the text array of every column built | 46 MB | 140 MB |
+
+In the whole app (import, analysis, first render) a 25 MiB file takes 1.9 s instead of 2.9 s and keeps 180 MB instead of 262 MB.
+A 74 MiB file takes 8.5 s instead of 11.1 s and keeps 816 MB instead of 1,037 MB.
+Most of what remains is the analyses and the rendering, not the import. Phase 5 addresses the text arrays and the consumers.
+The next profiling step is to find what the analyses keep.
 
 ### Phase 2: chunk codec (M)
 

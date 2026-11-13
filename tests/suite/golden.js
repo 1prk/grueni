@@ -94,8 +94,13 @@
     return r;
   }
 
+  // The parse hashes do not depend on the time zone. The downstream hashes contain absolute times
+  // and clock labels, so they are compared only in the time zone that wrote the golden data.
+  const tzOffset = () => new Date(2026, 10, 3, 6).getTimezoneOffset();
+
+  T.allFixtures = fixtures;
   T.computeGolden = function () {
-    const g = {};
+    const g = { __meta: { tzOffset: tzOffset() } };
     Object.keys(fixtures()).forEach(n => { g[n] = compute(n); });
     return g;
   };
@@ -116,7 +121,9 @@
     T.test('golden: ' + name, () => {
       const g = window.GZT_GOLDEN;
       T.assert.ok(g && g[name], 'no golden value for ' + name);
-      T.assert.same(compute(name), g[name]);
+      const now = compute(name), want = g[name];
+      if (g.__meta.tzOffset === tzOffset()) T.assert.same(now, want);
+      else T.assert.same({ parse: now.parse, error: now.error }, { parse: want.parse, error: want.error });   // other time zone: parse hashes only
     });
   });
 })();
