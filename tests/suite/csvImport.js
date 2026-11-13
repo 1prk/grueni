@@ -106,6 +106,7 @@
   }
   let extraCache = null;
   const extra = () => extraCache || (extraCache = extras());
+  T.extraFixtures = extra;
 
   /* ---------- tests ---------- */
   T.test('csvImport: the same result as parseOcitText for the golden fixtures', () => {

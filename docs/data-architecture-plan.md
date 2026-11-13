@@ -94,10 +94,35 @@ A 74 MiB file takes 8.5 s instead of 11.1 s and keeps 816 MB instead of 1,037 MB
 Most of what remains is the analyses and the rendering, not the import. Phase 5 addresses the text arrays and the consumers.
 The next profiling step is to find what the analyses keep.
 
-### Phase 2: chunk codec (M)
+### Phase 2: chunk codec (M). Done.
 
-- Progression-segment encoding plus gzip, one chunk per recording and column, decoded on demand.
-- Round-trip tests, including `INV`, 65535, 65536, empty columns and one-row files.
+- `js/io/chunkCodec.js` (`GZ.chunkCodec`): one chunk for each recording and column, and one chunk for the time axis.
+  A chunk has a 5-byte header (magic, version, type, packing). The payload is gzip packed when this makes it smaller.
+- Packing of the numbers: progression segments (jump, step, length) as zigzag varints.
+  A state column is a list of constant runs. A countdown is one run. The 1 Hz time axis is one segment, and a gap adds one segment.
+  An exception cell (`INV`, blank, other text) keeps the run of the rows around it. The decoder sets these cells to 0 again.
+  So the file format has the implicit time axis (start, 1 s step, gap list) as a special case of the same codec.
+  A time axis with fractions or NaN uses plain float64 storage.
+- API: `encodeColumn`, `decodeColumn`, `encodeTimes`, `decodeTimes` (promises, with gzip) and
+  `serializeColumn`, `deserializeColumn`, `serializeTimes`, `deserializeTimes` (synchronous, without gzip).
+- A decoder checks the header, the lengths, the value ranges, the dictionary codes and the row count (at most 2^28).
+  It throws an `Error` with a message that starts with `chunk:`.
+- Tests: `tests/suite/chunkCodec.js` has round trips (limits 255, 256, 65535, 65536 and 4294967295, empty columns, one row, `INV`,
+  dictionary columns, 300 random columns, every column of every fixture, every time axis), a check of every shortened chunk,
+  3000 random damage cases, a bad row count and gzip tests.
+  The suite passes in Node and in Chromium on `file://` under the strict CSP.
+
+Results, the 24 h synthetic recording with 100 columns (25 MiB of text, 86,400 rows):
+
+| | Size | Time |
+|---|---|---|
+| Segments only (no gzip) | 641 KB | 44 ms to encode all columns |
+| One gzip chunk for each column | 144 KB | 109 ms to encode, 63 ms to decode all 100 columns |
+| Same data as one gzip stream (for comparison) | 95 KB | |
+| Time axis | 21 bytes | |
+| Largest column chunk | 2.6 KB | |
+
+Decoding five plain columns takes about 1 ms. A column chunk is the unit for lazy loading in Phase 4 and Phase 5.
 
 ### Phase 3: store and layers (M to L)
 

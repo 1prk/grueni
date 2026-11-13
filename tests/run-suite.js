@@ -11,7 +11,7 @@ const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const scripts = Array.from(html.matchAll(/<script src="([^"]+)"><\/script>/g)).map(m => m[1])
   .filter(src => src !== 'runner-browser.js');
 
-const ctx = { console, Date, Math, JSON, TextEncoder, TextDecoder };
+const ctx = { console, Date, Math, JSON, TextEncoder, TextDecoder, CompressionStream, DecompressionStream };
 ctx.window = {};
 vm.createContext(ctx);
 for (const src of scripts) {
