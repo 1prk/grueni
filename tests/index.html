@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>grueni tests</title>
+<link rel="stylesheet" href="runner.css">
+</head>
+<body>
+<h1>grueni tests</h1>
+<p id="summary">Running ...</p>
+<ul id="results"></ul>
+<!-- One script per line. tests/run-suite.js reads this list, so the browser and Node run the same files. -->
+<script src="lib/harness.js"></script>
+<script src="lib/hash.js"></script>
+<script src="../js/core/format.js"></script>
+<script src="../js/core/stats.js"></script>
+<script src="../js/core/parser.js"></script>
+<script src="../js/core/segments.js"></script>
+<script src="../js/core/wartezeitLogic.js"></script>
+<script src="../js/core/slices.js"></script>
+<script src="../js/core/greenTime.js"></script>
+<script src="../js/core/detectors.js"></script>
+<script src="../js/core/logParser.js"></script>
+<script src="../js/core/sampleData.js"></script>
+<script src="fixtures/synthetic.js"></script>
+<script src="golden/golden-data.js"></script>
+<script src="suite/golden.js"></script>
+<script src="runner-browser.js"></script>
+</body>
+</html>
