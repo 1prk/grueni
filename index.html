@@ -43,6 +43,7 @@
       <span class="project-bar-title">Projekt</span>
       <span class="project-bar-info" id="projectInfo">Noch keine Daten geladen</span>
       <span class="project-bar-actions">
+        <button type="button" id="btnProjectPanel" disabled title="Zeigt die LSAs des Projekts und die Aufzeichnungen der gewählten LSA.">LSAs und Aufzeichnungen</button>
         <button type="button" id="btnProjectSave" disabled title="Speichert Aufzeichnung, Phasen, Formeln und alle Einstellungen in einer Projektdatei (ZIP).">Projekt speichern</button>
         <label class="btn" for="projectOpenInput" title="Öffnet eine Projektdatei.">Projekt öffnen …</label>
         <input type="file" id="projectOpenInput" accept=".zip,.grueni">
@@ -50,6 +51,24 @@
         <label class="btn" for="configImportInput" title="Lädt eine Konfigurationsdatei dieser Anwendung. Auch die älteren Phasen- und Umlaufprüfungs-Dateien sind möglich.">Konfiguration laden …</label>
         <input type="file" id="configImportInput" accept=".json">
       </span>
+    </div>
+    <div class="project-panel" id="projectPanel">
+      <div class="project-panel-col">
+        <div class="project-panel-head">
+          <span>LSAs</span>
+          <label class="btn" for="lsaNewInput" title="Liest eine CSV-Datei und legt dafür eine neue LSA im Projekt an.">Neue LSA aus Datei …</label>
+          <input type="file" id="lsaNewInput" accept=".csv,.txt,.tsv">
+        </div>
+        <ul class="project-list" id="lsaList"></ul>
+      </div>
+      <div class="project-panel-col">
+        <div class="project-panel-head">
+          <span id="recHead">Aufzeichnungen</span>
+          <label class="btn" for="recAddInput" id="recAddLabel" title="Liest eine CSV-Datei und fügt sie als weiteren Tag zur gewählten LSA hinzu. Die Spalten werden nach Name und Typ verglichen.">Aufzeichnung hinzufügen …</label>
+          <input type="file" id="recAddInput" accept=".csv,.txt,.tsv">
+        </div>
+        <ul class="project-list" id="recList"></ul>
+      </div>
     </div>
     <div class="project-banner" id="projectBanner" data-init-hidden>
       <span id="projectBannerText"></span>
@@ -809,6 +828,7 @@
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/views/umlaufstatistiken.js"></script>
 <script src="js/views/project.js"></script>
+<script src="js/views/projectPanel.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

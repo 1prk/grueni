@@ -827,11 +827,13 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
 
   // Applies a configuration file object to the view.
   // Returns { notes, skipped, text }. text is the hint for the user. It is empty when everything was applied without a remark.
-  function applyFileConfig(cfg) {
+  // opts.sameLsa is true when the project applies the settings of an LSA to another recording of the same LSA.
+  // Then another time range or row count is normal. The note appears only when the columns are different.
+  function applyFileConfig(cfg, opts) {
     const a = GZ.state.data.currentAnalysis;
     const match = GZ.configIO.fingerprintMatches(cfg.fingerprint, a);
     const notes = [];
-    if (!match.exact) {
+    if (!match.exact && !(opts && opts.sameLsa && match.columnsMatch)) {
       notes.push(match.columnsMatch
         ? 'Spaltenstruktur passt, aber andere Aufzeichnung (Zeitraum/Zeilenzahl weichen ab) – Zuordnung erfolgte über Spaltennamen.'
         : 'Spaltenstruktur weicht von der gespeicherten Konfiguration ab – ggf. nicht alle Einstellungen übernommen.');

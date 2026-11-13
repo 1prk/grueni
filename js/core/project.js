@@ -20,6 +20,11 @@
    config.statsColumns  the columns of the tab "Umlaufstatistiken", [{ label, expr }]
    The configurations use column NAMES and never the raw column index. See GZ.configIO.
 
+   A project can have several LSAs, and an LSA can have several recordings (one for each day).
+   The configuration belongs to the LSA. All its recordings share it. It names columns by NAME, so it fits every recording
+   of the LSA, also when the column order is different. mapColumns() and checkImport() compare the columns of two recordings
+   by name and by type before a new recording joins an LSA.
+
    Every id is 128 random bits as 32 hex characters. The ids exist from the first version of the file.
    schemaVersion counts the versions of this model. migrate() brings an older project to the current version.
    A project with a newer version is refused. */
@@ -90,15 +95,36 @@ GZ.define('project', { layer: 'domain', deps: [] }, function (GZ) {
   const findRecording = (lsa, id) => lsa.recordings.find(r => r.id === id) || null;
   function touch(project, now) { project.modifiedAt = now || isoNow(); return project; }
 
+  // The chunk keys of one recording.
+  function recordingChunkKeys(r) {
+    const keys = [], c = r.chunks;
+    CHUNK_NAMES.forEach(n => { if (c[n]) keys.push(chunkKey(r.id, c[n])); });
+    Object.keys(c.columns).forEach(i => keys.push(chunkKey(r.id, c.columns[i])));
+    return keys;
+  }
   // All chunk keys that the recordings of the project name.
   function chunkKeys(project) {
     const keys = [];
-    project.lsas.forEach(l => l.recordings.forEach(r => {
-      const c = r.chunks;
-      CHUNK_NAMES.forEach(n => { if (c[n]) keys.push(chunkKey(r.id, c[n])); });
-      Object.keys(c.columns).forEach(i => keys.push(chunkKey(r.id, c.columns[i])));
-    }));
+    project.lsas.forEach(l => l.recordings.forEach(r => { recordingChunkKeys(r).forEach(k => keys.push(k)); }));
     return keys;
+  }
+
+  // Removes a recording from an LSA. Returns the recording, or null when the id is not there.
+  // The active recording becomes the last one that is left, or null.
+  function removeRecording(lsa, id) {
+    const i = lsa.recordings.findIndex(r => r.id === id);
+    if (i < 0) return null;
+    const removed = lsa.recordings.splice(i, 1)[0];
+    if (lsa.activeRecordingId === id) lsa.activeRecordingId = lsa.recordings.length ? lsa.recordings[lsa.recordings.length - 1].id : null;
+    return removed;
+  }
+  // Removes an LSA with all its recordings. Returns the LSA, or null when the id is not there.
+  function removeLsa(project, id) {
+    const i = project.lsas.findIndex(l => l.id === id);
+    if (i < 0) return null;
+    const removed = project.lsas.splice(i, 1)[0];
+    if (project.activeLsaId === id) project.activeLsaId = project.lsas.length ? project.lsas[project.lsas.length - 1].id : null;
+    return removed;
   }
 
   /* ---------- validation ---------- */
@@ -184,6 +210,91 @@ GZ.define('project', { layer: 'domain', deps: [] }, function (GZ) {
     return p;
   }
 
+  /* ---------- the columns of two recordings ---------- */
+  // A column is described by its group and its type.
+  // A signal group has the group 'SG' and the OCIT type name (for example 'veh' or 'ped') as type.
+  // Every other column has its short code (for example 'DET' or 'APW') as group and as type.
+  const nameKey = name => String(name == null ? '' : name).trim().toUpperCase();
+  function columnEntries(header) {
+    const out = [];
+    (header.columns || []).forEach(c => out.push({ name: c.name, group: 'SG', type: c.typName || 'SG', index: c.index }));
+    (header.otherColumns || []).forEach(c => out.push({ name: c.name, group: c.kuerzel, type: c.kuerzel, index: c.index }));
+    return out;
+  }
+
+  // Matches the columns of a recording to the columns of a reference recording by name, and then by group.
+  // Two columns that have the same name and the same group are a pair. Names are not case sensitive.
+  // When a name is used more than once, the first column pairs with the first, the second with the second.
+  // Returns:
+  //   pairs         [{ ref, col }]  columns that have the same name and the same group
+  //   typeChanged   [{ ref, col }]  pairs where the type is different (for example 'veh' and 'ped')
+  //   conflicts     [{ ref, col }]  the name is the same but the group is different (for example a signal group and a detector)
+  //   missing       [ref]           columns of the reference that the new recording does not have
+  //   added         [col]           columns of the new recording that the reference does not have
+  // ref and col are { name, group, type, index }. The index is the field number in the CSV of the own recording.
+  function mapColumns(refHeader, header) {
+    const ref = columnEntries(refHeader), cur = columnEntries(header);
+    const usedRef = new Set(), usedCur = new Set();
+    const pairs = [], typeChanged = [], conflicts = [];
+    // First pass: same name and same group.
+    cur.forEach((c, ci) => {
+      const ri = ref.findIndex((r, i) => !usedRef.has(i) && nameKey(r.name) === nameKey(c.name) && r.group === c.group);
+      if (ri < 0) return;
+      usedRef.add(ri); usedCur.add(ci);
+      pairs.push({ ref: ref[ri], col: c });
+      if (ref[ri].type !== c.type) typeChanged.push({ ref: ref[ri], col: c });
+    });
+    // Second pass: same name, another group.
+    cur.forEach((c, ci) => {
+      if (usedCur.has(ci)) return;
+      const ri = ref.findIndex((r, i) => !usedRef.has(i) && nameKey(r.name) === nameKey(c.name));
+      if (ri < 0) return;
+      usedRef.add(ri); usedCur.add(ci);
+      conflicts.push({ ref: ref[ri], col: c });
+    });
+    return {
+      pairs, typeChanged, conflicts,
+      missing: ref.filter((_, i) => !usedRef.has(i)),
+      added: cur.filter((_, i) => !usedCur.has(i))
+    };
+  }
+
+  function listNames(entries, max) {
+    const names = entries.map(e => e.name);
+    const shown = names.slice(0, max || 8).join(', ');
+    return names.length > (max || 8) ? shown + ' und ' + (names.length - (max || 8)) + ' weitere' : shown;
+  }
+
+  // Checks a new recording against the LSA that it joins.
+  // header, tMin and tMax are the fields of the new recording (see createRecording). The reference is the active recording of the LSA.
+  // Returns { reference, mapping, problems, notes }.
+  //   problems  German texts. The user must confirm the import (another node number, an overlap in time, a conflict of columns,
+  //             missing signal groups).
+  //   notes     German texts for differences that do not need a confirmation (new columns, other types, missing detectors).
+  // An LSA without a recording has no reference. Then there are no problems.
+  function checkImport(lsa, rec) {
+    const problems = [], notes = [];
+    const reference = (lsa.activeRecordingId && findRecording(lsa, lsa.activeRecordingId)) || lsa.recordings[lsa.recordings.length - 1] || null;
+    if (!reference) return { reference: null, mapping: null, problems, notes };
+
+    const nodeNow = rec.header.knotenNr == null ? '' : String(rec.header.knotenNr).trim();
+    const nodeRef = lsa.nodeNo != null ? String(lsa.nodeNo).trim() : '';
+    if (nodeNow && nodeRef && nodeNow !== nodeRef) problems.push('Die Knotennummer ist ' + nodeNow + '. Die LSA „' + lsa.name + '“ hat die Knotennummer ' + nodeRef + '.');
+
+    const overlapping = lsa.recordings.filter(r => rec.tMin < r.tMax && rec.tMax > r.tMin);
+    overlapping.forEach(r => problems.push('Der Zeitraum überschneidet sich mit der Aufzeichnung „' + r.name + '“.'));
+
+    const m = mapColumns(reference.header, rec.header);
+    if (m.conflicts.length) problems.push('Spalten mit gleichem Namen, aber anderer Art: ' + listNames(m.conflicts.map(c => ({ name: c.col.name + ' (' + c.ref.group + ' → ' + c.col.group + ')' }))) + '.');
+    const missingSg = m.missing.filter(e => e.group === 'SG');
+    if (missingSg.length) problems.push('Signalgruppen der Aufzeichnung „' + reference.name + '“ fehlen: ' + listNames(missingSg) + '.');
+    const missingOther = m.missing.filter(e => e.group !== 'SG');
+    if (missingOther.length) notes.push('Weitere Spalten fehlen: ' + listNames(missingOther) + '.');
+    if (m.added.length) notes.push('Neue Spalten: ' + listNames(m.added) + '.');
+    if (m.typeChanged.length) notes.push('Anderer Typ bei: ' + listNames(m.typeChanged.map(c => ({ name: c.col.name + ' (' + c.ref.type + ' → ' + c.col.type + ')' }))) + '.');
+    return { reference, mapping: m, problems, notes };
+  }
+
   /* ---------- configuration export ---------- */
   // The configuration of one LSA without the recordings.
   function toConfigExport(lsa, now) {
@@ -225,7 +336,7 @@ GZ.define('project', { layer: 'domain', deps: [] }, function (GZ) {
   return {
     FORMAT, CONFIG_FORMAT, SCHEMA_VERSION, CHUNK_NAMES, MIGRATIONS,
     newId, isId, columnChunkName, chunkKey, isChunkName,
-    createProject, createLsa, createRecording, addLsa, addRecording, findLsa, findRecording, touch, chunkKeys,
+    createProject, createLsa, createRecording, addLsa, addRecording, findLsa, findRecording, touch, chunkKeys, recordingChunkKeys, removeRecording, removeLsa, mapColumns, checkImport,
     validate, migrate, toConfigExport, parseConfigExport
   };
 });

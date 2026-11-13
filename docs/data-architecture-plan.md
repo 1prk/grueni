@@ -1,6 +1,6 @@
 # Data architecture plan
 
-Status: approved. Phases 0 to 5 are done. Phase 6 is next.
+Status: approved. Phases 0 to 6 are done. Phase 7 is next.
 
 ## Hard constraints
 
@@ -255,9 +255,40 @@ Results, Chromium, memory kept after the import and the first render of all tabs
 Known behavior that did not change: after the sample, a second import in the same page does not give the public transport tab a first row. The code before Phase 5 does the same.
 An opened project does not replace a log file that is already loaded. The log is not part of a project yet.
 
-### Phase 6: several recordings per LSA (M to L)
+### Phase 6: several recordings per LSA (M to L). Done.
 
-- LSA list, recording list, import into an LSA, column mapping by name and type.
+- The model had LSAs and recordings from Phase 4. New functions in `GZ.project`: `removeRecording`, `removeLsa` (the active ids stay valid),
+  `recordingChunkKeys`, `mapColumns` and `checkImport`.
+- Column mapping by name and type: `mapColumns(refHeader, header)` pairs the columns of a new recording with the columns of the reference recording.
+  The key is the name (not case sensitive) and the group (`SG` for a signal group, else the short code such as `DET` or `APW`).
+  It reports `pairs` (with both CSV indices), `typeChanged` (for example `veh` and `ped`), `conflicts` (same name, other group), `missing` and `added`.
+  The configuration of an LSA names columns by name. So it fits all recordings of the LSA, also with another column order.
+- `checkImport(lsa, recording)` compares a new recording with the active recording of the LSA. It gives German texts in two lists:
+  - `problems` need a confirmation: another node number, a time range that overlaps a recording of the LSA, a conflict of columns,
+    missing signal groups. A recording that starts when another ends is not an overlap.
+  - `notes` are only shown after the import: missing detectors, new columns, other types.
+- Store: the change topic `project:changed`, the commands `project:selectLsa`, `project:selectRecording`, `project:addRecording`, `project:newLsa`,
+  `project:rename` and `project:remove`, and the providers `projectOverview` and `importGuard`.
+- `GZ.views.project` does the work. The settings belong to the LSA. Before the page shows another LSA or recording, the view saves the settings into the LSA.
+  After it shows the recording, it applies the settings of the LSA again. Each LSA keeps its own settings.
+  - "Aufzeichnung hinzufügen" reads a CSV file, checks it and adds it to the active LSA. "Neue LSA aus Datei" makes a new LSA with the file as first recording.
+  - A project needs at least one LSA, and an LSA needs at least one recording. So the view always shows a recording of the active LSA.
+  - Removing a recording or an LSA also removes the chunks from the session and from the browser store, and the recording from the cache.
+  - The main import buttons (file, sample, pasted text) still start a new project. `importGuard` asks first when the project has two or more
+    recordings and changes that no project file has yet.
+- `GZ.views.projectPanel` (new) draws the two lists in the project bar. It has no project logic. A pencil renames in place. The button
+  "LSAs und Aufzeichnungen (n · m)" opens and closes the panel.
+- Two fixes that the multi-recording case showed:
+  - The cycle check selects key figure columns as objects. The project view applied the cycle check before the key figure columns.
+    The page then said "Nicht gefunden: Objekt (ohne Bezeichnung)" after a restore or an open. The order is now: master data, key figures, cycle check.
+  - The cycle check noted "andere Aufzeichnung (Zeitraum/Zeilenzahl weichen ab)" for each other recording of the same LSA. Within an LSA this is normal.
+    The project view now passes `sameLsa`. The note stays when the columns differ.
+- Tests: 8 new unit tests in `tests/suite/project.js` (removal, mapping with random orders and types, every problem and note).
+  `node tests/e2e/projects.js` plays 42 checks in Chromium: next day without a question, overlap, other node number and missing signal groups with the
+  question (yes and no), selection of recordings and LSAs, own settings for each LSA, rename, remove (also the rules for the last recording and the last LSA,
+  and the chunks in the browser store), save, open in a clean browser, restore after a reload, and the question before a new import.
+
+Not in this phase: the log file is not part of a project. A recording of a project is still decoded as a whole when it is shown (the cache keeps the last ones).
 
 ### Phase 7: hardening (M)
 
@@ -291,6 +322,6 @@ It does not cover `vendor/` and the generated `tests/fixtures/golden-data.js`.
 - Node: `node tests/run-suite.js`. This runs the layer check, the policy check and the same suite as the browser.
   `node tests/check-layers.js` and `node tests/check-csp.js` run the two checks alone.
 - Real browser (they need Playwright): `node tests/e2e/suite.js` runs the test page, `node tests/e2e/crawl.js` clicks through all tabs,
-  `node tests/e2e/exports.js` starts every export and `node tests/e2e/project.js` plays the project functions.
+  `node tests/e2e/exports.js` starts every export and `node tests/e2e/project.js` plays the project functions and `node tests/e2e/projects.js` plays several LSAs and recordings.
 - Update the golden data after an intended change: `node tests/run-suite.js --update-golden`.
 - The older `node tests/core.test.js` still runs.

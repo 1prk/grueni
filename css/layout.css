@@ -73,4 +73,18 @@
 .project-bar-info{ font-family:var(--mono); font-size:11.5px; color:var(--text-muted); flex:1 1 220px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .project-bar-info.warn{ color:var(--warn-text); }
 .project-bar-actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.project-panel{ display:none; grid-template-columns:minmax(220px,1fr) minmax(280px,2fr); gap:var(--space-4); padding:8px var(--space-5) 10px; border-top:1px solid var(--border); background:var(--bg-surface); }
+.project-panel.open{ display:grid; }
+.project-panel-col{ min-width:0; }
+.project-panel-head{ display:flex; align-items:center; gap:var(--space-3); margin-bottom:6px; font-size:12px; font-weight:700; color:var(--text-muted); }
+.project-panel-head > span{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-panel-head .btn.disabled{ opacity:.5; pointer-events:none; }
+.project-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:3px; max-height:200px; overflow-y:auto; }
+.project-item{ display:flex; align-items:stretch; gap:2px; border:1px solid var(--border); border-radius:4px; background:var(--bg-surface-2); }
+.project-item.active{ border-color:var(--accent); background:var(--accent-bg); }
+.project-item-main{ flex:1 1 auto; min-width:0; display:flex; flex-direction:column; align-items:flex-start; gap:1px; padding:4px 8px; border:0; background:transparent; text-align:left; cursor:pointer; }
+.project-item-name{ font-size:12.5px; font-weight:600; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-item-meta{ font-family:var(--mono); font-size:10.5px; color:var(--text-muted); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-item-btn{ border:0; background:transparent; padding:0 8px; color:var(--text-muted); cursor:pointer; }
+.project-item-input{ font:inherit; font-size:12.5px; font-weight:600; width:100%; box-sizing:border-box; }
 .project-banner{ display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-3); padding:8px var(--space-5); background:var(--accent-bg); border-top:1px solid var(--border); font-size:12.5px; }

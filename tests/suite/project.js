@@ -140,4 +140,100 @@
     throws(() => P.parseConfigExport({ format: P.CONFIG_FORMAT, schemaVersion: 99, config: {} }), /neuer/, 'newer config');
     throws(() => P.parseConfigExport({ format: P.CONFIG_FORMAT, schemaVersion: 1 }), /config/, 'no config');
   });
+
+  /* ---------- several recordings and LSAs ---------- */
+  const col = (index, name, typName) => ({ index, name, typName: typName || 'veh', beschreibung: '' });
+  const oth = (index, name, kuerzel) => ({ index, name, kuerzel: kuerzel || 'DET', beschreibung: '' });
+  const rec = (name, tMin, tMax, columns, otherColumns, node) => sampleRecording({
+    name, fileName: name, tMin, tMax,
+    header: { columns, otherColumns, knotenName: 'K', knotenNr: node == null ? '7' : node, totalRows: 10, skippedRows: 0 }
+  });
+
+  T.test('project: removeRecording and removeLsa keep the active ids valid', () => {
+    const p = sampleProject();
+    const lsa = p.lsas[0];
+    const a = lsa.recordings[0], b = P.addRecording(lsa, sampleRecording({ name: 'b' })), c = P.addRecording(lsa, sampleRecording({ name: 'c' }));
+    assert.equal(lsa.activeRecordingId, c.id);
+    assert.ok(P.removeRecording(lsa, b.id) === b);
+    assert.equal(lsa.activeRecordingId, c.id, 'the active recording stays');
+    assert.ok(P.removeRecording(lsa, c.id) === c);
+    assert.equal(lsa.activeRecordingId, a.id, 'the last recording that is left becomes active');
+    assert.equal(P.removeRecording(lsa, 'nope'), null);
+    P.removeRecording(lsa, a.id);
+    assert.equal(lsa.activeRecordingId, null);
+    P.validate(p);
+    const second = P.addLsa(p, P.createLsa({ name: 'zwei' }));
+    assert.equal(p.activeLsaId, lsa.id);
+    p.activeLsaId = second.id;
+    assert.ok(P.removeLsa(p, second.id) === second);
+    assert.equal(p.activeLsaId, lsa.id);
+    P.removeLsa(p, lsa.id);
+    assert.equal(p.activeLsaId, null);
+    assert.equal(P.removeLsa(p, 'nope'), null);
+    P.validate(p);
+  });
+
+  T.test('project: recordingChunkKeys lists the keys of one recording', () => {
+    const r = sampleRecording();
+    assert.same(P.recordingChunkKeys(r).sort(), ['times', 'cycles', 'tc', 'spl', 'col-5'].map(n => r.id + '/' + n).sort());
+  });
+
+  T.test('project: mapColumns pairs by name and group and reports the rest', () => {
+    const ref = { columns: [col(5, 'K1'), col(6, 'K2'), col(7, 'F1', 'ped')], otherColumns: [oth(8, 'IS1'), oth(9, 'IS2'), oth(10, 'TA1', 'APW')] };
+    // The new file has another column order, another type for F1, a new detector, no IS2, and K2 as a detector.
+    const cur = { columns: [col(5, 'k1'), col(6, 'F1', 'veh')], otherColumns: [oth(7, 'IS1'), oth(8, 'IS9'), oth(9, 'K2'), oth(10, 'TA1', 'APW')] };
+    const m = P.mapColumns(ref, cur);
+    assert.same(m.pairs.map(x => [x.ref.name, x.col.name]), [['K1', 'k1'], ['F1', 'F1'], ['IS1', 'IS1'], ['TA1', 'TA1']]);
+    assert.same(m.pairs.map(x => [x.ref.index, x.col.index]), [[5, 5], [7, 6], [8, 7], [10, 10]], 'the pairs keep both indices');
+    assert.same(m.typeChanged.map(x => x.col.name), ['F1']);
+    assert.same(m.conflicts.map(x => [x.ref.group, x.col.group]), [['SG', 'DET']]);
+    assert.same(m.missing.map(x => x.name), ['IS2']);
+    assert.same(m.added.map(x => x.name), ['IS9']);
+  });
+
+  T.test('project: mapColumns pairs equal names in order', () => {
+    const h = { columns: [col(5, 'K1'), col(6, 'K1')], otherColumns: [] };
+    const m = P.mapColumns(h, { columns: [col(8, 'K1'), col(9, 'K1'), col(10, 'K1')], otherColumns: [] });
+    assert.same(m.pairs.map(x => [x.ref.index, x.col.index]), [[5, 8], [6, 9]]);
+    assert.same(m.added.map(x => x.index), [10]);
+    const none = P.mapColumns({ columns: [], otherColumns: [] }, { columns: [], otherColumns: [] });
+    assert.equal(none.pairs.length + none.missing.length + none.added.length, 0);
+  });
+
+  T.test('project: checkImport gives no problem for the next day with the same columns', () => {
+    const p = P.createProject();
+    const lsa = P.addLsa(p, P.createLsa({ name: 'Knoten 7', nodeNo: '7' }));
+    P.addRecording(lsa, rec('tag1', 0, 86400000, [col(5, 'K1')], [oth(6, 'IS1')]));
+    const next = rec('tag2', 86400000, 172800000, [col(5, 'K1')], [oth(6, 'IS1')]);
+    const r = P.checkImport(lsa, next);
+    assert.same(r.problems, []);
+    assert.same(r.notes, []);
+    assert.equal(r.mapping.pairs.length, 2);
+    // An LSA without a recording has no reference.
+    const empty = P.checkImport(P.createLsa({ name: 'leer' }), next);
+    assert.equal(empty.reference, null);
+    assert.same(empty.problems, []);
+  });
+
+  T.test('project: checkImport names every problem and note in German', () => {
+    const p = P.createProject();
+    const lsa = P.addLsa(p, P.createLsa({ name: 'Knoten 7', nodeNo: '7' }));
+    P.addRecording(lsa, rec('tag1', 0, 86400000, [col(5, 'K1'), col(6, 'K2')], [oth(7, 'IS1'), oth(8, 'IS2')]));
+    const bad = rec('tag1b', 43200000, 129600000, [col(5, 'K1')], [oth(6, 'IS1'), oth(7, 'NEU')], '9');
+    const r = P.checkImport(lsa, bad);
+    const text = r.problems.join(' | ');
+    assert.ok(/Knotennummer ist 9/.test(text) && /hat die Knotennummer 7/.test(text), text);
+    assert.ok(/überschneidet sich mit der Aufzeichnung „tag1“/.test(text), text);
+    assert.ok(/Signalgruppen .* fehlen: K2/.test(text), text);
+    assert.ok(r.notes.some(n => /Weitere Spalten fehlen: IS2/.test(n)), r.notes.join(' | '));
+    assert.ok(r.notes.some(n => /Neue Spalten: NEU/.test(n)), r.notes.join(' | '));
+    // A recording that touches the end of the other is not an overlap.
+    assert.same(P.checkImport(lsa, rec('tag2', 86400000, 172800000, [col(5, 'K1'), col(6, 'K2')], [oth(7, 'IS1'), oth(8, 'IS2')])).problems, []);
+    // A conflict of columns.
+    const conflict = P.checkImport(lsa, rec('tag3', 86400000, 172800000, [col(6, 'K2')], [oth(7, 'K1'), oth(8, 'IS1'), oth(9, 'IS2')]));
+    assert.ok(conflict.problems.some(x => /gleichem Namen, aber anderer Art: K1 \(SG → DET\)/.test(x)), conflict.problems.join(' | '));
+    // Many names are shortened.
+    const many = P.checkImport(lsa, rec('tag4', 86400000, 172800000, [], []));
+    assert.ok(/und \d+ weitere/.test(many.problems.join(' ')) || many.problems.join(' ').length > 10);
+  });
 })();

@@ -53,7 +53,14 @@ GZ.define('state', { layer: 'store', deps: ['detectors', 'logs', 'topology'] }, 
     'nodeConfig:load': 'command',          // { file } load a node configuration file
     'transition:show': 'command',          // { fromPhaseId, toPhaseId } show a phase transition in the master data
     'recording:imported': 'command',       // { parsed, fileName } a new recording was imported and analysed
-    'recording:show': 'command'            // { parsed, fileName } analyse a recording that the project view decoded (it was not imported)
+    'recording:show': 'command',           // { parsed, fileName } analyse a recording that the project view decoded (it was not imported)
+    'project:changed': 'change',           // the working project changed (LSAs, recordings, names or the active ones)
+    'project:selectLsa': 'command',        // { id } show another LSA of the project
+    'project:selectRecording': 'command',  // { id } show another recording of the active LSA
+    'project:addRecording': 'command',     // { file } import a CSV file as a new recording of the active LSA
+    'project:newLsa': 'command',           // { file } import a CSV file as the first recording of a new LSA
+    'project:rename': 'command',           // { kind: 'lsa' | 'recording', id, name }
+    'project:remove': 'command'            // { kind: 'lsa' | 'recording', id }
   };
   const PROVIDERS = {
     formulaColumns: 'synthetic detector columns of the formula builder, [{index, kuerzel, name, beschreibung, rawSeries}]',
@@ -65,9 +72,11 @@ GZ.define('state', { layer: 'store', deps: ['detectors', 'logs', 'topology'] }, 
     'nodeConfig:get': '() -> the node configuration object of the master data tab, or null',
     'nodeConfig:apply': '(config) -> { loaded, notes, skipped, message, warn }',
     'cycleConfig:get': '() -> the configuration file object of the cycle check, or null',
-    'cycleConfig:apply': '(config) -> { notes, skipped, text }',
+    'cycleConfig:apply': '(config, { sameLsa }?) -> { notes, skipped, text }',
     'statsColumns:get': '() -> the columns of the cycle statistics, [{ label, expr }]',
-    'statsColumns:apply': '(list) -> the number of columns that the view took over'
+    'statsColumns:apply': '(list) -> the number of columns that the view took over',
+    projectOverview: '() -> null or { name, lsas: [{ id, name, nodeNo, active, recordings: [{ id, name, rowCount, tMin, tMax, active }] }] }',
+    importGuard: '() -> true when a new import may replace the working project. It asks the user when the project has unsaved work with several recordings.'
   };
 
   const listeners = new Map();   // topic -> [fn]

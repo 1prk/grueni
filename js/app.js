@@ -2,7 +2,7 @@
    It also controls the analysis across the three technical views.
    It runs fully local in the browser. The application sends no data.
    The code has no fetch or XHR. The document has no external resources. */
-GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser', 'sampleData', 'segments', 'snackbar', 'state', 'stats', 'views.formulaBuilder', 'views.gruenzeitanalyse', 'views.logBar', 'views.oepnvQa', 'views.phasenauswertung', 'views.project', 'views.stammdatenLsa', 'views.stammdatenTopologie', 'views.umlaufpruefung', 'views.umlaufstatistiken', 'views.wartezeit'] }, function (GZ) {
+GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser', 'sampleData', 'segments', 'snackbar', 'state', 'stats', 'views.formulaBuilder', 'views.gruenzeitanalyse', 'views.logBar', 'views.oepnvQa', 'views.phasenauswertung', 'views.project', 'views.projectPanel', 'views.stammdatenLsa', 'views.stammdatenTopologie', 'views.umlaufpruefung', 'views.umlaufstatistiken', 'views.wartezeit'] }, function (GZ) {
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
 
@@ -178,9 +178,13 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
     GZ.views.umlaufpruefung.init(document.getElementById('tab-up'));
     GZ.views.umlaufstatistiken.init(document.getElementById('tab-us'));
     GZ.views.project.init(document.getElementById('projectBar'));
+    GZ.views.projectPanel.init(document.getElementById('projectBar'));
 
-    document.getElementById('btnAnalyze').addEventListener('click', analyze);
+    // A new import replaces the working project. The project view asks the user when work could get lost.
+    const mayReplaceProject = () => GZ.state.request('importGuard') !== false;
+    document.getElementById('btnAnalyze').addEventListener('click', () => { if (mayReplaceProject()) analyze(); });
     document.getElementById('btnSample').addEventListener('click', () => {
+      if (!mayReplaceProject()) return;
       els.rawInput.value = GZ.sampleData.generateSampleText();
       analyze('Beispieldaten');
       loadLogText(GZ.sampleData.generateSampleLog(), 'Beispiel-Log');
@@ -201,6 +205,7 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
     document.getElementById('fileInput').addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
+      if (!mayReplaceProject()) { e.target.value = ''; return; }
       clearError();
       const previousSummary = els.dataPanelSummary.innerHTML;
       els.rawInput.value = '';
