@@ -3,7 +3,7 @@
    Each track has one tick for each detected detector edge. Both tracks share one time axis.
    The view does not depend on the pairing logic of registration and deregistration.
    It is for a quick visual check of the raw data. */
-(function (GZ) {
+GZ.define('charts.oepnvRawPointsChart', { layer: 'ui', deps: ['charts.timelineLane', 'format'] }, function (GZ) {
   'use strict';
   const { fmtTimeShort } = GZ.format;
   const { renderTimeAxis } = GZ.charts.timelineLane;
@@ -28,6 +28,5 @@
     renderTimeAxis(axisEl, tMin, tMax);
   }
 
-  GZ.charts = GZ.charts || {};
-  GZ.charts.oepnvRawPointsChart = { render };
-})(window.GZ = window.GZ || {});
+  return { render };
+});

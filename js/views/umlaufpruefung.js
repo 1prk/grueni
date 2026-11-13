@@ -31,7 +31,7 @@
    - A cycle window (as in the signal time diagram) limits the number of DOM and SVG nodes that
      the code renders at the same time.
      So the view stays smooth also for very long recordings (thousands of cycles). */
-(function (GZ) {
+GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 'charts.timelineLane', 'configIO', 'exprEngine', 'format', 'greenTime', 'logs', 'oepnvLogic', 'parser', 'phases', 'segments', 'snackbar', 'state'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs, fmtTimeShort } = GZ.format;
   const {
@@ -131,6 +131,10 @@
     els.logFilter.addEventListener('change', render);
     els.logFilterLevel.addEventListener('change', render);
 
+    // Other views tell the store when formula columns, key figures or phases change.
+    GZ.state.on('syntheticColumns:changed', refreshSyntheticColumns);
+    GZ.state.on('phases:changed', refreshSyntheticColumns);
+
     // Buttons inside the cycle list: expand or shorten an irregular cycle, and close a jump note.
     els.rows.addEventListener('click', e => {
       const close = e.target.closest('button.up-jump-close');
@@ -194,10 +198,10 @@
   // Results of the formula builder (see formulaBuilder.js).
   // This is read-only access.
   // The code does NOT change the shared analysis (the same pattern as
-  // GZ.views.oepnvQa.getRowsForSg).
-  // The result is empty as long as no formulas are calculated or the module is not loaded (yet).
+  // the provider 'oepnvRows').
+  // The result is empty as long as no formulas are calculated or no view provides them (yet).
   function formulaCols() {
-    return GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getSyntheticColumns() : [];
+    return GZ.state.request('formulaColumns') || [];
   }
 
   // Key figures of Umlaufstatistiken (see umlaufstatistiken.js).
@@ -207,7 +211,7 @@
   // They have no rawSeries for each row.
   // They have valuesByCycleIdx, which is one value for each cycle index.
   function kennzahlCols() {
-    return GZ.views.umlaufstatistiken ? GZ.views.umlaufstatistiken.getSyntheticColumns() : [];
+    return GZ.state.request('kennzahlColumns') || [];
   }
 
   // Display of a key figure value on the track (bar label and tooltip) and in the legend.
@@ -405,8 +409,8 @@
 
     panel.querySelector('.up-pue-close').addEventListener('click', () => { openPueDetail = null; render(); });
     panel.querySelector('.up-pue-edit').addEventListener('click', () => {
-      GZ.app.switchTab('sd');
-      if (GZ.views.stammdatenLsa) GZ.views.stammdatenLsa.jumpToTransition(fromPhaseId, toPhaseId);
+      GZ.state.command('nav:switchTab', { tab: 'sd' });
+      GZ.state.command('transition:show', { fromPhaseId, toPhaseId });
     });
   }
 
@@ -807,7 +811,7 @@
       version: 1,
       fingerprint: GZ.configIO.buildFingerprint(a),
       umlaufpruefung: getConfig(),
-      formulaBuilder: GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getConfig() : null
+      formulaBuilder: GZ.state.request('formulaConfig:get') || null
     };
     GZ.configIO.downloadJson('umlaufpruefung_konfiguration.json', cfg);
   }
@@ -838,7 +842,8 @@
     // Apply and calculate the formulas FIRST.
     // So applyConfig() below can find the saved FORMEL selections in the detector list and filter
     // list that the code already updated.
-    const formulaSkipped = GZ.views.formulaBuilder ? GZ.views.formulaBuilder.applyConfig(cfg.formulaBuilder).skipped : [];
+    const applied = GZ.state.request('formulaConfig:apply', cfg.formulaBuilder);
+    const formulaSkipped = applied ? applied.skipped : [];
     const upSkipped = applyConfig(cfg.umlaufpruefung).skipped;
 
     const allSkipped = formulaSkipped.concat(upSkipped);
@@ -1025,7 +1030,7 @@
   // detector segments), for the sweep of each cycle window.
   // See computeOepnvEvents (GZ.oepnvLogic) for the logic.
   function buildFzRowsForSg(sgIdx, times, seriesByCol, splValues) {
-    const oepnvRows = GZ.views.oepnvQa ? GZ.views.oepnvQa.getRowsForSg(sgIdx) : [];
+    const oepnvRows = GZ.state.request('oepnvRows', sgIdx) || [];
     return oepnvRows.map(orow => {
       const anOccupied = times.map((_, i) => orow.anDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
       const abOccupied = times.map((_, i) => orow.abDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
@@ -1180,8 +1185,7 @@
     // Here objKey() counts signal groups by their position in the allStats array.
     // The two counts are the same only by chance (see the comment there).
     const highlightsByObjKey = new Map();
-    const formulaHighlights = (GZ.views.formulaBuilder && GZ.views.formulaBuilder.getFormulaHighlights)
-      ? GZ.views.formulaBuilder.getFormulaHighlights() : [];
+    const formulaHighlights = GZ.state.request('formulaHighlights') || [];
     if (formulaHighlights.length) {
       const targetKeyByName = new Map(objsNow.map(o => [o.kuerzel + '|' + o.name, objKey(o)]));
       formulaHighlights.forEach(h => {
@@ -1723,7 +1727,7 @@
   function jumpTo(t, entry) {
     const a = GZ.state.data.currentAnalysis;
     if (!a || !a.cycleStarts || a.cycleStarts.length < 2) return;
-    if (t < a.tMin || t > a.tMax) return;   // outside the recording: no cycle (see GZ.app.jumpToLog)
+    if (t < a.tMin || t > a.tMax) return;   // outside the recording: no cycle (see jumpToLog in app.js)
     const hasSg = [...els.objList.querySelectorAll('.obj-row input:checked')].some(cb => cb.closest('.obj-row').dataset.key.startsWith('SG|'));
     if (!hasSg) {
       els.objList.querySelectorAll('.obj-row').forEach(row => { if (row.dataset.key.startsWith('SG|')) row.querySelector('input').checked = true; });
@@ -1732,6 +1736,5 @@
     render();
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.umlaufpruefung = { init, populateControls, render, refreshSyntheticColumns, jumpTo };
-})(window.GZ = window.GZ || {});
+  return { init, populateControls, render, refreshSyntheticColumns, jumpTo };
+});

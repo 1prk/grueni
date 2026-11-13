@@ -8,7 +8,7 @@
    The user can evaluate each section for the whole recording, for each signal plan (SPL) or for
    each clock hour.
    Log markers appear in the time charts. */
-(function (GZ) {
+GZ.define('views.gruenzeitanalyse', { layer: 'views', deps: ['charts.kit', 'charts.logMarkers', 'charts.report', 'format', 'greenTime', 'logs', 'slices', 'state'] }, function (GZ) {
   'use strict';
   const { esc, fmtNum, fmtTimeShort, fmtHoursMinutes, fmtDauer, fmtTs } = GZ.format;
   const GT = GZ.greenTime;
@@ -26,6 +26,8 @@
   const sgIndex = sg => sg.col.index;
 
   function init(root) {
+    // The master data view tells the store when the phases change.
+    GZ.state.on('phases:changed', refresh);
     els = {
       root,
       context: root.querySelector('#gzContext'),
@@ -55,7 +57,7 @@
     // A dark period in the list opens its start in the cycle check.
     root.addEventListener('click', e => {
       const b = e.target.closest('button[data-jump-t]');
-      if (b) GZ.app.jumpToTime(Number(b.dataset.jumpT));
+      if (b) GZ.state.command('nav:jumpToTime', { t: Number(b.dataset.jumpT) });
     });
     els.scopeGroup.addEventListener('click', e => {
       const b = e.target.closest('button[data-scope]');
@@ -134,7 +136,7 @@
       tMin: a.tMin, tMax: a.tMax, height: 158, yMin, yMax,
       bands, dividers: runs.slice(1).map(r => r.t0),
       steps: regular.map(c => ({ t0: c.t, t1: c.t + c.tu * 1000, y: c.tu, tip: `Umlauf ${c.i + 1} · ${fmtTimeShort(c.t)}<br>TU ${fmtNum(c.tu)} s · ${esc(GZ.slices.planLabel(c.plan))}` })),
-      logs: GZ.logs.visible(a.tMin, a.tMax)
+      logs: GZ.logs.visible(a.tMin, a.tMax), drawLogs: GZ.charts.logMarkers.draw
     });
   }
 
@@ -250,7 +252,7 @@
     kit.timeChart(host, {
       tMin: a.tMin, tMax: a.tMax, height, yMin: 0, yMax, yStep: yMax <= 30 ? 5 : (yMax > 100 ? 20 : 10),
       bands, dividers: runs.slice(1).map(r => r.t0), hours: state.scope === 'hour' ? slices.hours.map(h => h.t0) : [],
-      windows, points, crosses, logs: GZ.logs.visible(a.tMin, a.tMax)
+      windows, points, crosses, logs: GZ.logs.visible(a.tMin, a.tMax), drawLogs: GZ.charts.logMarkers.draw
     });
   }
 
@@ -486,6 +488,5 @@
     renderAll();
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.gruenzeitanalyse = { init, onAnalyzeComplete, refresh, exportStatsCSV };
-})(window.GZ = window.GZ || {});
+  return { init, onAnalyzeComplete, refresh, exportStatsCSV };
+});

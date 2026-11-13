@@ -45,7 +45,7 @@
    The span exists only if the WHOLE column expression is exactly one of these primitive calls.
    It does not exist if the call is part of a calculation.
    In that case, spans stays null and the track in Umlaufprüfung uses the full row width. */
-(function (GZ) {
+GZ.define('views.umlaufstatistiken', { layer: 'views', deps: ['exprEditor', 'exprEngine', 'format', 'state', 'stats', 'umlaufContext', 'xlsxWriter'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs, fmtTimeShort } = GZ.format;
   const { mean, median, stdDev, percentile } = GZ.stats;
@@ -119,6 +119,7 @@
   }
 
   function init(root) {
+    GZ.state.provide('kennzahlColumns', getSyntheticColumns);
     els = {
       root,
       addColBtn: root.querySelector('#usAddColBtn'),
@@ -467,11 +468,9 @@
 
     // Umlaufprüfung shows the valid columns as a separate KENNZAHL track for each cycle (see
     // getSyntheticColumns() below).
-    // After each new calculation, refresh the object list and the render there.
-    // The pattern is the same as berechnen() in formulaBuilder.js.
-    // The guard is necessary because Umlaufprüfung can initialize before or after this module at
-    // start-up.
-    if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
+    // After each new calculation, the cycle check must refresh its object list and its render.
+    // The store tells it (the same pattern as berechnen() in formulaBuilder.js).
+    GZ.state.commit('syntheticColumns:changed');
   }
 
   // Read access for umlaufpruefung.js (see kennzahlCols() there).
@@ -654,6 +653,5 @@
     URL.revokeObjectURL(url);
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.umlaufstatistiken = { init, populateControls, recompute, getSyntheticColumns };
-})(window.GZ = window.GZ || {});
+  return { init, populateControls, recompute };
+});

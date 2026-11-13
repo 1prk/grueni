@@ -41,7 +41,7 @@
    The module attaches to rowEl.querySelector('.expr-input-wrap'):
      wrap.__exprRefreshHighlight(errPos): an outside caller (validation) uses it to add an error
      position (red wavy line) later. */
-(function (GZ) {
+GZ.define('exprEditor', { layer: 'ui', deps: ['exprEngine', 'format'] }, function (GZ) {
   'use strict';
   const { esc } = GZ.format;
 
@@ -497,5 +497,5 @@
     refresh(null, { preserveCaret: false });
   }
 
-  GZ.exprEditor = { setup };
-})(window.GZ = window.GZ || {});
+  return { setup };
+});

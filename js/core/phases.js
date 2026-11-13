@@ -7,7 +7,7 @@
    This file uses the existing green segments (stats.greens of each member signal group).
    It finds WHEN a defined phase was fully shown in the recording.
    This is pure evaluation logic and does not depend on the DOM. */
-(function (GZ) {
+GZ.define('phases', { layer: 'domain', deps: ['segments', 'stats'] }, function (GZ) {
   'use strict';
 
   // Categorical color palette for each phase.
@@ -740,7 +740,7 @@
     return out;
   }
 
-  GZ.phases = {
+  return {
     PHASE_COLORS, colorForIndex, intersectIntervals, unionIntervals, subtractIntervals, createPhase, createPhaseFromConfig,
     computePhaseOccurrences, filterAbortedOccurrences, buildCombinedSegments, durationPerCycle,
     pueLabelFor, buildAnnotatedSegments, listDistinctTransitions, cycleIdxAtTime,
@@ -749,4 +749,4 @@
     ensurePueOverride, setPueOverrideRowField, setPueOverrideRowAlways, addPueOverrideRow, removePueOverrideRow, sortPueOverrideRows, resetPueOverride,
     setPueOverrideEndSec, buildRowDisplaySegs
   };
-})(window.GZ = window.GZ || {});
+});

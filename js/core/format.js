@@ -1,6 +1,6 @@
 /* GZ.format formats times and numbers. It also escapes HTML.
    The functions are pure. They do not use the DOM or an analysis. */
-(function (GZ) {
+GZ.define('format', { layer: 'domain', deps: [] }, function (GZ) {
   'use strict';
 
   function esc(s) {
@@ -50,5 +50,5 @@
     return `${Math.floor(m / 60)}:${pad(m % 60)} h`;
   }
 
-  GZ.format = { esc, pad, fmtTs, fmtDate, fmtTimeOnly, fmtTimeShort, fmtDauer, fmtNum, fmtHm, fmtHoursMinutes };
-})(window.GZ = window.GZ || {});
+  return { esc, pad, fmtTs, fmtDate, fmtTimeOnly, fmtTimeShort, fmtDauer, fmtNum, fmtHm, fmtHoursMinutes };
+});

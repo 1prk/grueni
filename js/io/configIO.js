@@ -7,7 +7,7 @@
    They are never the raw column index.
    An index is stable only inside one parsed CSV.
    A name stays stable across new exports of the same installation. */
-(function (GZ) {
+GZ.define('configIO', { layer: 'io', deps: [] }, function (GZ) {
   'use strict';
 
   function buildFingerprint(a) {
@@ -50,5 +50,5 @@
     });
   }
 
-  GZ.configIO = { buildFingerprint, fingerprintMatches, downloadJson, readJsonFile };
-})(window.GZ = window.GZ || {});
+  return { buildFingerprint, fingerprintMatches, downloadJson, readJsonFile };
+});

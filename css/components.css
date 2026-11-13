@@ -347,7 +347,7 @@ tr.oe-hidden{ display:none; }
 /* ---------- Cycle check: expression editor (error marking, autocomplete, function palette)
    ----------
    It uses contenteditable and not <input>, to color the tokens live. See the header comment of
-   js/core/exprEditor.js.
+   js/ui/exprEditor.js.
    An earlier overlay trick used an invisible <input> over a colored <div>. It had a structural
    flaw:
    some browsers rendered the text selection visibly in spite of color:transparent.
@@ -395,7 +395,7 @@ tr.oe-hidden{ display:none; }
 /* Text literal ("..." or '...'), for example for the public transport row filter (SPL
    comparison). */
 .expr-tok-text{ color:var(--sig-redyellow); font-weight:600; }
-/* Known identifier with its own accent color (hook identColorFor() in js/core/exprEditor.js).
+/* Known identifier with its own accent color (hook identColorFor() in js/ui/exprEditor.js).
    It replaces the generic variable color.
    For example a referenced formula has the same color as its own row in formulaBuilder.js (see
    formulaColorFor()). */

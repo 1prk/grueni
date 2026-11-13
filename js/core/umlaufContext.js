@@ -47,7 +47,7 @@
    The code adds them to the shared cycleMetrics object of a detector or value as the fields
    triggered and count.
    They come in addition to an, ab, tf, rotgelb and gelb (see detCycleMetricsForRow()). */
-(function (GZ) {
+GZ.define('umlaufContext', { layer: 'domain', deps: ['parser', 'segments', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const {
     computeGlobalTU, computeCycleSgEvents, computeCycleDetMetrics, findSplAt,
@@ -214,5 +214,5 @@
     return { index, cycles };
   }
 
-  GZ.umlaufContext = { buildIdentifierIndex, buildAll };
-})(window.GZ = window.GZ || {});
+  return { buildIdentifierIndex, buildAll };
+});

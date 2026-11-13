@@ -7,7 +7,7 @@
    Examples: "Calculate" is blocked or skipped, or a configuration loads only in part.
    Do not use a toast for the live validation of single rows.
    The inline status dots and tooltips do that. A toast for each key press is too much. */
-(function (GZ) {
+GZ.define('snackbar', { layer: 'ui', deps: [] }, function (GZ) {
   'use strict';
 
   let container = null;
@@ -63,5 +63,5 @@
     return { close };
   }
 
-  GZ.snackbar = { show };
-})(window.GZ = window.GZ || {});
+  return { show };
+});

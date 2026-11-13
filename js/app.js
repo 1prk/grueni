@@ -2,7 +2,7 @@
    It also controls the analysis across the three technical views.
    It runs fully local in the browser. The application sends no data.
    The code has no fetch or XHR. The document has no external resources. */
-(function (GZ) {
+GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser', 'sampleData', 'segments', 'snackbar', 'state', 'stats', 'views.formulaBuilder', 'views.gruenzeitanalyse', 'views.logBar', 'views.oepnvQa', 'views.phasenauswertung', 'views.stammdatenLsa', 'views.stammdatenTopologie', 'views.umlaufpruefung', 'views.umlaufstatistiken', 'views.wartezeit'] }, function (GZ) {
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
 
@@ -32,14 +32,10 @@
 
   // A time outside the recording has no cycle. The application refuses a jump to it and shows a
   // message.
-  function inRecording(t) {
-    const a = GZ.state.data.currentAnalysis;
-    return !!a && t >= a.tMin && t <= a.tMax;
-  }
   function refuseOutside(t) {
     const a = GZ.state.data.currentAnalysis;
     if (!a) { GZ.snackbar.show('Keine Aufzeichnung geladen', { type: 'warning' }); return true; }
-    if (inRecording(t)) return false;
+    if (GZ.state.inRecording(t)) return false;
     const f = GZ.format.fmtTs;
     GZ.snackbar.show('Außerhalb der Aufzeichnung', { type: 'warning', description: `${f(new Date(t))} liegt nicht im Zeitraum ${f(new Date(a.tMin))} – ${f(new Date(a.tMax))}.` });
     return true;
@@ -157,6 +153,11 @@
     els.dataPanelHead = document.getElementById('dataPanelHead');
     els.dataPanelSummary = document.getElementById('dataPanelSummary');
 
+    // The views ask for navigation through the store.
+    GZ.state.on('nav:switchTab', p => switchTab(p.tab));
+    GZ.state.on('nav:jumpToTime', p => jumpToTime(p.t));
+    GZ.state.on('nav:jumpToLog', p => jumpToLog(p.entry));
+
     GZ.views.logBar.init(refreshActiveTab);
     GZ.views.gruenzeitanalyse.init(document.getElementById('tab-gz'));
     GZ.views.stammdatenLsa.init(document.getElementById('tab-sd'));
@@ -224,5 +225,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', init);
-  GZ.app = { switchTab, analyze, refreshActiveTab, jumpToLog, jumpToTime, inRecording };
-})(window.GZ = window.GZ || {});
+  return { switchTab, analyze, refreshActiveTab };
+});

@@ -3,7 +3,7 @@
    shared time axis.
    It builds the track rows (label, An, Ab, TF, track) again in each render.
    The data is small, so a diff gives no benefit. */
-(function (GZ) {
+GZ.define('charts.timelineChart', { layer: 'ui', deps: ['charts.timelineLane', 'format', 'segments'] }, function (GZ) {
   'use strict';
   const { fmtTimeShort, esc } = GZ.format;
   const { computeSplTransitions, computeSignalplanRow, computeSegmentAnAbTf } = GZ.segments;
@@ -100,5 +100,5 @@
     renderTimeAxis(els.axisSvgEl, wMin, wMax);
   }
 
-  GZ.charts.timelineChart = { render, renderSplBar };
-})(window.GZ = window.GZ || {});
+  return { render, renderSplBar };
+});

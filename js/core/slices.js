@@ -3,7 +3,7 @@
    one clock hour.
    An item belongs to a slice by its start time.
    The functions are pure. They do not use the DOM. */
-(function (GZ) {
+GZ.define('slices', { layer: 'domain', deps: ['format'] }, function (GZ) {
   'use strict';
   const { pad } = GZ.format;
 
@@ -92,5 +92,5 @@
     return PLAN_COLORS[slices.plans.indexOf(slice) % PLAN_COLORS.length];
   }
 
-  GZ.slices = { MAX_HOUR_SLICES, UNKNOWN_PLAN, build, forScope, contains, planRuns, colorOf, planLabel, startOfHour };
-})(window.GZ = window.GZ || {});
+  return { MAX_HOUR_SLICES, UNKNOWN_PLAN, build, forScope, contains, planRuns, colorOf, planLabel, startOfHour };
+});

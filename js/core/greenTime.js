@@ -9,7 +9,7 @@
    - "actuated" (verkehrsabhängig): the green time changes.
    A signal group is fixed when at least `fixedShare` percent of its green times
    are within the median ± `tolerance` seconds. */
-(function (GZ) {
+GZ.define('greenTime', { layer: 'domain', deps: ['segments', 'slices', 'stats'] }, function (GZ) {
   'use strict';
   const { median, mean, stdDev } = GZ.stats;
   // GZ.stats.percentile needs a sorted array. This function sorts a copy.
@@ -166,8 +166,8 @@
     return 'Beginn und Ende variabel';
   }
 
-  GZ.greenTime = {
+  return {
     MIN_GREENS, IRREGULAR_CYCLE_FACTOR, params, build, stats, plantActuated, plantHasData, cycleTimes, cyclesInSlice, behaviour,
     mean, percentile
   };
-})(window.GZ = window.GZ || {});
+});

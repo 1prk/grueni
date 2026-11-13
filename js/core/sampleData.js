@@ -14,7 +14,7 @@
    - IS9: counting loop. It belongs to no signal group.
    The module also generates a matching synthetic log file ("Beispiel-Log").
    None of the data is measured data. */
-(function (GZ) {
+GZ.define('sampleData', { layer: 'domain', deps: ['format'] }, function (GZ) {
   'use strict';
   const { fmtDate, fmtTimeOnly, pad } = GZ.format;
 
@@ -201,5 +201,5 @@
     return ['Stufe;Zeit;Text;Quelle;Nr'].concat(rows.map((r, i) => `${r[1]};${stamp(r[0])};${r[2]};Steuergerät;${1000 + i}`)).join('\n');
   }
 
-  GZ.sampleData = { generateSampleText, generateSampleLog };
-})(window.GZ = window.GZ || {});
+  return { generateSampleText, generateSampleLog };
+});

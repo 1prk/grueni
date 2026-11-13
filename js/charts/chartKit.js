@@ -2,7 +2,7 @@
    wait time tab.
    It uses plain SVG and no d3.
    One generic time chart (`timeChart`) and one generic CDF chart (`cdfChart`) serve both tabs. */
-(function (GZ) {
+GZ.define('charts.kit', { layer: 'ui', deps: ['format'] }, function (GZ) {
   'use strict';
   const { esc, pad } = GZ.format;
 
@@ -101,6 +101,7 @@
        points:   [{ t, y, color, r, tip }]
        crosses:  [{ t, tip }]                      "no green in this cycle" marks on the baseline
        logs:     [log entries]                     drawn as marker lane
+       drawLogs: function (svg, args)              draws the marker lane (GZ.charts.logMarkers.draw). Needed when logs is set.
        yUnit: 's'
      } */
   function timeChart(host, o) {
@@ -166,7 +167,7 @@
       if (p.onClick) { dot.style.cursor = 'pointer'; dot.addEventListener('click', p.onClick); }
     });
 
-    if (logLane) GZ.charts.logMarkers.draw(svg, { x, entries: o.logs, laneTop: plotBottom + 8, plotTop: m.t, plotBottom, left: m.l, right: W - m.r });
+    if (logLane && o.drawLogs) o.drawLogs(svg, { x, entries: o.logs, laneTop: plotBottom + 8, plotTop: m.t, plotBottom, left: m.l, right: W - m.r });
     return svg;
   }
 
@@ -206,6 +207,5 @@
     return svg;
   }
 
-  GZ.charts = GZ.charts || {};
-  GZ.charts.kit = { el, text, createSvg, hostWidth, showTooltip, hideTooltip, attachTooltip, timeTicks, drawTimeAxis, niceStep, timeChart, cdfChart, esc };
-})(window.GZ = window.GZ || {});
+  return { el, text, createSvg, hostWidth, showTooltip, hideTooltip, attachTooltip, timeTicks, drawTimeAxis, niceStep, timeChart, cdfChart, esc };
+});

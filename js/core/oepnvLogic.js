@@ -8,7 +8,7 @@
    (Zwangslöschzeit)
    has passed without a deregistration.
    The LOS (A to F) rates the lost time. */
-(function (GZ) {
+GZ.define('oepnvLogic', { layer: 'domain', deps: ['wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { wzIstBelegt, txAtTime, auslosenderDetektor } = GZ.wartezeitLogic;
 
@@ -93,9 +93,9 @@
     return { events, unresolved };
   }
 
-  GZ.oepnvLogic = {
+  return {
     LOS_LEVELS, losDefaultBounds, sollfahrzeitDefault, zwangsloeschDefault,
     losStufe, risingEdgeTimes, computeOepnvEvents,
     wzIstBelegt, txAtTime, auslosenderDetektor
   };
-})(window.GZ = window.GZ || {});
+});

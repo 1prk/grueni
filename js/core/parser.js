@@ -2,7 +2,7 @@
    Lines 1 to 7 are the header. The measurement data starts at line 8.
    The parser also translates raw values into signal image categories.
    For the table layout, see the reference "ocit-tabellenstruktur". */
-(function (GZ) {
+GZ.define('parser', { layer: 'domain', deps: ['stats'] }, function (GZ) {
   'use strict';
 
   const STATE_CAT = {
@@ -239,10 +239,10 @@
     return { columns, otherColumns, times, seriesByCol, splValues, tcValues, totalRows: dataRows.length, skippedRows, knotenName, knotenNr, cycleStarts };
   }
 
-  GZ.parser = {
+  return {
     STATE_CAT, CAT_LABEL, TYPNAME_TO_KUERZEL, DETECTOR_NAME_RE,
     parseOcitText, parseTimestamp, looksLikeTimeOnly, splitLine, analyzeHeader,
     extractLabeledValue, findColumnByLabel, estimateStep,
     categorizeSgRaw, categorizeDetRaw
   };
-})(window.GZ = window.GZ || {});
+});

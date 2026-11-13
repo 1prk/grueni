@@ -1,7 +1,7 @@
 /* GZ.segments has state segments, cycle and SPL statistics and derived signal plan values (An,
    Ab, TF).
    It works on the raw series that GZ.parser gives. It does not depend on the DOM. */
-(function (GZ) {
+GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (GZ) {
   'use strict';
   const { median, mean } = GZ.stats;
   const { categorizeSgRaw } = GZ.parser;
@@ -596,7 +596,7 @@
     };
   }
 
-  GZ.segments = {
+  return {
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
     findSplAt, makeRawValueSampler, makeSegmentDurationSampler, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
@@ -604,4 +604,4 @@
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
     computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep, makePointSegmentSweep
   };
-})(window.GZ = window.GZ || {});
+});

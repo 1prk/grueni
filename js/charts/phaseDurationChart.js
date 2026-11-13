@@ -4,7 +4,7 @@
    It compares the phase durations cycle by cycle.
    A time-series scatter chart is not used. For phases, the link to the cycle is more useful than
    the point in time. */
-(function (GZ) {
+GZ.define('charts.phaseDurationChart', { layer: 'ui', deps: ['charts.tooltipHelper'] }, function (GZ) {
   'use strict';
 
   // opts: {umlaufNumbers:number[], phases:[{id,label,color}],
@@ -81,6 +81,5 @@
     return true;
   }
 
-  GZ.charts = GZ.charts || {};
-  GZ.charts.phaseDurationChart = { render };
-})(window.GZ = window.GZ || {});
+  return { render };
+});

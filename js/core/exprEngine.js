@@ -73,7 +73,7 @@
    The caller advances advance(t) once for each row BEFORE each run() call (formulaBuilder.js
    berechnen()).
    The primitives read only sweep.segment() and sweep.time(). */
-(function (GZ) {
+GZ.define('exprEngine', { layer: 'domain', deps: [] }, function (GZ) {
   'use strict';
 
   // incomplete: the expression is not WRONG, it is (not yet) NOT FINISHED.
@@ -913,5 +913,5 @@
   // So formulaBuilder.js builds syntax highlighting, autocomplete and the function palette
   // on the same lexer and the same list of primitives.
   // It does not duplicate them in the UI layer (single source of truth).
-  GZ.exprEngine = { compile, compileValue, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS, argRangesFor };
-})(window.GZ = window.GZ || {});
+  return { compile, compileValue, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS, argRangesFor };
+});

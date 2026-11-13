@@ -2,7 +2,7 @@
    trend charts and wait time charts.
    The tooltip follows the cursor.
    At the edges of the container it flips to the other side. It is not cut off. */
-(function (GZ) {
+GZ.define('charts.tooltipHelper', { layer: 'ui', deps: [] }, function (GZ) {
   'use strict';
 
   function attach(containerEl, tooltipEl) {
@@ -22,6 +22,5 @@
     return { show, move, hide };
   }
 
-  GZ.charts = GZ.charts || {};
-  GZ.charts.tooltipHelper = { attach };
-})(window.GZ = window.GZ || {});
+  return { attach };
+});

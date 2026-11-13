@@ -29,7 +29,7 @@
    Typing only validates (syntax and types, no data evaluation).
    Only "Berechnen" evaluates over all TX.
    For each valid formula, it gives one boolean raw series.
-   umlaufpruefung.js adds it through getSyntheticColumns() as an additional detector column with
+   umlaufpruefung.js reads it from the store (provider 'formulaColumns') and adds it as an additional detector column with
    a different color (short name FORMEL).
 
    Formulas can reference OTHER formulas directly by name (for example "M1 AND NOT R1", if "M1"
@@ -59,7 +59,7 @@
    - as a highlight color on an object track, if a highlight target is set (see
      getFormulaHighlights()).
    So the user can recognize a formula everywhere. */
-(function (GZ) {
+GZ.define('views.formulaBuilder', { layer: 'views', deps: ['exprEditor', 'exprEngine', 'format', 'parser', 'segments', 'snackbar', 'state', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { esc } = GZ.format;
   const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler, makeSegmentDurationSampler } = GZ.segments;
@@ -235,6 +235,11 @@
   }
 
   function init(root) {
+    // Other views read the results through the store.
+    GZ.state.provide('formulaColumns', getSyntheticColumns);
+    GZ.state.provide('formulaHighlights', getFormulaHighlights);
+    GZ.state.provide('formulaConfig:get', getConfig);
+    GZ.state.provide('formulaConfig:apply', applyConfig);
     els = {
       root,
       varRows: root.querySelector('#upVarRows'),
@@ -662,7 +667,7 @@
           f.highlightCol = optEl.dataset.col === '' ? null : Number(optEl.dataset.col);
           closeAllHlPopovers();
           renderFormulaRows();
-          if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
+          GZ.state.commit('syntheticColumns:changed');
         };
       });
       GZ.exprEditor.setup(rowEl, {
@@ -1109,7 +1114,7 @@
       });
     }
 
-    if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
+    GZ.state.commit('syntheticColumns:changed');
   }
 
   // Read access for umlaufpruefung.js.
@@ -1212,6 +1217,5 @@
     return { skipped };
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.formulaBuilder = { init, populateControls, getSyntheticColumns, getFormulaHighlights, getConfig, applyConfig };
-})(window.GZ = window.GZ || {});
+  return { init, populateControls };
+});

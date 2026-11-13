@@ -1,6 +1,6 @@
 /* GZ.stats has basic statistics helpers.
    They are purely numeric. They do not use an analysis or the DOM. */
-(function (GZ) {
+GZ.define('stats', { layer: 'domain', deps: [] }, function (GZ) {
   'use strict';
 
   function mean(a) { return a.reduce((x, y) => x + y, 0) / a.length; }
@@ -64,5 +64,5 @@
     return lo;
   }
 
-  GZ.stats = { mean, median, stdDev, detectAnomalies, percentile, parseNumListe, sortSplList, countLessOrEqual };
-})(window.GZ = window.GZ || {});
+  return { mean, median, stdDev, detectAnomalies, percentile, parseNumListe, sortSplList, countLessOrEqual };
+});

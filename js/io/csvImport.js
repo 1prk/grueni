@@ -19,7 +19,7 @@
    - The importer removes a byte order mark at the start. A file read does the same.
    - The importer decodes bytes that are not valid UTF-8 for each cell. It does not decode the
      whole file at once. */
-(function (GZ) {
+GZ.define('csvImport', { layer: 'io', deps: ['parser', 'table'] }, function (GZ) {
   'use strict';
   const P = GZ.parser;
   const T = GZ.table;
@@ -374,5 +374,5 @@
     return imp.finish();
   }
 
-  GZ.csvImport = { Importer, importBytes, importText, importFile };
-})(window.GZ = window.GZ || {});
+  return { Importer, importBytes, importText, importFile };
+});

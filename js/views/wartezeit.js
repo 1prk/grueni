@@ -5,7 +5,7 @@
    3  Wait times over time or as CDF (whole recording, for each signal plan, for each hour)
    4  The longest waits (with log lines around them, if a log is loaded)
    GZ.wartezeitLogic.computeWartezeitEvents does the calculation. */
-(function (GZ) {
+GZ.define('views.wartezeit', { layer: 'views', deps: ['charts.kit', 'charts.logMarkers', 'charts.report', 'detectors', 'format', 'logs', 'segments', 'slices', 'state', 'stats', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { esc, fmtNum, fmtTs, fmtTimeShort } = GZ.format;
   const D = GZ.detectors;
@@ -30,6 +30,8 @@
   const entryOf = idx => analysis().allStats.find(s => s.col.index === idx);
 
   function init(root) {
+    // The master data view tells the store when it changes the detector assignment.
+    GZ.state.on('detectors:changed', populate);
     els = {
       root,
       context: root.querySelector('#wzContext'),
@@ -328,7 +330,7 @@
     kit.timeChart(host, {
       tMin: a.tMin, tMax: a.tMax, height, yMin: 0, yMax, yStep: yMax > 100 ? 30 : 20,
       bands, dividers: runs.slice(1).map(r => r.t0), hours: state.scope === 'hour' ? slices.hours.map(h => h.t0) : [],
-      hLines, windows, points, logs
+      hLines, windows, points, logs, drawLogs: GZ.charts.logMarkers.draw
     });
   }
 
@@ -393,7 +395,7 @@
         }
         return `<tr data-t="${e.reqTime}" class="${g === 'crit' ? 'event-crit' : g === 'warn' ? 'event-warn' : ''}"><td>${e.nr}</td><td>${esc(fmtTs(new Date(e.reqTime)))}</td><td>${tx ?? '–'}</td><td>${esc(fmtTs(new Date(e.greenTime)))}</td><td>${esc(e.spl)}</td><td>${fmtNum(e.waitSec, 1)} s</td><td class="left sans">${g === 'crit' ? 'Grenzwert überschritten' : g === 'warn' ? 'Warnung' : 'OK'}</td><td class="left">${esc(e.detector)}</td>${logCell}</tr>`;
       }).join('') + '</tbody>';
-    els.table4.querySelectorAll('tr[data-t]').forEach(tr => tr.addEventListener('click', () => GZ.app.jumpToTime(Number(tr.dataset.t))));
+    els.table4.querySelectorAll('tr[data-t]').forEach(tr => tr.addEventListener('click', () => GZ.state.command('nav:jumpToTime', { t: Number(tr.dataset.t) })));
     els.note4.textContent = `Die 10 längsten von ${st.n} Anforderungen, absteigend; Nr = Reihenfolge im Mitschnitt. Zeile anklicken: Umlauf in der Umlaufprüfung öffnen.` + (hasLog ? ' Die Log-Spalte zeigt Einträge von 60 s vor der Anforderung bis 60 s nach dem Grünbeginn (Tooltip: alle).' : '');
   }
 
@@ -440,6 +442,5 @@
     renderTable1(); renderTable2(); renderPicker(); renderTrend(); renderTable4();
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.wartezeit = { init, onAnalyzeComplete, populate, refresh };
-})(window.GZ = window.GZ || {});
+  return { init, onAnalyzeComplete, populate, refresh };
+});

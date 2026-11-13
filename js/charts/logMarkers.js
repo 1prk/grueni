@@ -3,7 +3,7 @@
    The color shows the highest severity of the cluster.
    Hovering shows the entries (time, level, text) and a guide line up into the chart.
    The code escapes the log text before it goes into the tooltip. */
-(function (GZ) {
+GZ.define('charts.logMarkers', { layer: 'ui', deps: ['charts.kit', 'format'] }, function (GZ) {
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
 
@@ -87,6 +87,5 @@
     });
   }
 
-  GZ.charts = GZ.charts || {};
-  GZ.charts.logMarkers = { draw, drawStrip, SEVERITY_COLOR };
-})(window.GZ = window.GZ || {});
+  return { draw, drawStrip, SEVERITY_COLOR };
+});

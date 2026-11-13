@@ -5,7 +5,7 @@
    By definition, phases are never active at the same time. The intergreen times separate them.
    So the tab shows all phases in ONE common track. Each phase has its own color.
    There is no separate track for each phase. */
-(function (GZ) {
+GZ.define('views.phasenauswertung', { layer: 'views', deps: ['charts.phaseDurationChart', 'charts.timelineChart', 'charts.timelineLane', 'format', 'phases', 'segments', 'state', 'stats'] }, function (GZ) {
   'use strict';
   const { esc, fmtDauer, fmtTimeShort } = GZ.format;
   const { mean, median } = GZ.stats;
@@ -19,6 +19,8 @@
   let win = { count: 5, startIdx: 0, showAll: false };
 
   function init(root) {
+    // The master data view tells the store when the phases change.
+    GZ.state.on('phases:changed', refresh);
     els = {
       root,
       emptyHint: root.querySelector('#paEmptyHint'),
@@ -181,6 +183,5 @@
     });
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.phasenauswertung = { init, onAnalyzeComplete, refresh };
-})(window.GZ = window.GZ || {});
+  return { init, onAnalyzeComplete, refresh };
+});

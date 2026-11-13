@@ -6,7 +6,7 @@
    The tab has a raw points view and a scatter chart for each signal group,
    combined key figures (with a breakdown for each signal group)
    and an event table that the user can sort, search and export to Excel. */
-(function (GZ) {
+GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart', 'charts.oepnvScatterChart', 'exprEditor', 'exprEngine', 'format', 'oepnvLogic', 'segments', 'state', 'stats', 'xlsxWriter'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs } = GZ.format;
   const { mean, percentile, parseNumListe } = GZ.stats;
@@ -155,6 +155,7 @@
   }
 
   function init(root) {
+    GZ.state.provide('oepnvRows', getRowsForSg);
     els = {
       root,
       addSgBtn: root.querySelector('#oeAddSgBtn'),
@@ -609,6 +610,5 @@
     URL.revokeObjectURL(url);
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.oepnvQa = { init, populateControls, recompute, getRowsForSg };
-})(window.GZ = window.GZ || {});
+  return { init, populateControls, recompute };
+});

@@ -14,7 +14,7 @@
 
    The log text can be confidential. It stays in the browser memory.
    The application does not save it, export it or send it anywhere. */
-(function (GZ) {
+GZ.define('logs', { layer: 'domain', deps: [] }, function (GZ) {
   'use strict';
 
   const DE_STAMP = /(\d{1,2})\.(\d{1,2})\.(\d{2,4}),?\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?/;
@@ -121,9 +121,13 @@
   function empty() {
     return { entries: [], fileName: '', skipped: 0, hiddenSeverities: new Set(), search: '' };
   }
+  // The holder is the object that keeps the log, in the field `log`.
+  // The store gives it with bind(). The module itself does not know the store.
+  let holder = { log: null };
+  function bind(h) { holder = h; }
   function state() {
-    if (!GZ.state.data.log) GZ.state.data.log = empty();
-    return GZ.state.data.log;
+    if (!holder.log) holder.log = empty();
+    return holder.log;
   }
   function load(text, fileName) {
     const parsed = parse(text);
@@ -132,7 +136,7 @@
     st.hiddenSeverities = new Set(); st.search = '';
     return parsed;
   }
-  function clear() { GZ.state.data.log = empty(); }
+  function clear() { holder.log = empty(); }
   function hasEntries() { return state().entries.length > 0; }
 
   // Returns the entries that pass the current filters. The entries can be limited to [tMin, tMax].
@@ -166,5 +170,5 @@
     return counts;
   }
 
-  GZ.logs = { SEVERITY, RANK, severityOf, parseStamp, parse, state, load, clear, hasEntries, visible, around, severityCounts };
-})(window.GZ = window.GZ || {});
+  return { SEVERITY, RANK, severityOf, parseStamp, parse, bind, state, load, clear, hasEntries, visible, around, severityCounts };
+});

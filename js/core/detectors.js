@@ -16,7 +16,7 @@
 
    Detector kinds: "presence" (induction loop, camera field, radar)
    and "pulse" (push button, the request stays until green). */
-(function (GZ) {
+GZ.define('detectors', { layer: 'domain', deps: ['parser', 'segments', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { buildSegments } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
@@ -60,7 +60,11 @@
   }
 
   /* ---------------- State ---------------- */
-  function data() { return GZ.state.data.detectors; }
+  // The holder is the object that keeps the assignment, in the field `detectors`.
+  // The store gives it with bind(). The module itself does not know the store.
+  let holder = { detectors: null };
+  function bind(h) { holder = h; }
+  function data() { return holder.detectors; }
 
   // Call this function once for each new analysis. It builds the detector list and applies the name
   // rule.
@@ -77,7 +81,7 @@
         ignored: false
       };
     });
-    GZ.state.data.detectors = { list, cache: { intervals: new Map(), scores: new Map(), occupancy: new Map() } };
+    holder.detectors = { list, cache: { intervals: new Map(), scores: new Map(), occupancy: new Map() } };
   }
   function list() { return data() ? data().list : []; }
 
@@ -169,8 +173,8 @@
     return skipped;
   }
 
-  GZ.detectors = {
+  return {
     NAME_RULES, CONFIRMED, CONTRADICTED, sgClass, kindFromName, nameTargets,
-    init, list, isLinked, detectorsOf, link, unlink, score, bestMatch, eligibleSgs, occupancy, toConfig, fromConfig
+    bind, init, list, isLinked, detectorsOf, link, unlink, score, bestMatch, eligibleSgs, occupancy, toConfig, fromConfig
   };
-})(window.GZ = window.GZ || {});
+});

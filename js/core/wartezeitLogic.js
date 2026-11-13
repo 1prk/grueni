@@ -2,7 +2,7 @@
    detector occupancy to start of green.
    It is pure calculation logic with event-based edge detection.
    TX and TU are only for information (see txAtTime and computeGlobalTU). */
-(function (GZ) {
+GZ.define('wartezeitLogic', { layer: 'domain', deps: ['segments'] }, function (GZ) {
   'use strict';
 
   // Default limits for the rating for each signal group type.
@@ -106,8 +106,8 @@
     return names.length ? names.join(' + ') : '–';
   }
 
-  GZ.wartezeitLogic = {
+  return {
     wzThresholdDefaults, wzIsGreen, wzIstBelegt, computeWartezeitEvents,
     qualitaetsstufe, WZ_QUAL_LABEL, txAtTime, auslosenderDetektor
   };
-})(window.GZ = window.GZ || {});
+});

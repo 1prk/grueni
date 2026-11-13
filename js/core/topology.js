@@ -16,7 +16,7 @@
    Traffic drives on the right.
    Look outward along an arm.
    The ingress lanes are on the left side and the egress lanes are on the right side. */
-(function (GZ) {
+GZ.define('topology', { layer: 'domain', deps: [] }, function (GZ) {
   'use strict';
 
   const DEFAULTS = {
@@ -1553,7 +1553,7 @@
     };
   }
 
-  GZ.topology = {
+  return {
     DEFAULTS, LANE_TYPES, COMPASS,
     // Local metres to centimetres, relative to the previous node (first node: relative to the
     // reference point).
@@ -1565,4 +1565,4 @@
     lanesOf, derive, junctionOutline, allLaneGeoms, connectionCurve, cubicPoint, connectionManeuver, laneManeuvers, connectionSg,
     proposeConnections, exampleCrossing, toConfig, fromConfig, signalGroupIds, toMapem
   };
-})(window.GZ = window.GZ || {});
+});

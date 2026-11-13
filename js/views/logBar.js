@@ -5,7 +5,7 @@
    button to remove the log.
    A click on a list entry opens its cycle in the cycle check.
    All containers with the attribute data-log-bar show the same state. */
-(function (GZ) {
+GZ.define('views.logBar', { layer: 'views', deps: ['charts.logMarkers', 'format', 'logs', 'state'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs } = GZ.format;
 
@@ -63,7 +63,7 @@
       if (!listOpen) { host.innerHTML = ''; return; }
       host.innerHTML = head + (listed.length
         ? `<div class="log-list-scroll"><table><thead><tr><th>Zeit</th><th>Stufe</th><th>Text</th></tr></thead><tbody>${listed.map((e, i) =>
-            `<tr data-i="${i}" class="${e === active ? 'active' : ''}${a && !GZ.app.inRecording(e.t) ? ' outside' : ''}" title="${a && !GZ.app.inRecording(e.t) ? 'Außerhalb der Aufzeichnung – kein Umlauf' : 'Klick: Umlauf in der Umlaufprüfung öffnen'}"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
+            `<tr data-i="${i}" class="${e === active ? 'active' : ''}${a && !GZ.state.inRecording(e.t) ? ' outside' : ''}" title="${a && !GZ.state.inRecording(e.t) ? 'Außerhalb der Aufzeichnung – kein Umlauf' : 'Klick: Umlauf in der Umlaufprüfung öffnen'}"><td>${esc(fmtTs(new Date(e.t)))}</td><td class="sev-${esc(e.severity)}">${esc(e.level || '–')}</td><td class="text">${esc(e.text)}</td></tr>`).join('')}</tbody></table>`
           + (total > listed.length ? `<div class="log-list-more">${listed.length} von ${total} Einträgen – Filter oder Suche einschränken.</div>` : '') + '</div>'
         : '<div class="log-list-more">Keine Einträge für diese Filter.</div>');
     });
@@ -125,10 +125,9 @@
       const filterBtn = e.target.closest('button[data-list-filter]');
       if (filterBtn) { listFilter = filterBtn.dataset.listFilter; renderLists(); return; }
       const row = e.target.closest('.log-list tbody tr[data-i]');
-      if (row && listed[Number(row.dataset.i)]) GZ.app.jumpToLog(listed[Number(row.dataset.i)]);
+      if (row && listed[Number(row.dataset.i)]) GZ.state.command('nav:jumpToLog', { entry: listed[Number(row.dataset.i)] });
     });
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.logBar = { init, render, markActive };
-})(window.GZ = window.GZ || {});
+  return { init, render, markActive };
+});

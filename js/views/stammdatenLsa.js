@@ -4,7 +4,7 @@
    The view edits GZ.state.data.phases directly.
    The evaluation itself runs in the tab "Phasenauswertung" (js/views/phasenauswertung.js).
    The code refreshes that tab after each change here. */
-(function (GZ) {
+GZ.define('views.stammdatenLsa', { layer: 'views', deps: ['charts.timelineLane', 'configIO', 'detectors', 'format', 'phases', 'segments', 'snackbar', 'state', 'topology'] }, function (GZ) {
   'use strict';
   const { esc } = GZ.format;
   const { createPhase } = GZ.phases;
@@ -13,6 +13,10 @@
   let els = null;
 
   function init(root) {
+    // Other views ask for these actions through the store.
+    GZ.state.on('nodeConfig:save', () => saveConfig());
+    GZ.state.on('nodeConfig:load', p => loadConfigFile(p.file));
+    GZ.state.on('transition:show', p => jumpToTransition(p.fromPhaseId, p.toPhaseId));
     els = {
       root,
       table: root.querySelector('#sdPhaseTable'),
@@ -50,23 +54,20 @@
 
   function notifyChanged() {
     renderPueSection();
-    if (GZ.views.phasenauswertung) GZ.views.phasenauswertung.refresh();
-    if (GZ.views.gruenzeitanalyse) GZ.views.gruenzeitanalyse.refresh();
     // Umlaufprüfung shows the same phases as a separate track (PHASE object, see phaseCols() and
     // buildPhaseTrack() in umlaufpruefung.js).
     // After each change here, its object list and its track rendering must follow.
     // The object list has a checkbox that appears with the first phase and disappears with the last
     // phase.
-    // This is the same as for the changes in the formula builder and Umlaufstatistiken
-    // (refreshSyntheticColumns()).
-    if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
+    // The views Phasenauswertung, Grünzeitanalyse and Umlaufprüfung subscribe to this topic.
+    GZ.state.commit('phases:changed');
   }
 
   /* ---------------- Speichern/Laden je Knoten (JSON) ----------------
      Phases and manual PÜ corrections (GZ.state.data.pueOverrides, see the PÜ detail tool in
      umlaufpruefung.js) go together in ONE file.
      The file name is the node identifier (field "No" in the CSV header, see parser.js).
-     This is different from the existing Umlaufprüfung configuration (js/core/configIO.js).
+     This is different from the existing Umlaufprüfung configuration (js/io/configIO.js).
      That configuration does NOT use a data fingerprint check on purpose.
      This file uses the node identifier for the check.
      A phase division must be reusable over different recordings of THE SAME node.
@@ -143,7 +144,7 @@
     // The topology does not depend on a recording. Load it first.
     let topoNote = '';
     if (cfg.topology) {
-      GZ.views.stammdatenTopologie.setModel(GZ.topology.fromConfig(cfg.topology));
+      GZ.state.command('topology:setModel', { model: GZ.topology.fromConfig(cfg.topology) });
       topoNote = 'Topologie geladen. ';
     }
     if (!a) {
@@ -195,7 +196,7 @@
     GZ.state.data.pueOverrides = newOverrides;
     if (cfg.detectors) {
       GZ.detectors.fromConfig(a, cfg.detectors).forEach(msg => skipped.push(msg));
-      if (GZ.views.wartezeit) GZ.views.wartezeit.populate();
+      GZ.state.commit('detectors:changed');
     }
     renderTable();
     notifyChanged();
@@ -611,6 +612,5 @@
     setTimeout(() => el.classList.remove('sd-pue-highlight'), 1500);
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.stammdatenLsa = { init, onAnalyzeComplete, jumpToTransition, saveConfig, loadConfigFile };
-})(window.GZ = window.GZ || {});
+  return { init, onAnalyzeComplete, jumpToTransition, saveConfig, loadConfigFile };
+});

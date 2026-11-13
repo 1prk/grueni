@@ -3,7 +3,7 @@
    use it.
    It works with real pixel sizes (viewBox = measured container size).
    So circles and lines are not distorted by a non-uniform scale. */
-(function (GZ) {
+GZ.define('charts.timelineLane', { layer: 'ui', deps: ['format', 'parser'] }, function (GZ) {
   'use strict';
   const fmtTimeShort = GZ.format.fmtTimeShort;
   const esc = GZ.format.esc;
@@ -417,6 +417,5 @@
     return true;
   }
 
-  GZ.charts = GZ.charts || {};
-  GZ.charts.timelineLane = { renderLane, renderTimeAxis, ensurePatternDefs, CAT_FILL };
-})(window.GZ = window.GZ || {});
+  return { renderLane, renderTimeAxis, ensurePatternDefs, CAT_FILL };
+});

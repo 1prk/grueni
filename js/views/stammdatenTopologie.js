@@ -9,7 +9,7 @@
    The canvas needs no recording.
    Signal groups and detectors come from the loaded recording, if there is one.
    Otherwise the user can type names. */
-(function (GZ) {
+GZ.define('views.stammdatenTopologie', { layer: 'views', deps: ['configIO', 'detectors', 'format', 'phases', 'snackbar', 'state', 'topology'] }, function (GZ) {
   'use strict';
   const T = GZ.topology;
   const { esc } = GZ.format;
@@ -45,6 +45,8 @@ let linkStops = false;     // move all stop lines together
 
   /* ---------------- Init ---------------- */
   function init(root) {
+    // The master data view sends a loaded topology through the store.
+    GZ.state.on('topology:setModel', p => setModel(p.model));
     els = {
       root,
       subBtns: root.querySelectorAll('.subnav-btn'),
@@ -89,10 +91,10 @@ let linkStops = false;     // move all stop lines together
     els.subBtns.forEach(b => b.addEventListener('click', () => showSub(b.dataset.sub)));
     root.querySelector('#topoExample').addEventListener('click', loadExample);
     root.querySelector('#topoMapExport').addEventListener('click', exportMap);
-    root.querySelector('#topoConfigSaveBtn').addEventListener('click', () => GZ.views.stammdatenLsa.saveConfig());
+    root.querySelector('#topoConfigSaveBtn').addEventListener('click', () => GZ.state.command('nodeConfig:save'));
     root.querySelector('#topoConfigLoadInput').addEventListener('change', e => {
       const file = e.target.files[0];
-      if (file) GZ.views.stammdatenLsa.loadConfigFile(file);
+      if (file) GZ.state.command('nodeConfig:load', { file });
       e.target.value = '';
     });
     root.querySelector('#topoFit').addEventListener('click', fitView);
@@ -1248,6 +1250,5 @@ let linkStops = false;     // move all stop lines together
     if (els && els.paneTopo.style.display !== 'none') { update(); refresh(); }
   }
 
-  GZ.views = GZ.views || {};
-  GZ.views.stammdatenTopologie = { init, refresh, onAnalyzeComplete, setModel, showSub };
-})(window.GZ = window.GZ || {});
+  return { init, refresh, onAnalyzeComplete, setModel, showSub };
+});

@@ -4,7 +4,7 @@
    content types, relationships, a workbook and one worksheet with inline strings.
    The module does not vendor a library from a third party.
    This fits the rest of the application: no build step and no external resources. */
-(function (GZ) {
+GZ.define('xlsxWriter', { layer: 'io', deps: [] }, function (GZ) {
   'use strict';
 
   const CRC_TABLE = (() => {
@@ -197,5 +197,5 @@
     return new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
 
-  GZ.xlsxWriter = { buildWorkbookBlob, buildMultiSheetWorkbookBlob };
-})(window.GZ = window.GZ || {});
+  return { buildWorkbookBlob, buildMultiSheetWorkbookBlob };
+});

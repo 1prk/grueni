@@ -7,15 +7,19 @@ const vm = require('vm');
 const assert = require('assert');
 
 const root = path.join(__dirname, '..');
-const ctx = { window: {}, console, Date, Math };
-ctx.window.GZ = {};
+const ctx = { console, Date, Math };
+// The global object is the window, as in a browser. So the modules find GZ as a global name.
+ctx.window = ctx;
 vm.createContext(ctx);
-['format', 'stats', 'parser', 'segments', 'wartezeitLogic', 'slices', 'greenTime', 'detectors', 'logParser', 'sampleData', 'topology'].forEach(name => {
+['define', 'format', 'stats', 'parser', 'segments', 'wartezeitLogic', 'slices', 'greenTime', 'detectors', 'logParser', 'sampleData', 'topology'].forEach(name => {
   const file = path.join(root, 'js/core', name + '.js');
   vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: file });
 });
 const GZ = ctx.window.GZ;
+// The test plays the role of the store. It gives the detector module and the log module a holder object.
 GZ.state = { data: {} };
+GZ.detectors.bind(GZ.state.data);
+GZ.logs.bind(GZ.state.data);
 
 // Arrays made inside the vm context have another prototype, so compare as JSON.
 const same = (actual, expected) => assert.strictEqual(JSON.stringify(actual), JSON.stringify(expected));

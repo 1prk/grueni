@@ -12,13 +12,21 @@ const scripts = Array.from(html.matchAll(/<script src="([^"]+)"><\/script>/g)).m
   .filter(src => src !== 'runner-browser.js');
 
 const ctx = { console, Date, Math, JSON, TextEncoder, TextDecoder, CompressionStream, DecompressionStream };
-ctx.window = {};
+// The global object is the window, as in a browser. So the modules find GZ as a global name.
+ctx.window = ctx;
 vm.createContext(ctx);
 for (const src of scripts) {
   const file = path.join(__dirname, src);
   vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: file });
 }
 const GZT = ctx.window.GZT;
+
+// The static layer check runs first.
+{
+  const { problems } = require('./check-layers').check();
+  if (problems.length) { problems.forEach(p => console.log('FAIL layers: ' + p)); process.exit(1); }
+  console.log('ok   layers: modules, layers and declared dependencies');
+}
 
 (async () => {
   if (process.argv.includes('--update-golden')) {

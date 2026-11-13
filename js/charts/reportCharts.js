@@ -2,7 +2,7 @@
    time tab:
    green time histogram, position in the cycle, share bar and small CDF.
    Each function returns an SVG element. */
-(function (GZ) {
+GZ.define('charts.report', { layer: 'ui', deps: ['charts.kit', 'format'] }, function (GZ) {
   'use strict';
   const { el, text, attachTooltip } = GZ.charts.kit;
   const { fmtNum } = GZ.format;
@@ -105,5 +105,5 @@
     return svg;
   }
 
-  GZ.charts.report = { HIST_W, LANE_W, CDF_W, axis, histogram, lane, shareBar, miniCdf };
-})(window.GZ = window.GZ || {});
+  return { HIST_W, LANE_W, CDF_W, axis, histogram, lane, shareBar, miniCdf };
+});

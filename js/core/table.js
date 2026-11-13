@@ -13,7 +13,7 @@
      index  the field number in the CSV (0-based)
      exc    null, or { idx: Uint32Array (rows, ascending), tok: Uint32Array (token numbers), tokens: string[] }
      dict   string[] for the kind 'dict', else null */
-(function (GZ) {
+GZ.define('table', { layer: 'domain', deps: [] }, function (GZ) {
   'use strict';
 
   function createNumericColumn(index, data, exc) {
@@ -114,5 +114,5 @@
     return { rowCount: times.length, times, columns, byIndex: new Map(columns.map(c => [c.index, c])) };
   }
 
-  GZ.table = { createNumericColumn, createDictColumn, createTable, isException, rawAt, columnStrings, LazySeriesMap };
-})(window.GZ = window.GZ || {});
+  return { createNumericColumn, createDictColumn, createTable, isException, rawAt, columnStrings, LazySeriesMap };
+});

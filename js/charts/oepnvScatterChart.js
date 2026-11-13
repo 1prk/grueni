@@ -6,7 +6,7 @@
    A forced clearance is a registration with no deregistration within the forced clearance time.
    The caller calls the chart once for each signal group. The charts are separate. There is no
    combined chart. */
-(function (GZ) {
+GZ.define('charts.oepnvScatterChart', { layer: 'ui', deps: ['charts.timelineLane', 'charts.tooltipHelper', 'format', 'oepnvLogic'] }, function (GZ) {
   'use strict';
   const { fmtTimeShort, esc } = GZ.format;
   const { LOS_LEVELS, losStufe, txAtTime } = GZ.oepnvLogic;
@@ -103,5 +103,5 @@
     return { rendered: true, yMax };
   }
 
-  GZ.charts.oepnvScatterChart = { render };
-})(window.GZ = window.GZ || {});
+  return { render };
+});

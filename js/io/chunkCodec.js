@@ -33,7 +33,7 @@
    encodeColumn, decodeColumn, encodeTimes and decodeTimes return promises (gzip works with streams).
    serializeColumn, deserializeColumn, serializeTimes and deserializeTimes are the same without gzip. They are synchronous.
    A decoder throws an Error with a clear message when the bytes are not a valid chunk. */
-(function (GZ) {
+GZ.define('chunkCodec', { layer: 'io', deps: ['table'] }, function (GZ) {
   'use strict';
   const T = GZ.table;
 
@@ -415,8 +415,8 @@
   const decodeColumn = async bytes => deserializeColumnPayload(await payloadOf(bytes, TYPE_COLUMN));
   const decodeTimes = async bytes => deserializeTimesPayload(await payloadOf(bytes, TYPE_TIMES));
 
-  GZ.chunkCodec = {
+  return {
     VERSION, encodeColumn, decodeColumn, encodeTimes, decodeTimes,
     serializeColumn, deserializeColumn, serializeTimes, deserializeTimes
   };
-})(window.GZ = window.GZ || {});
+});
