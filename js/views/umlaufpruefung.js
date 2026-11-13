@@ -134,6 +134,8 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
     // Other views tell the store when formula columns, key figures or phases change.
     GZ.state.on('syntheticColumns:changed', refreshSyntheticColumns);
     GZ.state.on('phases:changed', refreshSyntheticColumns);
+    GZ.state.provide('cycleConfig:get', buildFileConfig);
+    GZ.state.provide('cycleConfig:apply', applyFileConfig);
 
     // Buttons inside the cycle list: expand or shorten an irregular cycle, and close a jump note.
     els.rows.addEventListener('click', e => {
@@ -805,16 +807,45 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
     return { skipped };
   }
 
-  function saveConfig() {
+  // Builds the configuration file object of the cycle check. Returns null without a recording.
+  function buildFileConfig() {
     const a = GZ.state.data.currentAnalysis;
-    if (!a) return;
-    const cfg = {
+    if (!a) return null;
+    return {
       version: 1,
       fingerprint: GZ.configIO.buildFingerprint(a),
       umlaufpruefung: getConfig(),
       formulaBuilder: GZ.state.request('formulaConfig:get') || null
     };
+  }
+
+  function saveConfig() {
+    const cfg = buildFileConfig();
+    if (!cfg) return;
     GZ.configIO.downloadJson('umlaufpruefung_konfiguration.json', cfg);
+  }
+
+  // Applies a configuration file object to the view.
+  // Returns { notes, skipped, text }. text is the hint for the user. It is empty when everything was applied without a remark.
+  function applyFileConfig(cfg) {
+    const a = GZ.state.data.currentAnalysis;
+    const match = GZ.configIO.fingerprintMatches(cfg.fingerprint, a);
+    const notes = [];
+    if (!match.exact) {
+      notes.push(match.columnsMatch
+        ? 'Spaltenstruktur passt, aber andere Aufzeichnung (Zeitraum/Zeilenzahl weichen ab) – Zuordnung erfolgte über Spaltennamen.'
+        : 'Spaltenstruktur weicht von der gespeicherten Konfiguration ab – ggf. nicht alle Einstellungen übernommen.');
+    }
+
+    // Apply and calculate the formulas FIRST.
+    // So applyConfig() below can find the saved FORMEL selections in the detector list and filter
+    // list that the code already updated.
+    const applied = GZ.state.request('formulaConfig:apply', cfg.formulaBuilder);
+    const formulaSkipped = applied ? applied.skipped : [];
+    const upSkipped = applyConfig(cfg.umlaufpruefung).skipped;
+
+    const skipped = formulaSkipped.concat(upSkipped);
+    return { notes, skipped, text: [...notes, skipped.length ? `Nicht gefunden: ${skipped.join(', ')}.` : ''].filter(Boolean).join(' ') };
   }
 
   async function loadConfigFile(file) {
@@ -832,31 +863,10 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
       return;
     }
 
-    const match = GZ.configIO.fingerprintMatches(cfg.fingerprint, a);
-    const notes = [];
-    if (!match.exact) {
-      notes.push(match.columnsMatch
-        ? 'Spaltenstruktur passt, aber andere Aufzeichnung (Zeitraum/Zeilenzahl weichen ab) – Zuordnung erfolgte über Spaltennamen.'
-        : 'Spaltenstruktur weicht von der gespeicherten Konfiguration ab – ggf. nicht alle Einstellungen übernommen.');
-    }
-
-    // Apply and calculate the formulas FIRST.
-    // So applyConfig() below can find the saved FORMEL selections in the detector list and filter
-    // list that the code already updated.
-    const applied = GZ.state.request('formulaConfig:apply', cfg.formulaBuilder);
-    const formulaSkipped = applied ? applied.skipped : [];
-    const upSkipped = applyConfig(cfg.umlaufpruefung).skipped;
-
-    const allSkipped = formulaSkipped.concat(upSkipped);
-    els.hint.textContent = ['Konfiguration geladen.', ...notes, allSkipped.length ? `Nicht gefunden: ${allSkipped.join(', ')}.` : '']
-      .filter(Boolean).join(' ');
-    els.hint.className = 'hint' + ((notes.length || allSkipped.length) ? ' warn' : '');
-    if ((notes.length || allSkipped.length) && GZ.snackbar) {
-      GZ.snackbar.show('Konfiguration teilweise geladen', {
-        type: 'warning',
-        description: [...notes, allSkipped.length ? `Nicht gefunden: ${allSkipped.join(', ')}.` : ''].filter(Boolean).join(' ')
-      });
-    }
+    const r = applyFileConfig(cfg);
+    els.hint.textContent = ['Konfiguration geladen.', r.text].filter(Boolean).join(' ');
+    els.hint.className = 'hint' + (r.text ? ' warn' : '');
+    if (r.text && GZ.snackbar) GZ.snackbar.show('Konfiguration teilweise geladen', { type: 'warning', description: r.text });
   }
 
   function populateControls() {

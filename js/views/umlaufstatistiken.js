@@ -120,6 +120,8 @@ GZ.define('views.umlaufstatistiken', { layer: 'views', deps: ['exprEditor', 'exp
 
   function init(root) {
     GZ.state.provide('kennzahlColumns', getSyntheticColumns);
+    GZ.state.provide('statsColumns:get', getColumnConfig);
+    GZ.state.provide('statsColumns:apply', applyColumnConfig);
     els = {
       root,
       addColBtn: root.querySelector('#usAddColBtn'),
@@ -182,6 +184,19 @@ GZ.define('views.umlaufstatistiken', { layer: 'views', deps: ['exprEditor', 'exp
     renderLegend();
     renderColumns();
     recompute();
+  }
+
+  // The columns for the project file: [{ label, expr }]. The ids are only valid in this session.
+  function getColumnConfig() {
+    return GZ.state.data.umlaufSpalten.map(c => ({ label: c.label, expr: c.expr }));
+  }
+  // Replaces the columns with a list from getColumnConfig(). Returns the number of columns.
+  function applyColumnConfig(list) {
+    if (!GZ.state.data.currentAnalysis || !Array.isArray(list)) return 0;
+    GZ.state.data.umlaufSpalten = list.filter(c => c && typeof c.expr === 'string').map(c => ({ id: nextColId++, label: typeof c.label === 'string' ? c.label : '', expr: c.expr }));
+    renderColumns();
+    recompute();
+    return GZ.state.data.umlaufSpalten.length;
   }
 
   function addColumn() {

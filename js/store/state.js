@@ -51,7 +51,9 @@ GZ.define('state', { layer: 'store', deps: ['detectors', 'logs', 'topology'] }, 
     'topology:setModel': 'command',        // { model } replace the topology model
     'nodeConfig:save': 'command',          // save the node configuration file
     'nodeConfig:load': 'command',          // { file } load a node configuration file
-    'transition:show': 'command'           // { fromPhaseId, toPhaseId } show a phase transition in the master data
+    'transition:show': 'command',          // { fromPhaseId, toPhaseId } show a phase transition in the master data
+    'recording:imported': 'command',       // { parsed, fileName } a new recording was imported and analysed
+    'recording:show': 'command'            // { parsed, fileName } analyse a recording that the project view decoded (it was not imported)
   };
   const PROVIDERS = {
     formulaColumns: 'synthetic detector columns of the formula builder, [{index, kuerzel, name, beschreibung, rawSeries}]',
@@ -59,7 +61,13 @@ GZ.define('state', { layer: 'store', deps: ['detectors', 'logs', 'topology'] }, 
     'formulaConfig:get': 'the configuration object of the formula builder',
     'formulaConfig:apply': '(config) -> { skipped: string[] }',
     kennzahlColumns: 'key figure columns of the cycle statistics',
-    oepnvRows: '(sgIndex) -> the rows that the public transport tab configured for a signal group'
+    oepnvRows: '(sgIndex) -> the rows that the public transport tab configured for a signal group',
+    'nodeConfig:get': '() -> the node configuration object of the master data tab, or null',
+    'nodeConfig:apply': '(config) -> { loaded, notes, skipped, message, warn }',
+    'cycleConfig:get': '() -> the configuration file object of the cycle check, or null',
+    'cycleConfig:apply': '(config) -> { notes, skipped, text }',
+    'statsColumns:get': '() -> the columns of the cycle statistics, [{ label, expr }]',
+    'statsColumns:apply': '(list) -> the number of columns that the view took over'
   };
 
   const listeners = new Map();   // topic -> [fn]

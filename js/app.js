@@ -2,7 +2,7 @@
    It also controls the analysis across the three technical views.
    It runs fully local in the browser. The application sends no data.
    The code has no fetch or XHR. The document has no external resources. */
-GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser', 'sampleData', 'segments', 'snackbar', 'state', 'stats', 'views.formulaBuilder', 'views.gruenzeitanalyse', 'views.logBar', 'views.oepnvQa', 'views.phasenauswertung', 'views.stammdatenLsa', 'views.stammdatenTopologie', 'views.umlaufpruefung', 'views.umlaufstatistiken', 'views.wartezeit'] }, function (GZ) {
+GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser', 'sampleData', 'segments', 'snackbar', 'state', 'stats', 'views.formulaBuilder', 'views.gruenzeitanalyse', 'views.logBar', 'views.oepnvQa', 'views.phasenauswertung', 'views.project', 'views.stammdatenLsa', 'views.stammdatenTopologie', 'views.umlaufpruefung', 'views.umlaufstatistiken', 'views.wartezeit'] }, function (GZ) {
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
 
@@ -79,17 +79,21 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
   function clearError() { els.errorBox.style.display = 'none'; }
 
   // Pasted text or sample data: the text box is the source.
-  function analyze() {
+  // fileName is the name that the project shows for the recording. A click event is not a name.
+  function analyze(fileName) {
     clearError();
     let parsed;
     try { parsed = GZ.csvImport.importText(els.rawInput.value); }
     catch (e) { showError(e.message); return; }
-    analyzeParsed(parsed);
+    analyzeParsed(parsed, { fileName: typeof fileName === 'string' ? fileName : 'Eingefügter Text' });
   }
 
   // `parsed` comes from GZ.csvImport. It has the same shape as the result of
   // GZ.parser.parseOcitText, plus `table`.
-  function analyzeParsed(parsed) {
+  // opts.fileName is the name of the source. opts.restored is true when the project view decoded the recording from a project.
+  // A restored recording does not send the topic recording:imported. It is not a new import.
+  function analyzeParsed(parsed, opts) {
+    const o = opts || {};
     const { columns, otherColumns, times, seriesByCol, totalRows, skippedRows, knotenName, knotenNr, cycleStarts } = parsed;
     const tMin = times[0], tMax = times[times.length - 1] + GZ.parser.estimateStep(times);
 
@@ -141,6 +145,7 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
 
     GZ.views.logBar.render();
     els.btnExport.disabled = false;
+    if (!o.restored) GZ.state.command('recording:imported', { parsed, fileName: o.fileName || '' });
   }
 
   function init() {
@@ -160,6 +165,7 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
     GZ.state.on('nav:switchTab', p => switchTab(p.tab));
     GZ.state.on('nav:jumpToTime', p => jumpToTime(p.t));
     GZ.state.on('nav:jumpToLog', p => jumpToLog(p.entry));
+    GZ.state.on('recording:show', p => analyzeParsed(p.parsed, { fileName: p.fileName, restored: true }));
 
     GZ.views.logBar.init(refreshActiveTab);
     GZ.views.gruenzeitanalyse.init(document.getElementById('tab-gz'));
@@ -171,11 +177,12 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
     GZ.views.formulaBuilder.init(document.getElementById('tab-up'));
     GZ.views.umlaufpruefung.init(document.getElementById('tab-up'));
     GZ.views.umlaufstatistiken.init(document.getElementById('tab-us'));
+    GZ.views.project.init(document.getElementById('projectBar'));
 
     document.getElementById('btnAnalyze').addEventListener('click', analyze);
     document.getElementById('btnSample').addEventListener('click', () => {
       els.rawInput.value = GZ.sampleData.generateSampleText();
-      analyze();
+      analyze('Beispieldaten');
       loadLogText(GZ.sampleData.generateSampleLog(), 'Beispiel-Log');
     });
     document.getElementById('logInput').addEventListener('change', e => {
@@ -209,7 +216,7 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
         e.target.value = '';
         return;
       }
-      analyzeParsed(parsed);
+      analyzeParsed(parsed, { fileName: file.name });
       e.target.value = '';
     });
     els.btnExport.addEventListener('click', () => GZ.views.gruenzeitanalyse.exportStatsCSV());

@@ -38,6 +38,26 @@
     </div>
   </header>
 
+  <section class="project-bar" id="projectBar">
+    <div class="project-bar-main">
+      <span class="project-bar-title">Projekt</span>
+      <span class="project-bar-info" id="projectInfo">Noch keine Daten geladen</span>
+      <span class="project-bar-actions">
+        <button type="button" id="btnProjectSave" disabled title="Speichert Aufzeichnung, Phasen, Formeln und alle Einstellungen in einer Projektdatei (ZIP).">Projekt speichern</button>
+        <label class="btn" for="projectOpenInput" title="Öffnet eine Projektdatei.">Projekt öffnen …</label>
+        <input type="file" id="projectOpenInput" accept=".zip,.grueni">
+        <button type="button" id="btnConfigExport" disabled title="Speichert nur die Einstellungen (ohne Aufzeichnung) als JSON-Datei.">Konfiguration exportieren</button>
+        <label class="btn" for="configImportInput" title="Lädt eine Konfigurationsdatei dieser Anwendung. Auch die älteren Phasen- und Umlaufprüfungs-Dateien sind möglich.">Konfiguration laden …</label>
+        <input type="file" id="configImportInput" accept=".json">
+      </span>
+    </div>
+    <div class="project-banner" id="projectBanner" data-init-hidden>
+      <span id="projectBannerText"></span>
+      <button type="button" class="primary" id="btnRestore">Wiederherstellen</button>
+      <button type="button" id="btnDiscard">Verwerfen</button>
+    </div>
+  </section>
+
   <section class="data-panel open" id="dataPanel">
     <div class="data-panel-head" id="dataPanelHead">
       <h2>Rohdaten</h2>
@@ -754,9 +774,16 @@
 <script src="js/core/umlaufContext.js"></script>
 <script src="js/core/sampleData.js"></script>
 <script src="js/store/state.js"></script>
+<script src="js/core/project.js"></script>
 <script src="js/io/csvImport.js"></script>
 <script src="js/io/configIO.js"></script>
 <script src="js/io/xlsxWriter.js"></script>
+<script src="js/io/chunkCodec.js"></script>
+<script src="js/io/zip.js"></script>
+<script src="js/io/recordingCodec.js"></script>
+<script src="js/io/projectFile.js"></script>
+<script src="js/io/localStore.js"></script>
+<script src="js/io/fileAccess.js"></script>
 <script src="js/ui/snackbar.js"></script>
 <script src="js/ui/cssom.js"></script>
 <script src="js/ui/exprEditor.js"></script>
@@ -779,6 +806,7 @@
 <script src="js/views/formulaBuilder.js"></script>
 <script src="js/views/umlaufpruefung.js"></script>
 <script src="js/views/umlaufstatistiken.js"></script>
+<script src="js/views/project.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # Data architecture plan
 
-Status: approved. Phases 0 and 1 are done. Phase 2 is next.
+Status: approved. Phases 0 to 4 are done. Phase 5 is next.
 
 ## Hard constraints
 
@@ -162,12 +162,44 @@ Decoding five plain columns takes about 1 ms. A column chunk is the unit for laz
 - A bug that the crawl found (it also happens before this phase): "add filter" in the cycle check chose the phase track as the first object and the page threw an error.
   The filter now skips the phase track and the key figures.
 
-### Phase 4: project model and persistence (L)
+### Phase 4: project model and persistence (L). Done.
 
-- Model with `schemaVersion` and migrations.
-- Namespaced IndexedDB with stores `lsa`, `recordings` and `chunks`. Request `persist()`. Handle quota errors.
-- Project file as ZIP. Edge saves in place (File System Access). Firefox downloads a timestamped file.
-- Config-only JSON export. The existing `map_*.json` and `phasen_*.json` files stay importable.
+- `js/core/project.js` (`GZ.project`): the model with `schemaVersion` 1, ids (128 random bits as hex) for project, LSA and recording,
+  validation with German messages, `migrate()` (a step table, a newer file is refused with the code `newer`), the configuration export and
+  the reader for it. The reader also takes the older `phasen_knoten-*.json` and `umlaufpruefung_konfiguration.json` files. A MAP file is refused.
+  A project has LSAs. An LSA has `config` (`nodeConfig`, `cycleConfig`, `statsColumns`) and recordings. A recording has the header and the chunk names.
+  The configurations use column names, never the raw index.
+- `js/io/zip.js` (`GZ.zip`): ZIP writer and reader without a library. Stored and deflate entries, CRC-32, UTF-8 names, size limits,
+  a refusal of ZIP64, encryption and several disks, and a check that a packed entry does not grow past its size in the directory.
+  A file from this code passes `unzip -t` and python `zipfile`. A file from python opens with this code.
+- `js/io/recordingCodec.js`: an import becomes chunks (time axis, cycle starts, the filled-in TC and SP texts, one chunk for each column) and comes back exactly.
+- `js/io/projectFile.js`: the project file is a ZIP with `project.json` (deflate) and `chunks/<recording id>/<name>.chunk` (stored, they are packed already).
+  `unpack()` checks the model and that every chunk is in the file. Each chunk is checked by its CRC when it is read.
+- `js/io/localStore.js`: IndexedDB `grueni:<namespace>` with the stores `meta`, `projects` and `chunks`. The namespace is a hash of the folder of the page.
+  A model and its chunks are saved in one transaction. Errors have a code (`quota`, `unavailable`, `blocked`, `storage`). `persist()` is requested after the first save.
+- `js/io/fileAccess.js`: File System Access when the browser has it (Edge asks for the file once and then writes into it), else a download with a time stamp
+  (`name_2026-11-13_10-15-30.grueni.zip`).
+- `js/views/project.js` and the project bar in `index.html`:
+  - After an import the page builds a project with one LSA and one recording. This is the working copy. It lives in memory and in IndexedDB.
+  - An autosave runs 1.5 s after the last user action and when the page closes. It saves only when the settings changed.
+  - After a reload a banner offers to restore the working copy.
+  - Buttons: save project, open project, export configuration, load configuration.
+  - If IndexedDB does not work, the page tells the user once and goes on. The project file still works.
+- The views give their settings through the store: the providers `nodeConfig`, `cycleConfig` and `statsColumns` (`get` and `apply`).
+  The existing buttons of the tabs use the same functions, so the older files work as before.
+  New store topics: `recording:imported` (from the app) and `recording:show` (to the app).
+- Not part of a project yet: the log file, and the topology background image only when it is in the node configuration (it is).
+  Several recordings in one LSA come in Phase 6.
+
+Tests: 6 new suites in `tests/suite` (project, zip, recordingCodec, projectFile, localStore, fileAccess; 51 tests) run in Node and in the browser (the IndexedDB tests run only in the browser).
+`node tests/e2e/project.js` plays 34 checks in Chromium: working copy and restore after a reload, download and in-place save (fake picker), open in a clean browser,
+configuration export and import, the older files, bad files (not a ZIP, damaged, newer version, MAP file) and a browser without IndexedDB.
+After a restore or an open, the settings of all views and the recording are the same as before.
+
+Results, the 24 h recording with 100 columns (25 MiB of text): the working copy is ready at the same time as the analysis (1.8 s), the chunks are 145 KB,
+the project file is 166 KB.
+
+Firefox is not tested yet (Phase 7). IndexedDB on `file://` in Firefox and the download path are the open questions.
 
 ### Phase 5: consumer migration (L)
 
@@ -210,6 +242,7 @@ It does not cover `vendor/` and the generated `tests/fixtures/golden-data.js`.
 - Browser: open `tests/index.html` from disk. The page has a strict CSP.
 - Node: `node tests/run-suite.js`. This runs the layer check, the policy check and the same suite as the browser.
   `node tests/check-layers.js` and `node tests/check-csp.js` run the two checks alone.
-- Real browser: `node tests/e2e/crawl.js` and `node tests/e2e/exports.js` (they need Playwright).
+- Real browser (they need Playwright): `node tests/e2e/suite.js` runs the test page, `node tests/e2e/crawl.js` clicks through all tabs,
+  `node tests/e2e/exports.js` starts every export and `node tests/e2e/project.js` plays the project functions.
 - Update the golden data after an intended change: `node tests/run-suite.js --update-golden`.
 - The older `node tests/core.test.js` still runs.

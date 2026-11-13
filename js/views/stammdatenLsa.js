@@ -17,6 +17,8 @@ GZ.define('views.stammdatenLsa', { layer: 'views', deps: ['charts.timelineLane',
     GZ.state.on('nodeConfig:save', () => saveConfig());
     GZ.state.on('nodeConfig:load', p => loadConfigFile(p.file));
     GZ.state.on('transition:show', p => jumpToTransition(p.fromPhaseId, p.toPhaseId));
+    GZ.state.provide('nodeConfig:get', buildConfig);
+    GZ.state.provide('nodeConfig:apply', applyConfig);
     els = {
       root,
       table: root.querySelector('#sdPhaseTable'),
@@ -80,13 +82,14 @@ GZ.define('views.stammdatenLsa', { layer: 'views', deps: ['charts.timelineLane',
      This is the same principle as GZ.configIO (see its header comment).
      PÜ corrections refer to the pair of SHORT NAMES of the two phases.
      They do not refer to phase.id, which is valid only in this session. */
-  function saveConfig() {
+  // Builds the node configuration object from the state. Returns null when there is nothing to save.
+  function buildConfig() {
     const a = GZ.state.data.currentAnalysis;
     const topo = GZ.state.data.topology;
     const hasTopology = !!(topo && topo.axes.length);
     // Phases and detectors refer to recording columns.
     // Without a recording, the user can save only the topology.
-    if (!a && !hasTopology) return;
+    if (!a && !hasTopology) return null;
     const sgNameByIndex = a ? new Map(a.allStats.map(s => [s.col.index, s.col.name])) : new Map();
     const phases = a ? GZ.state.data.phases : [];
     const kuerzelById = new Map(phases.map(p => [p.id, p.kuerzel]));
@@ -124,23 +127,25 @@ GZ.define('views.stammdatenLsa', { layer: 'views', deps: ['charts.timelineLane',
       const d = GZ.topology.derive(topo);
       if (d.arms.length) cfg.mapem = GZ.topology.toMapem(topo, d, { sortFn: GZ.phases.compareSgNames });
     }
-    const rawId = a && a.knotenNr ? String(a.knotenNr).trim() : (hasTopology && topo.name ? topo.name : '');
+    return cfg;
+  }
+
+  function saveConfig() {
+    const cfg = buildConfig();
+    if (!cfg) return;
+    const a = GZ.state.data.currentAnalysis;
+    const topo = GZ.state.data.topology;
+    const rawId = a && a.knotenNr ? String(a.knotenNr).trim() : (topo && topo.axes.length && topo.name ? topo.name : '');
     const idPart = rawId ? rawId.replace(/[^A-Za-z0-9_-]+/g, '-') : 'unbekannt';
     GZ.configIO.downloadJson(`phasen_knoten-${idPart}.json`, cfg);
   }
 
-  async function loadConfigFile(file) {
+  // Applies a node configuration object to the state and the view.
+  // Returns { loaded, topoNote, notes, skipped, phaseCount, message, warn }.
+  // loaded is false when the recording is missing. Then only the topology could be applied.
+  // message and warn are the text and the kind of the hint for the user.
+  function applyConfig(cfg) {
     const a = GZ.state.data.currentAnalysis;
-    let cfg;
-    try { cfg = await GZ.configIO.readJsonFile(file); }
-    catch (e) {
-      els.loadHint.textContent = e.message;
-      els.loadHint.className = 'hint warn';
-      els.loadHint.style.display = '';
-      GZ.snackbar.show('Konfiguration konnte nicht geladen werden', { type: 'warning', description: e.message });
-      return;
-    }
-
     // The topology does not depend on a recording. Load it first.
     let topoNote = '';
     if (cfg.topology) {
@@ -148,14 +153,10 @@ GZ.define('views.stammdatenLsa', { layer: 'views', deps: ['charts.timelineLane',
       topoNote = 'Topologie geladen. ';
     }
     if (!a) {
-      const msg = topoNote
+      const message = topoNote
         ? topoNote + 'Phasen und Detektorzuordnung werden erst nach dem Laden einer Aufzeichnung übernommen – Datei dann erneut laden.'
         : 'Bitte zuerst eine Aufzeichnung laden.';
-      els.loadHint.textContent = msg;
-      els.loadHint.className = 'hint warn';
-      els.loadHint.style.display = '';
-      GZ.snackbar.show(topoNote ? 'Topologie geladen' : 'Keine Aufzeichnung geladen', { type: topoNote ? 'info' : 'warning', description: msg });
-      return;
+      return { loaded: false, topoNote, notes: [], skipped: [], phaseCount: 0, message, warn: true };
     }
 
     const notes = [];
@@ -202,9 +203,27 @@ GZ.define('views.stammdatenLsa', { layer: 'views', deps: ['charts.timelineLane',
     notifyChanged();
 
     const msgs = notes.concat(skipped.length ? [`${skipped.length} Referenz(en) übersprungen: ${skipped.join('; ')}`] : []);
-    els.loadHint.textContent = msgs.length ? topoNote + msgs.join(' ') : `${topoNote}Phasenkonfiguration geladen (${newPhases.length} Phase(n)).`;
-    els.loadHint.className = msgs.length ? 'hint warn' : 'hint';
+    const message = msgs.length ? topoNote + msgs.join(' ') : `${topoNote}Phasenkonfiguration geladen (${newPhases.length} Phase(n)).`;
+    return { loaded: true, topoNote, notes, skipped, phaseCount: newPhases.length, message, warn: msgs.length > 0 };
+  }
+
+  function showLoadHint(message, warn) {
+    els.loadHint.textContent = message;
+    els.loadHint.className = warn ? 'hint warn' : 'hint';
     els.loadHint.style.display = '';
+  }
+
+  async function loadConfigFile(file) {
+    let cfg;
+    try { cfg = await GZ.configIO.readJsonFile(file); }
+    catch (e) {
+      showLoadHint(e.message, true);
+      GZ.snackbar.show('Konfiguration konnte nicht geladen werden', { type: 'warning', description: e.message });
+      return;
+    }
+    const r = applyConfig(cfg);
+    showLoadHint(r.message, r.warn);
+    if (!r.loaded) GZ.snackbar.show(r.topoNote ? 'Topologie geladen' : 'Keine Aufzeichnung geladen', { type: r.topoNote ? 'info' : 'warning', description: r.message });
   }
 
   // A discreet hint after each new data import.

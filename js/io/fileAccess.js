@@ -12,7 +12,8 @@
      opts.description    the text of the picker
      mode is 'file-system' or 'download'. cancelled is true when the user closes the picker. Then nothing was saved.
    timestampedName(name, date) puts the time stamp before the extension.
-   The extension is everything from the first dot. So "a.grueni.zip" becomes "a_2026-11-13_10-15-30.grueni.zip".
+   The extension is the last dot with up to 8 letters or digits. The part ".grueni" before it belongs to it.
+   So "a.grueni.zip" becomes "a_2026-11-13_10-15-30.grueni.zip" and "Str. 5.zip" becomes "Str. 5_2026-11-13_10-15-30.zip".
    setDownloader(fn) replaces the download function. The tests use it. */
 GZ.define('fileAccess', { layer: 'io', deps: [] }, function (GZ) {
   'use strict';
@@ -21,7 +22,7 @@ GZ.define('fileAccess', { layer: 'io', deps: [] }, function (GZ) {
   function timestampedName(name, date) {
     const d = date || new Date();
     const stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + '-' + pad(d.getMinutes()) + '-' + pad(d.getSeconds());
-    const m = String(name).match(/^([^.]*)(\..*)?$/);
+    const m = String(name).match(/^(.*?)((?:\.grueni)?\.[A-Za-z0-9]{1,8})?$/);
     return m[1] + '_' + stamp + (m[2] || '');
   }
 

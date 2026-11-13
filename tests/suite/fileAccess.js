@@ -33,6 +33,9 @@
     assert.equal(F.timestampedName('projekt.zip', d), 'projekt_2026-11-03_06-05-09.zip');
     assert.equal(F.timestampedName('knoten.grueni.zip', d), 'knoten_2026-11-03_06-05-09.grueni.zip');
     assert.equal(F.timestampedName('ohne', d), 'ohne_2026-11-03_06-05-09');
+    assert.equal(F.timestampedName('Hauptstr. - Ring.grueni.zip', d), 'Hauptstr. - Ring_2026-11-03_06-05-09.grueni.zip');
+    assert.equal(F.timestampedName('a.b.zip', d), 'a.b_2026-11-03_06-05-09.zip');
+    assert.equal(F.timestampedName('Str. 5', d), 'Str. 5_2026-11-03_06-05-09');
   });
 
   T.test('fileAccess: file names are made safe', () => {

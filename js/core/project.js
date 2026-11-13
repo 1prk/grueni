@@ -46,7 +46,7 @@ GZ.define('project', { layer: 'domain', deps: [] }, function (GZ) {
   const isoNow = () => new Date().toISOString();
 
   /* ---------- chunk names ---------- */
-  // The chunk names of a recording are fixed. The column chunks use the CSV column index.
+  // A recording has fixed chunk names. The column chunks use the CSV column index.
   const CHUNK_NAMES = ['times', 'cycles', 'tc', 'spl'];
   const columnChunkName = index => 'col-' + index;
   // The key in the chunk store and the path in the project file.
