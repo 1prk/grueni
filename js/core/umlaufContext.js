@@ -47,10 +47,10 @@
    The code adds them to the shared cycleMetrics object of a detector or value as the fields
    triggered and count.
    They come in addition to an, ab, tf, rotgelb and gelb (see detCycleMetricsForRow()). */
-GZ.define('umlaufContext', { layer: 'domain', deps: ['parser', 'segments', 'wartezeitLogic'] }, function (GZ) {
+GZ.define('umlaufContext', { layer: 'domain', deps: ['parser', 'segments', 'series', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const {
-    computeGlobalTU, computeCycleSgEvents, computeCycleDetMetrics, findSplAt,
+    computeGlobalTU, computeCycleSgEvents, countCycleSgEvents, computeCycleDetMetrics, findSplAt,
     buildSegments, makeRawValueSampler, makeSegmentDurationSampler
   } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
@@ -125,48 +125,103 @@ GZ.define('umlaufContext', { layer: 'domain', deps: ['parser', 'segments', 'wart
   }
 
   // Builds the context for EVERY cycle of the recording at once.
-  // The expensive sweep work (GZ.segments.computeCycleSgEvents and computeCycleDetMetrics) runs
-  // once over the recording.
-  // After that, the evaluation of a formula for a row is only one tree walk over a few nodes
-  // (compiled.run()).
+  // The context is LAZY. The number of rows needs only the number of An and Ab events of each object.
+  // The code counts them in one cheap pass (see GZ.segments.countCycleSgEvents).
+  // The expensive data of an object is built when a formula reads this object for the first time:
+  // the events, the sampler of the raw value, the sampler of the duration and the cycle aggregates of a detector.
+  // A recording with 100 detector columns and a formula that uses 3 of them builds the data of 3 columns.
+  // The scope of a row has a getter for each object name. The getters are on one shared prototype.
+  // A getter makes the handle of the object for this row, and keeps it.
+  // The result of buildAll() has the same shape as before. The scope of a row works as before.
   function buildAll(analysis) {
     const index = buildIdentifierIndex(analysis);
-    const { allStats, otherColumns, cycleStarts, tMax, times, seriesByCol, splValues } = analysis;
+    const { allStats, otherColumns, cycleStarts, tMax, times, table, splValues } = analysis;
     if (!cycleStarts || cycleStarts.length === 0) return { index, cycles: [] };
 
     const TU_MED = computeGlobalTU(cycleStarts);
     const n = cycleStarts.length;
 
-    // eventsByName, durationAtByName and rawSamplerByName apply to SG AND DET equally (see the file
-    // header comment).
-    // detAggByName is for DET only (the aggregates Ausgeloest and AnzahlAusloesungen, see
-    // detCycleMetricsForRow()).
-    const eventsByName = new Map();
-    const rawSamplerByName = new Map();
-    const durationAtByName = new Map();
-    const detAggByName = new Map();
+    // A name belongs to a signal group OR to a detector or value (see the file header comment).
+    // If two columns have the same name, the later column wins. A detector wins over a signal group.
+    const sources = new Map();
+    allStats.forEach(entry => { sources.set(entry.col.name, { kind: 'SG', entry, col: entry.col }); });
+    otherColumns.forEach(col => { sources.set(col.name, { kind: 'DET', col }); });
 
-    allStats.forEach(({ col, segs, stats }) => {
-      eventsByName.set(col.name, computeCycleSgEvents(segs, stats.greens, cycleStarts, tMax));
-      rawSamplerByName.set(col.name, makeRawValueSampler(times, seriesByCol.get(col.index)));
-      durationAtByName.set(col.name, makeSegmentDurationSampler(segs));
+    // The data of one object. The code builds it on the first call and keeps it.
+    // The samplers and the occupancy apply to SG AND DET equally (see the file header comment).
+    // agg is for DET only (the aggregates Ausgeloest and AnzahlAusloesungen, see detCycleMetricsForRow()).
+    const dataByName = new Map();
+    function objectData(name) {
+      let d = dataByName.get(name);
+      if (d !== undefined) return d;
+      const src = sources.get(name);
+      const series = table.byIndex.get(src.col.index);
+      if (src.kind === 'SG') {
+        const { segs, stats } = src.entry;
+        d = {
+          events: computeCycleSgEvents(segs, stats.greens, cycleStarts, tMax),
+          rawSample: makeRawValueSampler(times, series),
+          durationAt: makeSegmentDurationSampler(segs),
+          agg: null
+        };
+      } else {
+        // Own BELEGT/FREI segmentation.
+        // computeCycleDetMetrics below gives only the cycle aggregates (Ausgeloest and AnzahlAusloesungen).
+        // It gives no segment borders.
+        // An, Ab, TF and DauerBei need the real course of the BELEGT segments, as GRUEN for signal groups.
+        const detSegs = buildSegments(times, series, categorizeDetRaw);
+        const belegtSegs = detSegs.filter(s => s.cat === 'BELEGT');
+        d = {
+          events: computeCycleSgEvents(detSegs, belegtSegs, cycleStarts, tMax),
+          rawSample: makeRawValueSampler(times, series),
+          durationAt: makeSegmentDurationSampler(detSegs),
+          agg: computeCycleDetMetrics(times, GZ.series.flags(series, wzIstBelegt), cycleStarts, tMax)
+        };
+      }
+      dataByName.set(name, d);
+      return d;
+    }
+
+    // The number of rows of THIS cycle is the largest number of An events or Ab events
+    // among ALL signal groups AND detectors or values of the recording in this cycle.
+    // The minimum is 1, also with no event at all (as before: one row with only NaN values).
+    // The code finds it over ALL objects on purpose.
+    // It does not use only the objects that the current column formulas reference.
+    // Otherwise the number of rows of a cycle would change with each formula change.
+    const eventCounts = new Uint32Array(n).fill(1);
+    index.sgList.concat(index.detList).forEach(name => {
+      const src = sources.get(name);
+      let greens;
+      if (src.kind === 'SG') greens = src.entry.stats.greens;
+      else greens = buildSegments(times, table.byIndex.get(src.col.index), categorizeDetRaw).filter(s => s.cat === 'BELEGT');
+      const c = countCycleSgEvents(greens, cycleStarts, tMax);
+      for (let i = 0; i < n; i++) {
+        const m = c.an[i] > c.ab[i] ? c.an[i] : c.ab[i];
+        if (m > eventCounts[i]) eventCounts[i] = m;
+      }
     });
-    otherColumns.forEach(col => {
-      const rawVals = seriesByCol.get(col.index);
-      const occupied = times.map((_, k) => wzIstBelegt(rawVals[k]));
-      // Own BELEGT/FREI segmentation.
-      // computeCycleDetMetrics below gives only the cycle aggregates (Ausgeloest and
-      // AnzahlAusloesungen).
-      // It gives no segment borders.
-      // An, Ab, TF and DauerBei need the real course of the BELEGT segments, as GRUEN for signal
-      // groups.
-      const detSegs = buildSegments(times, rawVals, categorizeDetRaw);
-      const belegtSegs = detSegs.filter(s => s.cat === 'BELEGT');
-      eventsByName.set(col.name, computeCycleSgEvents(detSegs, belegtSegs, cycleStarts, tMax));
-      rawSamplerByName.set(col.name, makeRawValueSampler(times, rawVals));
-      durationAtByName.set(col.name, makeSegmentDurationSampler(detSegs));
-      detAggByName.set(col.name, computeCycleDetMetrics(times, occupied, cycleStarts, tMax));
-    });
+
+    // The shared prototype of all scopes. Each object name has a getter.
+    // __cycle and __event are internal fields. A user formula cannot reference them (as __cycleStart).
+    const proto = {};
+    const lazyNames = new Set();
+    const defineLazy = (name, kind) => {
+      lazyNames.add(name);
+      Object.defineProperty(proto, name, {
+        configurable: true,
+        enumerable: true,
+        get() {
+          const d = objectData(name), i = this.__cycle, e = this.__event;
+          const handle = kind === 'SG'
+            ? { class: 'SG', cycleMetrics: sgCycleMetricsForRow(d.events[i], e), rawSample: d.rawSample, durationAt: d.durationAt }
+            : { class: 'DET', cycleMetrics: detCycleMetricsForRow(d.events[i], e, d.agg[i]), rawSample: d.rawSample, durationAt: d.durationAt };
+          Object.defineProperty(this, name, { value: handle, writable: true, configurable: true, enumerable: true });
+          return handle;
+        }
+      });
+    };
+    index.sgList.forEach(name => defineLazy(name, 'SG'));
+    index.detList.forEach(name => defineLazy(name, 'DET'));
 
     const cycles = [];
     for (let i = 0; i < n; i++) {
@@ -174,39 +229,21 @@ GZ.define('umlaufContext', { layer: 'domain', deps: ['parser', 'segments', 'wart
       const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
       const spl = findSplAt(start, times, splValues) || '';
       const tu = Math.round((end - start) / 1000);
-
-      // The number of rows of THIS cycle is the largest number of An events or Ab events
-      // among ALL signal groups AND detectors or values of the recording in this cycle.
-      // The minimum is 1, also with no event at all (as before: one row with only NaN values).
-      // The code finds it over ALL objects on purpose.
-      // It does not use only the objects that the current column formulas reference.
-      // Otherwise the number of rows of a cycle would change with each formula change.
-      let eventCount = 1;
-      index.sgList.concat(index.detList).forEach(name => {
-        const evs = eventsByName.get(name)[i];
-        const c = Math.max(evs.an.length, evs.ab.length);
-        if (c > eventCount) eventCount = c;
-      });
+      const eventCount = eventCounts[i];
 
       for (let e = 0; e < eventCount; e++) {
-        // __cycleStart is not a regular identifier that varTypes declares. Users cannot reference
-        // it.
+        // __cycleStart is not a regular identifier that varTypes declares. Users cannot reference it.
         // Only the primitives WertBei() and DauerBei() read it internally (see exprEngine.js).
         // They use it to convert their time in seconds into an absolute timestamp
         // for handle.rawSample() and handle.durationAt().
         // It is the same for ALL rows of the same cycle.
         // The code does not split the cycle itself. It only splits the events that each row shows.
-        const scope = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, EREIGNIS: e + 1, __cycleStart: start };
-        index.sgList.forEach(name => {
-          const evs = eventsByName.get(name)[i];
-          scope[name] = { class: 'SG', cycleMetrics: sgCycleMetricsForRow(evs, e), rawSample: rawSamplerByName.get(name), durationAt: durationAtByName.get(name) };
+        // An object name wins over a field with the same name, as before.
+        const scope = Object.create(proto);
+        const fixed = { TU: tu, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: spl, EREIGNIS: e + 1, __cycleStart: start, __cycle: i, __event: e };
+        Object.keys(fixed).forEach(k => {
+          if (!lazyNames.has(k)) Object.defineProperty(scope, k, { value: fixed[k], writable: true, configurable: true, enumerable: true });
         });
-        index.detList.forEach(name => {
-          const evs = eventsByName.get(name)[i];
-          const agg = detAggByName.get(name)[i];
-          scope[name] = { class: 'DET', cycleMetrics: detCycleMetricsForRow(evs, e, agg), rawSample: rawSamplerByName.get(name), durationAt: durationAtByName.get(name) };
-        });
-
         cycles.push({ scope, start, end, TX: i + 1, SPL: spl, TU: tu, cycleIdx: i, eventIdx: e, eventCount });
       }
     }

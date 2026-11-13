@@ -1,6 +1,6 @@
 # Data architecture plan
 
-Status: approved. Phases 0 to 4 are done. Phase 5 is next.
+Status: approved. Phases 0 to 5 are done. Phase 6 is next.
 
 ## Hard constraints
 
@@ -72,8 +72,8 @@ Sizes: S small, M medium, L large. Each phase leaves the app working.
 - `js/io/csvImport.js` (`GZ.csvImport`): streaming byte-level importer.
   A fast path reads numbers from the bytes. Lines with quotes, a carriage return, no tab or an unusual time format use a slow path
   that calls the reference functions of `GZ.parser`, so odd lines behave as before.
-- Compatibility: the result has the same fields as `parseOcitText`. `seriesByCol` is a lazy map that builds a text array per column
-  when a view asks for it. The new field `table` holds the typed columns.
+- Compatibility: the result has the same fields as `parseOcitText`. `seriesByCol` was a lazy map that built a text array per column (removed in Phase 5).
+  The new field `table` holds the typed columns.
 - The header analysis is now one function, `GZ.parser.analyzeHeader`, used by both parsers.
 - The app: a file goes straight to `importFile`. Pasted text and the sample use `importText`. The textarea no longer holds a file.
 - Tests: `tests/suite/csvImport.js` compares the importer with `parseOcitText` for all fixtures, for every chunk size,
@@ -201,11 +201,59 @@ the project file is 166 KB.
 
 Firefox is not tested yet (Phase 7). IndexedDB on `file://` in Firefox and the download path are the open questions.
 
-### Phase 5: consumer migration (L)
+### Phase 5: consumer migration (L). Done.
 
-- Views use the numeric column API, with a lookup table per column to categorize values.
-- Remove the string arrays. Add an LRU cache for decoded days.
-- Make `GZ.umlaufContext.buildAll` lazy: build the data of a column only when a formula or a view uses it.
+- `js/core/series.js` (`GZ.series`): numeric access to the columns of a `GZ.table`.
+  A function that needs the meaning of a cell gets a function from the caller. The code calls this function one time for each different
+  cell text, keeps the result in a lookup table, and applies it to all rows. A day with 86,400 rows costs a few calls.
+  - `cats(col, fn)` gives `{ codes, names }`. The code 0 is a blank cell. The code type grows with the number of categories (8, 16 or 32 bit).
+  - `flags(col, pred)` gives a `Uint8Array`. `anyFlag(list, pred, rowCount)` is the OR over several columns.
+  - `numberAt(col)` gives a function `i -> number` with the forward fill of blank cells. A column without exception cells needs no copy.
+  - `rawGetter(col)` gives a function `i -> text` without a new string for each call. `rawAt(col, i)` reads one cell.
+  - `of(x)` accepts a column or a text array. `fromStrings` and `tableFromStrings` make columns from text arrays (used by tests and by the reference parser).
+- The analysis object has `table` and no more `seriesByCol`. The string arrays are gone from the application.
+  `LazySeriesMap` is removed. The importer and the recording decoder give typed columns only.
+  `GZ.table.withColumns(table, extra)` mixes extra columns into a table without a copy. The cycle check uses it for the formula columns.
+- All consumers now read the typed columns: `GZ.segments` (`buildSegments`, `makeRawValueSampler`), `GZ.wartezeitLogic`, `GZ.detectors`,
+  `GZ.umlaufContext`, the views of the wait time, the public transport tab, the formula builder and the cycle check, and `app.js`.
+  `GZ.detectors.occupancy` and the other occupancy flags are `Uint8Array` (0 or 1).
+  The result of a formula is a column of the kind `u8` (1 for TRUE). It is no longer an array of the texts '1' and '0'.
+- `GZ.umlaufContext.buildAll` is lazy. The number of rows of a cycle needs the number of An and Ab events of ALL objects (this rule stays).
+  The code counts them in one cheap pass (`GZ.segments.countCycleSgEvents`). It makes no event objects, no samplers and no occupancy arrays for this.
+  The data of an object is built when a formula reads this object for the first time (the scope of a row has a getter for each object name).
+  A recording with 100 detector columns and a formula with 3 of them builds the data of 3 columns.
+- `js/io/recordingCache.js` (`GZ.recordingCache`): an LRU cache of decoded recordings with a byte limit (default 256 MiB).
+  It keeps the last recording also when this one alone is above the limit. It shares a running load between two calls.
+  It drops an entry when the signature of the content (row count and size of the chunks) changes.
+  The project view uses it: an import puts its recording in the cache. "Restore" and "Open" read through it.
+  The recording is still decoded as a whole. A decode of single columns on demand needs a synchronous decoder (the gzip step is asynchronous).
+  This is not needed now, because the typed table of a day needs about 10 MB. The cache is the base for Phase 6 (several recordings per LSA).
+- Tests:
+  - The golden values of the consumers come from the code before Phase 5 (text arrays). They cover the segments, the samplers, the detector data check,
+    the occupancy, the wait time events, the public transport events, the cycle aggregates and the rows and values of the cycle context.
+    The cycle context values are 904 formulas over the 100 columns of the wide recording. The same values come from the table code for all
+    fixtures, also for the edge cases with `INV`, blank cells, wide numbers and a quoted header.
+  - `tests/suite/series.js` compares each function of `GZ.series` with the text array version on 60 random seeds and on all kinds of columns.
+  - `tests/suite/consumers.js` checks `countCycleSgEvents` against `computeCycleSgEvents` (200 random cases with borders on cycle starts)
+    and the occupancy of no detector.
+  - `tests/suite/recordingCache.js` tests the LRU order, the limit, the signature, the shared load and a failing loader.
+  - Ten breaks of the new code (no forward fill, AND for OR, a blank cell with a code, a wrong run shortcut, a wrong limit of the counter, a wrong event
+    in the lazy getter, and others) made the suite fail every time.
+  - `tests/e2e/project.js` checks that "open" in the same page does not decode again, also after another import.
+- Check against the code before Phase 5, in Chromium: the markup of all tabs for the sample and for the wide recording (formulas, numeric, detector and formula
+  filters, 8 columns of the cycle statistics) is identical. The saved configuration files have the same hashes.
+
+Results, Chromium, memory kept after the import and the first render of all tabs (heap after garbage collection):
+
+| | 25 MiB, 100 columns, 24 h | 74 MiB |
+|---|---|---|
+| Before Phase 5: memory, time | 180 MB, 2.8 s | 818 MB, 13.6 s |
+| After Phase 5: memory, time | 21 MB, 1.5 s | 88 MB, 5.2 s |
+| `umlaufstatistiken.populateControls` before | +149 MB, 998 ms | +675 MB, 3,298 ms |
+| `umlaufstatistiken.populateControls` after | +0.5 MB, 146 ms | +2.7 MB, 249 ms |
+
+Known behavior that did not change: after the sample, a second import in the same page does not give the public transport tab a first row. The code before Phase 5 does the same.
+An opened project does not replace a log file that is already loaded. The log is not part of a project yet.
 
 ### Phase 6: several recordings per LSA (M to L)
 

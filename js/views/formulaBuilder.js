@@ -59,7 +59,7 @@
    - as a highlight color on an object track, if a highlight target is set (see
      getFormulaHighlights()).
    So the user can recognize a formula everywhere. */
-GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor', 'exprEngine', 'format', 'parser', 'segments', 'snackbar', 'state', 'wartezeitLogic'] }, function (GZ) {
+GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor', 'exprEngine', 'format', 'parser', 'segments', 'series', 'snackbar', 'state', 'table', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { esc } = GZ.format;
   const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler, makeSegmentDurationSampler } = GZ.segments;
@@ -866,15 +866,15 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
         // Ab(K1)).
         // It is the raw signal image of K2 at the time of the stop of K1.
         // It is not the categorized Zustand() at the CURRENT time.
-        rawSample: makeRawValueSampler(a.times, a.seriesByCol.get(col.index)),
+        rawSample: makeRawValueSampler(a.times, a.table.byIndex.get(col.index)),
         // durationAt: for the DauerBei() primitive.
         // It is like Dauer(objekt), but for any time and not for the CURRENT time.
         durationAt: makeSegmentDurationSampler(segs)
       };
     }
-    const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);
-    const rawVals = a.seriesByCol.get(col.index);
-    const occupied = a.times.map((_, k) => wzIstBelegt(rawVals[k]));
+    const series = a.table.byIndex.get(col.index);
+    const segs = buildSegments(a.times, series, categorizeDetRaw);
+    const occupied = GZ.series.flags(series, wzIstBelegt);
     // An, Ab, TF, RG and GE are universal (see the PRIMITIVES header comment in exprEngine.js).
     // A detector or value has, with BELEGT, exactly the same idea of an "active state" as a signal
     // group with GRUEN.
@@ -902,7 +902,7 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
       // Unlike cycleMetrics, it stays unchanged over the whole berechnen() pass.
       // It does not need to advance for each row, because sample() itself resolves any time with a
       // binary search.
-      rawSample: makeRawValueSampler(a.times, rawVals),
+      rawSample: makeRawValueSampler(a.times, series),
       // durationAt: for the DauerBei() primitive.
       // An example is "how long was this detector already occupied at the time of the stop of K1".
       durationAt: makeSegmentDurationSampler(segs)
@@ -916,7 +916,7 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
   function berechnen() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
-    const { times, seriesByCol, cycleStarts } = a;
+    const { times, table, cycleStarts } = a;
     const { types, aliasErrors } = currentVarTypes();
     const { defs: funcDefs, errors: funcErrors } = currentFuncDefs();
     const cols = sourceCols();
@@ -939,7 +939,8 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
       const col = cols.find(c => c.index === v.colIndex);
       const type = col ? varTypeForCol(col) : 'NUM';
       if (type === 'SG' || type === 'DET') return { alias, type, handle: buildObjectHandle(a, type, col, TU_MED) };
-      return { alias, type, series: col ? seriesByCol.get(col.index) : null };
+      const column = col ? table.byIndex.get(col.index) : null;
+      return { alias, type, rawOf: column ? GZ.series.rawGetter(column) : null };
     }).filter(s => s.alias);
 
     // TX = seconds since the cycle start of the current cycle.
@@ -1047,7 +1048,7 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
       // Then each formula that uses a specific variable, EXCEPT the first one, wrongly gives "no
       // segment" (Zustand, Dauer and DauerSeit -> 0 or null) for the whole recording.
       scopeSpecs.forEach(s => { if (s.handle) s.handle.sweep.reset(); });
-      const rawSeries = new Array(times.length);
+      const rawSeries = new Uint8Array(times.length);
       let cyclePtr = 0;
       for (let i = 0; i < times.length; i++) {
         const t = times[i];
@@ -1067,11 +1068,11 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
             scope[s.alias] = s.handle;
             return;
           }
-          const raw = s.series ? (s.series[i] || '') : '';
+          const raw = s.rawOf ? (s.rawOf(i) || '') : '';
           scope[s.alias] = raw.trim() === '' ? NaN : Number(raw);
         });
-        deps.forEach(depId => { scope[byId.get(depId).name.trim()] = rawSeriesById.get(depId)[i] === '1'; });
-        rawSeries[i] = compiled.run(scope) ? '1' : '0';
+        deps.forEach(depId => { scope[byId.get(depId).name.trim()] = rawSeriesById.get(depId)[i] === 1; });
+        rawSeries[i] = compiled.run(scope) ? 1 : 0;
       }
       rawSeriesById.set(id, rawSeries);
     });
@@ -1084,8 +1085,8 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
     const skippedList = []; // {name, message} - for the hint line AND the snackbar
     formulas.forEach(f => {
       const name = f.name.trim() || `F${f.id}`;
-      const rawSeries = rawSeriesById.get(f.id);
-      if (!rawSeries) {
+      const rawData = rawSeriesById.get(f.id);
+      if (!rawData) {
         f.rawSeries = null;
         skippedList.push({ name, message: skipReasonById.get(f.id) || 'Unbekannter Fehler' });
         return;
@@ -1095,6 +1096,8 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
       // the formula itself.
       // It is cheap enough to translate it there into TRUE and FALSE intervals when needed.
       // So the code does not do this in advance here.
+      // The series is a column of the kind u8. A cell is 1 for TRUE and 0 for FALSE.
+      const rawSeries = GZ.table.createNumericColumn(SYNTH_INDEX_BASE + f.id, rawData, null);
       f.rawSeries = rawSeries;
       computed.push({
         index: SYNTH_INDEX_BASE + f.id, kuerzel: 'FORMEL', name,
@@ -1145,7 +1148,7 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor'
     if (!a) return [];
     const cols = sourceCols();
     return formulas
-      .filter(f => f.highlightCol != null && f.rawSeries && f.rawSeries.length === a.times.length)
+      .filter(f => f.highlightCol != null && f.rawSeries && f.rawSeries.data.length === a.times.length)
       .map(f => {
         const col = cols.find(c => c.index === f.highlightCol);
         if (!col) return null;

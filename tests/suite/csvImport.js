@@ -11,7 +11,9 @@
   /* ---------- comparison ---------- */
   function snapshot(r) {
     const series = {};
-    r.seriesByCol.forEach((arr, idx) => { series[idx] = Array.prototype.slice.call(arr); });
+    // The importer and the decoder give typed columns. The reference parser gives text arrays.
+    if (r.seriesByCol) r.seriesByCol.forEach((arr, idx) => { series[idx] = Array.prototype.slice.call(arr); });
+    else r.table.columns.forEach(col => { series[col.index] = GZ.table.columnStrings(col); });
     return {
       columns: r.columns, otherColumns: r.otherColumns, times: Array.prototype.slice.call(r.times), series,
       splValues: r.splValues, tcValues: r.tcValues, totalRows: r.totalRows, skippedRows: r.skippedRows,
@@ -168,16 +170,15 @@
     }
   });
 
-  T.test('csvImport: the result has the parseOcitText shape and a typed table', () => {
+  T.test('csvImport: the result has the parseOcitText fields and a typed table instead of text arrays', () => {
     const r = GZ.csvImport.importText(T.allFixtures().synthetic);
     assert.ok(Array.isArray(r.times), 'times is a plain array');
     assert.equal(r.table.rowCount, 3600);
     assert.ok(r.table.times instanceof Float64Array || r.table.times.length === 3600, 'table times');
-    assert.equal(r.seriesByCol.size, 100);
-    assert.equal(r.seriesByCol.get(99999), undefined);
-    const copy = new Map(r.seriesByCol);
-    assert.equal(copy.size, 100);
-    assert.equal(copy.get(5).length, 3600);
+    assert.equal(r.seriesByCol, undefined, 'the importer gives no text arrays');
+    assert.equal(r.table.columns.length, 100);
+    assert.equal(r.table.byIndex.get(99999), undefined);
+    assert.equal(r.table.byIndex.get(5).data.length, 3600);
     const kinds = {};
     r.table.columns.forEach(c => { kinds[c.kind] = (kinds[c.kind] || 0) + 1; });
     assert.ok(!kinds.dict && !kinds.u32, 'the synthetic recording needs only u8 and u16: ' + JSON.stringify(kinds));

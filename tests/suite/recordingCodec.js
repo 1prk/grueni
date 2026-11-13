@@ -7,7 +7,9 @@
   // The comparison of two import results, like in the csvImport tests.
   function snapshot(r) {
     const series = {};
-    r.seriesByCol.forEach((arr, idx) => { series[idx] = Array.prototype.slice.call(arr); });
+    // The importer and the decoder give typed columns. The reference parser gives text arrays.
+    if (r.seriesByCol) r.seriesByCol.forEach((arr, idx) => { series[idx] = Array.prototype.slice.call(arr); });
+    else r.table.columns.forEach(col => { series[col.index] = GZ.table.columnStrings(col); });
     return {
       columns: r.columns, otherColumns: r.otherColumns, times: Array.prototype.slice.call(r.times), series,
       splValues: r.splValues, tcValues: r.tcValues, totalRows: r.totalRows, skippedRows: r.skippedRows,

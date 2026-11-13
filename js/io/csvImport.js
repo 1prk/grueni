@@ -1,6 +1,7 @@
 /* GZ.csvImport is the streaming importer for OCIT tables (io layer).
 
    It gives the same result as GZ.parser.parseOcitText (same fields, same texts, same errors).
+   The one exception is `seriesByCol`: the importer has the typed columns in `table` instead.
    But it reads bytes. It does not read a big string.
    - A fast path reads numbers directly from the bytes.
      Some lines go to a slow path. These are lines with quotes, with a carriage return in the
@@ -8,7 +9,7 @@
      without a tab, or with an unusual time format.
      The slow path uses the reference functions of GZ.parser. So odd lines behave as before.
    - The columns are typed arrays (see GZ.table). The result also has the field `table`.
-   - `seriesByCol` is a lazy map. It builds the text array of a column when a view asks for it.
+   - There is no text array for a column. The analyses read the typed columns (see GZ.series).
 
    API
      importFile(file, { onProgress })  -> Promise<result>   (reads file.stream())
@@ -342,7 +343,6 @@ GZ.define('csvImport', { layer: 'io', deps: ['parser', 'table'] }, function (GZ)
       return {
         columns: h.columns, otherColumns: h.otherColumns,
         times: Array.from(timesF64),
-        seriesByCol: new T.LazySeriesMap(columnsData),
         splValues: this.splValues, tcValues: this.tcValues,
         totalRows: this.totalRows, skippedRows: this.skipped,
         knotenName: h.knotenName, knotenNr: h.knotenNr,

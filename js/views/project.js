@@ -14,7 +14,7 @@
 
    The project file is the source of truth. IndexedDB is a convenience copy. If it does not work, the page works as before
    and tells the user once. The chunks are small (about 150 KB for each day), so the session keeps them in memory too. */
-GZ.define('views.project', { layer: 'views', deps: ['configIO', 'fileAccess', 'format', 'localStore', 'project', 'projectFile', 'recordingCodec', 'snackbar', 'state'] }, function (GZ) {
+GZ.define('views.project', { layer: 'views', deps: ['configIO', 'fileAccess', 'format', 'localStore', 'project', 'projectFile', 'recordingCache', 'recordingCodec', 'snackbar', 'state'] }, function (GZ) {
   'use strict';
   const P = GZ.project, PF = GZ.projectFile, R = GZ.recordingCodec, L = GZ.localStore, FA = GZ.fileAccess;
 
@@ -22,6 +22,7 @@ GZ.define('views.project', { layer: 'views', deps: ['configIO', 'fileAccess', 'f
   const CURRENT_KEY = 'current';
   const EXTENSION = '.grueni.zip';
 
+  const cache = GZ.recordingCache.create();   // decoded recordings. A recording that the code used before needs no new decoding.
   let els = null;
   let store = null;          // the open GZ.localStore Store, or null
   let storeProblem = null;   // the error when the store does not work
@@ -157,6 +158,14 @@ GZ.define('views.project', { layer: 'views', deps: ['configIO', 'fileAccess', 'f
     timer = setTimeout(autosave, AUTOSAVE_DELAY_MS);
   }
 
+  // Describes the content of a recording. The cache drops an entry when the content has another signature.
+  // A recording id never changes its content in this application. The signature protects against a damaged or edited file.
+  function signatureOf(rec, chunks) {
+    let bytes = 0;
+    P.chunkKeys({ lsas: [{ recordings: [rec] }] }).forEach(key => { const b = chunks.get(key); bytes += b ? b.length : 0; });
+    return rec.rowCount + ':' + bytes;
+  }
+
   /* ---------- a new import ---------- */
   async function onImported(p) {
     const seq = ++importSeq;
@@ -173,6 +182,8 @@ GZ.define('views.project', { layer: 'views', deps: ['configIO', 'fileAccess', 'f
     encoded.chunks.forEach((bytes, name) => chunks.set(P.chunkKey(rec.id, name), bytes));
     const old = session;
     session = { project, chunks, lastConfigJson: null, fileHandle: null, fileName: '', savedAt: null };
+    // The recording is ready. The cache keeps it for a later "restore" or "open".
+    cache.set(rec.id, p.parsed, signatureOf(rec, chunks));
     syncConfig(true);
     enableButtons();
     describeSession();
@@ -193,11 +204,12 @@ GZ.define('views.project', { layer: 'views', deps: ['configIO', 'fileAccess', 'f
       snack('Das Projekt enthält keine Aufzeichnung', 'info', 'Die Einstellungen werden erst mit einer Aufzeichnung gebraucht.');
       return;
     }
-    const parsed = await R.decode(rec, name => {
-      const bytes = session.chunks.get(P.chunkKey(rec.id, name));
+    const chunks = session.chunks;
+    const parsed = await cache.load(rec.id, () => R.decode(rec, name => {
+      const bytes = chunks.get(P.chunkKey(rec.id, name));
       if (!bytes) throw new Error('Der Datenblock ' + name + ' fehlt.');
       return Promise.resolve(bytes);
-    });
+    }), signatureOf(rec, chunks));
     importSeq++;                                  // an import that is still running must not replace this project
     GZ.state.command('recording:show', { parsed, fileName: rec.fileName || rec.name });
     const remarks = applyConfig(lsa.config);

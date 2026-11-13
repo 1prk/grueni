@@ -6,7 +6,7 @@
    The tab has a raw points view and a scatter chart for each signal group,
    combined key figures (with a breakdown for each signal group)
    and an event table that the user can sort, search and export to Excel. */
-GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart', 'charts.oepnvScatterChart', 'exprEditor', 'exprEngine', 'format', 'oepnvLogic', 'segments', 'state', 'stats', 'xlsxWriter'] }, function (GZ) {
+GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart', 'charts.oepnvScatterChart', 'exprEditor', 'exprEngine', 'format', 'oepnvLogic', 'segments', 'series', 'state', 'stats', 'xlsxWriter'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs } = GZ.format;
   const { mean, percentile, parseNumListe } = GZ.stats;
@@ -325,7 +325,7 @@ GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart'
   function recompute() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
-    const { allStats, times, seriesByCol, splValues, cycleStarts } = a;
+    const { allStats, times, table, splValues, cycleStarts } = a;
     const detCols = currentDetCols();
     const losBounds = leseLosBounds();
     const exclSpl = parseNumListe(els.splExcl.value);
@@ -336,8 +336,8 @@ GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart'
       const anDetCols = detCols.filter(c => row.anIdx.has(c.index));
       const abDetCols = detCols.filter(c => row.abIdx.has(c.index));
       if (!sgEntry || anDetCols.length === 0 || abDetCols.length === 0) return;
-      const anOccupied = times.map((_, i) => anDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
-      const abOccupied = times.map((_, i) => abDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
+      const anOccupied = GZ.series.anyFlag(anDetCols.map(c => table.byIndex.get(c.index)), wzIstBelegt, times.length);
+      const abOccupied = GZ.series.anyFlag(abDetCols.map(c => table.byIndex.get(c.index)), wzIstBelegt, times.length);
       const { events, unresolved } = computeOepnvEvents(times, anOccupied, abOccupied, splValues, exclSpl, row.sollfahrzeitSek, row.zwangsloeschSek);
       events.forEach(e => { e.sgLabel = sgEntry.col.name; e.sgColIndex = sgEntry.col.index; e.rowId = row.id; });
       if (unresolved) { unresolved.sgLabel = sgEntry.col.name; unresolved.rowId = row.id; }
@@ -494,7 +494,7 @@ GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart'
   }
 
   function buildRowModel(allEvents, unresolvedList, losBounds, results) {
-    const seriesByCol = GZ.state.data.currentAnalysis.seriesByCol;
+    const table = GZ.state.data.currentAnalysis.table;
     const cycleStarts = GZ.state.data.currentAnalysis.cycleStarts;
     const findResult = id => results.find(r => r.row.id === id);
     let nr = 0;
@@ -519,8 +519,8 @@ GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart'
         istFahrzeitSek: e.istFahrzeitSek,
         verlustSek: e.verlustSek, verlustIsEstimate: isZwang,
         qsv: (!e.excluded && !isZwang) ? losStufe(e.verlustSek, losBounds) : null,
-        anPunkt: auslosenderDetektor(result.anDetCols, seriesByCol, e.anIdx),
-        abPunkt: e.type === 'ABMELDUNG' ? auslosenderDetektor(result.abDetCols, seriesByCol, e.endIdx) : '–'
+        anPunkt: auslosenderDetektor(result.anDetCols, table, e.anIdx),
+        abPunkt: e.type === 'ABMELDUNG' ? auslosenderDetektor(result.abDetCols, table, e.endIdx) : '–'
       };
     });
 
@@ -537,7 +537,7 @@ GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart'
         istFahrzeitSek: u.durationSec,
         verlustSek: null, verlustIsEstimate: false,
         qsv: null,
-        anPunkt: result ? auslosenderDetektor(result.anDetCols, seriesByCol, u.startIdx) : '–',
+        anPunkt: result ? auslosenderDetektor(result.anDetCols, table, u.startIdx) : '–',
         abPunkt: '–'
       });
     });

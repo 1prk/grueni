@@ -83,7 +83,6 @@ GZ.define('recordingCodec', { layer: 'io', deps: ['chunkCodec', 'project', 'tabl
     return {
       columns: h.columns, otherColumns: h.otherColumns,
       times: Array.from(times),
-      seriesByCol: new T.LazySeriesMap(columns),
       splValues: T.columnStrings(splCol), tcValues: T.columnStrings(tcCol),
       totalRows: h.totalRows, skippedRows: h.skippedRows,
       knotenName: h.knotenName, knotenNr: h.knotenNr,

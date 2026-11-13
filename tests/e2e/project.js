@@ -147,6 +147,23 @@ const noPicker = page => page.evaluate(() => { window.showSaveFilePicker = undef
   const gzB = await page2.evaluate(() => document.getElementById('tab-gz').textContent.replace(/\s+/g, ' ').length);
   check('the green time tab has the same text length after open', gzA === gzB && gzA > 500, gzA + ' vs ' + gzB);
 
+  /* ---------- the cache of decoded recordings ---------- */
+  await page.evaluate(() => {
+    window.__decodes = 0;
+    const original = GZ.recordingCodec.decode;
+    GZ.recordingCodec.decode = function () { window.__decodes++; return original.apply(this, arguments); };
+  });
+  await page.setInputFiles('#projectOpenInput', saved.file);
+  await wait(page, 1500);
+  check('opening the saved project in the same page does not decode again', (await page.evaluate(() => window.__decodes)) === 0, 'decodes ' + await page.evaluate(() => window.__decodes));
+  check('the recording of a project from the cache is the same', (await analysisSummary(page)) === summaryBefore);
+  await page.click('#btnSample');
+  await page.waitForFunction(() => /Beispieldaten/.test(document.getElementById('projectInfo').textContent), null, { timeout: 20000 });
+  await wait(page, 800);
+  await page.setInputFiles('#projectOpenInput', saved.file);
+  await wait(page, 1500);
+  check('the cache keeps the earlier recording after another import', (await page.evaluate(() => window.__decodes)) === 0 && (await analysisSummary(page)) === summaryBefore, 'decodes ' + await page.evaluate(() => window.__decodes));
+
   /* ---------- configuration files ---------- */
   const cfg = await download(page, '#btnConfigExport');
   const cfgObj = JSON.parse(fs.readFileSync(cfg.file, 'utf8'));

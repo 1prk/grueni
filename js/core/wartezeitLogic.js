@@ -2,7 +2,7 @@
    detector occupancy to start of green.
    It is pure calculation logic with event-based edge detection.
    TX and TU are only for information (see txAtTime and computeGlobalTU). */
-GZ.define('wartezeitLogic', { layer: 'domain', deps: ['segments'] }, function (GZ) {
+GZ.define('wartezeitLogic', { layer: 'domain', deps: ['segments', 'series'] }, function (GZ) {
   'use strict';
 
   // Default limits for the rating for each signal group type.
@@ -35,15 +35,18 @@ GZ.define('wartezeitLogic', { layer: 'domain', deps: ['segments'] }, function (G
   //   This does not depend on the occupancy.
   //   With short pulse loops the vehicle waits BEHIND the loop at the stop line.
   //   A gap resolution would drop exactly the long wait times that the analysis must find.
-  function computeWartezeitEvents(times, sgRaw, detOccupied, splRaw, inkBlinken, gapTolSek, holdUntilGreen, exclSpl) {
+  // sgSeries is the series of the signal group (a column or a text array).
+  // detOccupied has one flag for each row (see GZ.series.flags).
+  function computeWartezeitEvents(times, sgSeries, detOccupied, splRaw, inkBlinken, gapTolSek, holdUntilGreen, exclSpl) {
     const n = times.length;
+    const sgGreen = GZ.series.flags(sgSeries, raw => wzIsGreen(raw, inkBlinken));
     const events = [];
     const cancelledTimes = []; // Start times of requests that ended without green.
     let prevBelegt = false, inGreenPeriod = false, waitingForGreen = false;
     let requestStartIdx = -1, letzteBelegtZeit = 0, nAufgeloest = 0;
     for (let i = 0; i < n; i++) {
       const detBelegt = detOccupied[i];
-      const sgGruen = wzIsGreen(sgRaw[i], inkBlinken);
+      const sgGruen = sgGreen[i] === 1;
 
       if (sgGruen && !inGreenPeriod) {
         inGreenPeriod = true;
@@ -101,8 +104,9 @@ GZ.define('wartezeitLogic', { layer: 'domain', deps: ['segments'] }, function (G
     return cs == null ? null : Math.round((t - cs) / 1000);
   }
 
-  function auslosenderDetektor(detCols, seriesByCol, idx) {
-    const names = detCols.filter(c => wzIstBelegt(seriesByCol.get(c.index)[idx])).map(c => c.name);
+  // table is the GZ.table of the recording. idx is the row.
+  function auslosenderDetektor(detCols, table, idx) {
+    const names = detCols.filter(c => wzIstBelegt(GZ.series.rawAt(table.byIndex.get(c.index), idx))).map(c => c.name);
     return names.length ? names.join(' + ') : '–';
   }
 

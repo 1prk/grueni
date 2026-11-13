@@ -16,7 +16,7 @@ GZ.define('state', { layer: 'store', deps: ['detectors', 'logs', 'topology'] }, 
   'use strict';
 
   const state = {
-    // {allStats, tMin, tMax, cycleStarts, otherColumns, times, seriesByCol, splValues, tcValues,
+    // {allStats, tMin, tMax, cycleStarts, otherColumns, times, table, splValues, tcValues,
     // splList}
     currentAnalysis: null,
     // 'total' means the whole recording. 'spl' means one signal plan.

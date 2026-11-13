@@ -94,11 +94,11 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
   // A restored recording does not send the topic recording:imported. It is not a new import.
   function analyzeParsed(parsed, opts) {
     const o = opts || {};
-    const { columns, otherColumns, times, seriesByCol, totalRows, skippedRows, knotenName, knotenNr, cycleStarts } = parsed;
+    const { columns, otherColumns, times, table, totalRows, skippedRows, knotenName, knotenNr, cycleStarts } = parsed;
     const tMin = times[0], tMax = times[times.length - 1] + GZ.parser.estimateStep(times);
 
     const allStats = columns.map(col => {
-      const segs = GZ.segments.buildSegments(times, seriesByCol.get(col.index));
+      const segs = GZ.segments.buildSegments(times, table.byIndex.get(col.index));
       const stats = GZ.segments.computeCycleStats(segs);
       stats.bySpl = GZ.segments.computeCycleStatsBySpl(segs, times, parsed.splValues);
       return { col, segs, stats };
@@ -108,7 +108,7 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
     const splList = GZ.stats.sortSplList(splSet);
 
     GZ.state.data.currentAnalysis = {
-      allStats, tMin, tMax, cycleStarts, otherColumns, times, seriesByCol,
+      allStats, tMin, tMax, cycleStarts, otherColumns, times, table,
       splValues: parsed.splValues, tcValues: parsed.tcValues, splList, knotenName, knotenNr
     };
 

@@ -1,7 +1,8 @@
 /* GZ.segments has state segments, cycle and SPL statistics and derived signal plan values (An,
    Ab, TF).
-   It works on the raw series that GZ.parser gives. It does not depend on the DOM. */
-GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (GZ) {
+   It works on series. A series is a column of GZ.table or a text array (see GZ.series).
+   It does not depend on the DOM. */
+GZ.define('segments', { layer: 'domain', deps: ['parser', 'series', 'stats'] }, function (GZ) {
   'use strict';
   const { median, mean } = GZ.stats;
   const { categorizeSgRaw } = GZ.parser;
@@ -14,30 +15,31 @@ GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (
   // That would falsify the average, the maximum and the trend.
   // catFn is optional (default: traffic signal categorization). For DET columns the caller passes
   // categorizeDetRaw.
-  function buildSegments(times, rawValues, catFn) {
+  // The code calls catFn one time for each different cell text and not for each row (see GZ.series.cats).
+  function buildSegments(times, series, catFn) {
     const fn = catFn || categorizeSgRaw;
+    const { codes, names } = GZ.series.cats(series, fn);
     const segs = [];
     const step = GZ.parser.estimateStep(times);
     const gapThresh = Math.max(step * 5, 5000);
-    let curCat = null, curStart = null, prevT = null;
-    for (let i = 0; i < rawValues.length; i++) {
+    let curCode = 0, curStart = null, prevT = null;
+    for (let i = 0; i < codes.length; i++) {
       const t = times[i];
-      if (prevT !== null && (t - prevT) > gapThresh && curCat !== null) {
+      if (prevT !== null && (t - prevT) > gapThresh && curCode !== 0) {
         const segEnd = prevT + step;
-        segs.push({ cat: curCat, start: curStart, end: segEnd });
+        segs.push({ cat: names[curCode], start: curStart, end: segEnd });
         segs.push({ cat: 'LUECKE', start: segEnd, end: t });
-        curCat = null; curStart = null;
+        curCode = 0; curStart = null;
       }
       prevT = t;
-      const raw = rawValues[i];
-      if (raw === '') { continue; }
-      const cat = fn(raw);
-      if (cat !== curCat) {
-        if (curCat !== null) segs.push({ cat: curCat, start: curStart, end: t });
-        curCat = cat; curStart = t;
+      const code = codes[i];
+      if (code === 0) { continue; }
+      if (code !== curCode) {
+        if (curCode !== 0) segs.push({ cat: names[curCode], start: curStart, end: t });
+        curCode = code; curStart = t;
       }
     }
-    if (curCat !== null) segs.push({ cat: curCat, start: curStart, end: times[times.length - 1] + GZ.parser.estimateStep(times) });
+    if (curCode !== 0) segs.push({ cat: names[curCode], start: curStart, end: times[times.length - 1] + GZ.parser.estimateStep(times) });
     return segs;
   }
 
@@ -75,13 +77,8 @@ GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (
   // A REALLY empty cell (no value seen so far) and a non-numeric raw value (for example "INV") give
   // NaN.
   // This is consistent with the NUM/NaN contract in exprEngine.js.
-  function makeRawValueSampler(times, rawVals) {
-    const filled = new Array(rawVals.length);
-    let last = '';
-    for (let i = 0; i < rawVals.length; i++) {
-      if (rawVals[i] !== '') last = rawVals[i];
-      filled[i] = last;
-    }
+  function makeRawValueSampler(times, series) {
+    const valueAt = GZ.series.numberAt(series);
     return function sample(tMs) {
       let lo = 0, hi = times.length - 1, ans = -1;
       while (lo <= hi) {
@@ -89,10 +86,7 @@ GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (
         if (times[mid] <= tMs) { ans = mid; lo = mid + 1; } else hi = mid - 1;
       }
       if (ans === -1) return NaN;
-      const raw = filled[ans];
-      if (raw === '') return NaN;
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : NaN;
+      return valueAt(ans);
     };
   }
 
@@ -396,9 +390,33 @@ GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (
     return out;
   }
 
+  // The number of An events and of Ab events of each cycle. It uses the same rules as computeCycleSgEvents().
+  // But it does not make event objects. The count of rows of a cycle needs only these numbers.
+  // Returns { an: Uint32Array, ab: Uint32Array }.
+  function countCycleSgEvents(greens, cycleStarts, tMax) {
+    const n = cycleStarts ? cycleStarts.length : 0;
+    const an = new Uint32Array(n), ab = new Uint32Array(n);
+    let ptrAn = 0, ptrAb = 0;
+    for (let i = 0; i < n; i++) {
+      const start = cycleStarts[i];
+      const end = i + 1 < n ? cycleStarts[i + 1] : tMax;
+      while (ptrAn < greens.length && greens[ptrAn].start < start) ptrAn++;
+      let j = ptrAn;
+      while (j < greens.length && greens[j].start < end) j++;
+      an[i] = j - ptrAn;
+      ptrAn = j;
+      while (ptrAb < greens.length && greens[ptrAb].end < start) ptrAb++;
+      j = ptrAb;
+      while (j < greens.length && greens[j].end < end) j++;
+      ab[i] = j - ptrAb;
+      ptrAb = j;
+    }
+    return { an, ab };
+  }
+
   // Triggered and count of rising edges of ONE detector or value for EVERY cycle.
   // It is the basis of the exprEngine primitives Ausgeloest and AnzahlAusloesungen.
-  // occupiedFlags: boolean[] parallel to times.
+  // occupiedFlags: an array parallel to times. A value is true or false, or 1 or 0 (see GZ.series.flags).
   // The caller decides which occupancy rule applies (for example GZ.wartezeitLogic.wzIstBelegt).
   // This function knows only points in time, no raw values.
   function computeCycleDetMetrics(times, occupiedFlags, cycleStarts, tMax) {
@@ -600,7 +618,7 @@ GZ.define('segments', { layer: 'domain', deps: ['parser', 'stats'] }, function (
     buildSegments, computeCycleStats, computeCycleStatsBySpl,
     findSplAt, makeRawValueSampler, makeSegmentDurationSampler, computeSplTransitions, computeGlobalTU,
     findEnclosingCycleStart, findCycleRange, computeSegmentAnAbTf, computeSignalplanRow,
-    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleSgEvents, computeCycleDetMetrics,
+    mapGreensToSegIndex, adjacentTransitionDurations, computeCycleSgMetrics, computeCycleSgEvents, countCycleSgEvents, computeCycleDetMetrics,
     typicalCycleSegments, getFlaggedAnomalies, getSplGroupMed, computeTrendSplWindows,
     computeAnomalyBands, wrapInterval, makeIntervalSweep, makeIndexSweep, makePointSegmentSweep
   };

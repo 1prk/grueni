@@ -16,7 +16,7 @@
 
    Detector kinds: "presence" (induction loop, camera field, radar)
    and "pulse" (push button, the request stays until green). */
-GZ.define('detectors', { layer: 'domain', deps: ['parser', 'segments', 'wartezeitLogic'] }, function (GZ) {
+GZ.define('detectors', { layer: 'domain', deps: ['parser', 'segments', 'series', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { buildSegments } = GZ.segments;
   const { categorizeDetRaw } = GZ.parser;
@@ -97,7 +97,7 @@ GZ.define('detectors', { layer: 'domain', deps: ['parser', 'segments', 'wartezei
   function occupancyIntervals(a, det) {
     const c = data().cache.intervals;
     if (!c.has(det.col.index)) {
-      const segs = buildSegments(a.times, a.seriesByCol.get(det.col.index), categorizeDetRaw);
+      const segs = buildSegments(a.times, a.table.byIndex.get(det.col.index), categorizeDetRaw);
       c.set(det.col.index, segs.filter(s => s.cat === 'BELEGT' && (s.end - s.start) / 1000 >= MIN_OCCUPANCY_SEC));
     }
     return c.get(det.col.index);
@@ -141,10 +141,9 @@ GZ.define('detectors', { layer: 'domain', deps: ['parser', 'segments', 'wartezei
     return { sg: pick.sg, score: pick.score, ties: tied.filter(x => x !== pick).map(x => x.sg) };
   }
 
-  // Occupancy for each sample (OR over the given detectors).
+  // Occupancy for each sample (OR over the given detectors). The result is a Uint8Array of 0 and 1.
   function occupancy(a, dets) {
-    const series = dets.map(d => a.seriesByCol.get(d.col.index));
-    return a.times.map((_, i) => series.some(s => wzIstBelegt(s[i])));
+    return GZ.series.anyFlag(dets.map(d => a.table.byIndex.get(d.col.index)), wzIstBelegt, a.times.length);
   }
 
   /* ---------------- Persistence (part of the junction configuration file) ---------------- */

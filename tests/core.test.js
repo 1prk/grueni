@@ -11,7 +11,7 @@ const ctx = { console, Date, Math };
 // The global object is the window, as in a browser. So the modules find GZ as a global name.
 ctx.window = ctx;
 vm.createContext(ctx);
-['define', 'format', 'stats', 'parser', 'segments', 'wartezeitLogic', 'slices', 'greenTime', 'detectors', 'logParser', 'sampleData', 'topology'].forEach(name => {
+['define', 'format', 'stats', 'parser', 'table', 'series', 'segments', 'wartezeitLogic', 'slices', 'greenTime', 'detectors', 'logParser', 'sampleData', 'topology'].forEach(name => {
   const file = path.join(root, 'js/core', name + '.js');
   vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: file });
 });
@@ -98,7 +98,7 @@ const splSet = new Set();
 allStats.forEach(s => s.stats.bySpl.forEach((_, k) => splSet.add(k)));
 const a = {
   allStats, tMin: times[0], tMax: times[times.length - 1] + 1000, cycleStarts: parsed.cycleStarts, otherColumns,
-  times, seriesByCol, splValues: parsed.splValues, splList: GZ.stats.sortSplList(splSet)
+  times, table: GZ.series.tableFromStrings(times, seriesByCol), splValues: parsed.splValues, splList: GZ.stats.sortSplList(splSet)
 };
 GZ.state.data.currentAnalysis = a;
 
@@ -200,7 +200,7 @@ test('green time: a dark period without TX gives one irregular cycle that is lef
     const segs = GZ.segments.buildSegments(p2.times, p2.seriesByCol.get(col.index));
     return { col, segs, stats: GZ.segments.computeCycleStats(segs) };
   });
-  const a2 = Object.assign({}, a, { allStats: stats2, cycleStarts: p2.cycleStarts, times: p2.times, seriesByCol: p2.seriesByCol, splValues: p2.splValues, tMin: p2.times[0], tMax: p2.times[p2.times.length - 1] + 1000 });
+  const a2 = Object.assign({}, a, { allStats: stats2, cycleStarts: p2.cycleStarts, times: p2.times, table: GZ.series.tableFromStrings(p2.times, p2.seriesByCol), splValues: p2.splValues, tMin: p2.times[0], tMax: p2.times[p2.times.length - 1] + 1000 });
   const m2 = GZ.greenTime.build(a2);
   assert.strictEqual(m2.irregularCount, 1);
   const long = m2.cycles.filter(c => !c.regular)[0];

@@ -31,7 +31,7 @@
    - A cycle window (as in the signal time diagram) limits the number of DOM and SVG nodes that
      the code renders at the same time.
      So the view stays smooth also for very long recordings (thousands of cycles). */
-GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 'charts.timelineLane', 'configIO', 'exprEngine', 'format', 'greenTime', 'logs', 'oepnvLogic', 'parser', 'phases', 'segments', 'snackbar', 'state'] }, function (GZ) {
+GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 'charts.timelineLane', 'configIO', 'exprEngine', 'format', 'greenTime', 'logs', 'oepnvLogic', 'parser', 'phases', 'segments', 'series', 'snackbar', 'state', 'table'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs, fmtTimeShort } = GZ.format;
   const {
@@ -1040,11 +1040,11 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
   // It calculates the Anmeldung and Abmeldung events once over the whole recording (as for the
   // detector segments), for the sweep of each cycle window.
   // See computeOepnvEvents (GZ.oepnvLogic) for the logic.
-  function buildFzRowsForSg(sgIdx, times, seriesByCol, splValues) {
+  function buildFzRowsForSg(sgIdx, times, table, splValues) {
     const oepnvRows = GZ.state.request('oepnvRows', sgIdx) || [];
     return oepnvRows.map(orow => {
-      const anOccupied = times.map((_, i) => orow.anDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
-      const abOccupied = times.map((_, i) => orow.abDetCols.some(c => wzIstBelegt(seriesByCol.get(c.index)[i])));
+      const anOccupied = GZ.series.anyFlag(orow.anDetCols.map(c => table.byIndex.get(c.index)), wzIstBelegt, times.length);
+      const abOccupied = GZ.series.anyFlag(orow.abDetCols.map(c => table.byIndex.get(c.index)), wzIstBelegt, times.length);
       const { events, unresolved } = computeOepnvEvents(times, anOccupied, abOccupied, splValues, [], orow.sollfahrzeitSek, orow.zwangsloeschSek);
 
       const fzSegs = [];
@@ -1083,7 +1083,7 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
   //   (Number('') is NaN, and each comparison with NaN gives false.)
   // The code does one full scan over the recording (as for the detector and APW sweeps above).
   // It does not scan again for each cycle.
-  function computeMatchingCycles(conditions, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) {
+  function computeMatchingCycles(conditions, objsByKey, allStats, cycleStarts, tMax, times, table) {
     const n = cycleStarts.length;
     const numCmp = { '=': (a, b) => a === b, '!=': (a, b) => a !== b, '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b };
     const stateSweeps = [];
@@ -1096,7 +1096,7 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
       } else {
         const segs = c.kuerzel === 'SG'
           ? allStats[c.index].segs.filter(s => s.cat === fr.value)
-          : buildSegments(times, seriesByCol.get(c.index), categorizeDetRaw).filter(s => s.cat === fr.value);
+          : buildSegments(times, table.byIndex.get(c.index), categorizeDetRaw).filter(s => s.cat === fr.value);
         stateSweeps.push(makeIntervalSweep(segs));
       }
     });
@@ -1112,10 +1112,10 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
       const rowTo = ptr;
       const stateOk = stateSweeps.every(sweep => sweep(start, end).length > 0);
       const numOk = numChecks.every(({ index, op, value }) => {
-        const vals = seriesByCol.get(index);
+        const rawOf = GZ.series.rawGetter(table.byIndex.get(index));
         const cmp = numCmp[op];
         for (let k = rowFrom; k < rowTo; k++) {
-          const num = Number((vals[k] || '').trim());
+          const num = Number((rawOf(k) || '').trim());
           if (!Number.isNaN(num) && cmp(num, value)) return true;
         }
         return false;
@@ -1156,16 +1156,15 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
   function render() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
-    const { allStats, cycleStarts, tMax, times, splValues, seriesByCol: seriesByColReal, otherColumns: otherColumnsReal } = a;
+    const { allStats, cycleStarts, tMax, times, splValues, table: tableReal, otherColumns: otherColumnsReal } = a;
 
     // Do NOT change the shared analysis with synthetic formula columns.
     // Mix them in locally here.
-    // If the formulaCols() list is empty, seriesByCol stays the same Map reference. There is no
+    // If the formulaCols() list is empty, the table stays the same object. There is no
     // unnecessary copy.
     const fCols = formulaCols();
     const otherColumns = fCols.length ? otherColumnsReal.concat(fCols) : otherColumnsReal;
-    const seriesByCol = fCols.length ? new Map(seriesByColReal) : seriesByColReal;
-    fCols.forEach(c => seriesByCol.set(c.index, c.rawSeries));
+    const table = fCols.length ? GZ.table.withColumns(tableReal, fCols.map(c => c.rawSeries)) : tableReal;
 
     if (!cycleStarts || cycleStarts.length < 2) {
       els.tablePanel.style.display = 'none';
@@ -1236,7 +1235,7 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
         flags: getFlaggedAnomalies(stats, anomalyCtx),
         greenSweep: makeIndexSweep(stats.greens),
         segSweep: makeIntervalSweep(segs),
-        fzRows: fzEnabled ? buildFzRowsForSg(sgIdx, times, seriesByCol, splValues) : []
+        fzRows: fzEnabled ? buildFzRowsForSg(sgIdx, times, table, splValues) : []
       };
     }).filter(Boolean);
 
@@ -1270,13 +1269,13 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
       }
       const kind = isNumericKuerzel(r.kuerzel) ? 'apw' : (r.kuerzel === 'FORMEL' ? 'formula' : 'det');
       const catFn = kind === 'apw' ? (v => v.trim()) : categorizeDetRaw;
-      const segs = buildSegments(times, seriesByCol.get(r.index), catFn);
+      const segs = buildSegments(times, table.byIndex.get(r.index), catFn);
       if (kind === 'apw') segs.forEach((s, idx) => { s.idx = idx; });
       traceMeta.set(objKey(r), { col: r, kind, sweep: makeIntervalSweep(segs) });
     });
 
     const n = cycleStarts.length;
-    let matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
+    let matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, table) : null;
 
     // Log filter: only cycles that contain at least one log entry (the log bar filters and the
     // level that the user chose here apply).

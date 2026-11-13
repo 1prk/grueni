@@ -79,40 +79,18 @@ GZ.define('table', { layer: 'domain', deps: [] }, function (GZ) {
     return out;
   }
 
-  // LazySeriesMap looks like the Map of text arrays that parseOcitText returns.
-  // The key is the CSV column. The value is an array of raw texts.
-  // It builds each array only when a caller asks for it.
-  // get(), has(), forEach(), keys(), values(), entries() and iteration work.
-  // So `new Map(series)` also works.
-  // releaseStrings() drops the arrays that exist.
-  class LazySeriesMap {
-    constructor(columns) {
-      this._cols = new Map(columns.map(c => [c.index, c]));
-      this._cache = new Map();
-    }
-    get size() { return this._cols.size; }
-    has(key) { return this._cols.has(key); }
-    get(key) {
-      let a = this._cache.get(key);
-      if (a === undefined) {
-        const col = this._cols.get(key);
-        if (col === undefined) return undefined;
-        a = columnStrings(col);
-        this._cache.set(key, a);
-      }
-      return a;
-    }
-    keys() { return this._cols.keys(); }
-    * values() { for (const k of this._cols.keys()) yield this.get(k); }
-    * entries() { for (const k of this._cols.keys()) yield [k, this.get(k)]; }
-    forEach(fn, thisArg) { for (const k of this._cols.keys()) fn.call(thisArg, this.get(k), k, this); }
-    [Symbol.iterator]() { return this.entries(); }
-    releaseStrings() { this._cache.clear(); }
-  }
-
   function createTable(times, columns) {
     return { rowCount: times.length, times, columns, byIndex: new Map(columns.map(c => [c.index, c])) };
   }
 
-  return { createNumericColumn, createDictColumn, createTable, isException, rawAt, columnStrings, LazySeriesMap };
+  // Returns a new table with extra columns. The extra columns replace a column with the same index.
+  // The original table does not change. The data of the columns is shared.
+  function withColumns(table, extra) {
+    const byIndex = new Map(table.byIndex);
+    extra.forEach(c => byIndex.set(c.index, c));
+    const columns = table.columns.filter(c => byIndex.get(c.index) === c).concat(extra);
+    return { rowCount: table.rowCount, times: table.times, columns, byIndex };
+  }
+
+  return { createNumericColumn, createDictColumn, createTable, withColumns, isException, rawAt, columnStrings };
 });

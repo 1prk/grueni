@@ -100,10 +100,10 @@ GZ.define('views.wartezeit', { layer: 'views', deps: ['charts.kit', 'charts.logM
       if (!dets.length) return;
       const hold = dets.every(d => d.kind === 'pulse');
       const occupied = D.occupancy(a, dets);
-      const r = WL.computeWartezeitEvents(a.times, a.seriesByCol.get(entry.col.index), occupied, a.splValues, params.blink, params.gapSec, hold, exclPlans);
+      const r = WL.computeWartezeitEvents(a.times, a.table.byIndex.get(entry.col.index), occupied, a.splValues, params.blink, params.gapSec, hold, exclPlans);
       r.events.forEach(e => {
         e.plan = e.spl || GZ.slices.UNKNOWN_PLAN;
-        e.detector = WL.auslosenderDetektor(dets.map(d => d.col), a.seriesByCol, e.reqIdx);
+        e.detector = WL.auslosenderDetektor(dets.map(d => d.col), a.table, e.reqIdx);
       });
       results.set(entry.col.index, { events: r.events, cancelledTimes: r.cancelledTimes, unresolved: r.unresolved, dets });
     });
