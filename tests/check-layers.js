@@ -96,7 +96,7 @@ function listJs(dir, acc) {
 }
 
 // Modules that the application does not load yet. The tests load them.
-const NOT_LOADED_YET = ['js/io/chunkCodec.js'];
+const NOT_LOADED_YET = ['js/io/chunkCodec.js', 'js/io/zip.js', 'js/core/project.js', 'js/io/recordingCodec.js', 'js/io/projectFile.js'];
 
 const HEADER = /^GZ\.define\('([^']+)', \{ layer: '([^']+)', deps: \[([^\]]*)\] \}, function \(GZ\) \{$/m;
 
