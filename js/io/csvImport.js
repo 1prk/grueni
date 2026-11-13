@@ -1,28 +1,33 @@
-/* GZ.csvImport - streaming importer for OCIT tables (io layer).
+/* GZ.csvImport is the streaming importer for OCIT tables (io layer).
 
-   It gives the same result as GZ.parser.parseOcitText (same fields, same texts, same errors),
-   but it reads bytes, not a big string:
-   - A fast path reads numbers straight from the bytes. Lines with quotes, a carriage return inside
-     the scanned part, no tab, or an unusual time format go to a slow path. The slow path uses the
-     reference functions of GZ.parser, so odd lines behave exactly as before.
-   - Columns are stored as typed arrays (see GZ.table). The result also has a `table` field.
+   It gives the same result as GZ.parser.parseOcitText (same fields, same texts, same errors).
+   But it reads bytes. It does not read a big string.
+   - A fast path reads numbers directly from the bytes.
+     Some lines go to a slow path. These are lines with quotes, with a carriage return in the
+     scanned part,
+     without a tab, or with an unusual time format.
+     The slow path uses the reference functions of GZ.parser. So odd lines behave as before.
+   - The columns are typed arrays (see GZ.table). The result also has the field `table`.
    - `seriesByCol` is a lazy map. It builds the text array of a column when a view asks for it.
 
    API
      importFile(file, { onProgress })  -> Promise<result>   (reads file.stream())
      importBytes(uint8array)           -> result
      importText(string)                -> result
-     new Importer({ sizeHint })        push(uint8array) ... finish() -> result   (chunk wise)
-   Differences to parseOcitText: a leading byte order mark is removed (as a file read does).
-   Bytes that are not valid UTF-8 are decoded per cell, not for the whole file. */
+     new Importer({ sizeHint })        push(uint8array) ... finish() -> result   (in chunks)
+   Differences to parseOcitText:
+   - The importer removes a byte order mark at the start. A file read does the same.
+   - The importer decodes bytes that are not valid UTF-8 for each cell. It does not decode the
+     whole file at once. */
 (function (GZ) {
   'use strict';
   const P = GZ.parser;
   const T = GZ.table;
 
-  const NUM_RE = /^(0|[1-9][0-9]{0,8})$/;     // plain number, at most 9 digits: fits u32 and prints back the same
-  const textDecoder = new TextDecoder('utf-8', { ignoreBOM: true });   // keeps a BOM character in cell texts
-  const firstLineDecoder = new TextDecoder('utf-8');                   // removes the BOM at the start of the file
+  // A plain number with at most 9 digits. It fits in u32 and prints back the same.
+  const NUM_RE = /^(0|[1-9][0-9]{0,8})$/;
+  const textDecoder = new TextDecoder('utf-8', { ignoreBOM: true });   // Keeps a BOM character in cell texts.
+  const firstLineDecoder = new TextDecoder('utf-8');                   // Removes the BOM at the start of the file.
 
   const E_TOO_FEW = 'Zu wenige Zeilen – erwartet 7 Kopfzeilen + mindestens 1 Messzeile.';
   const E_NO_SG = 'Keine Signalgruppen gefunden – kein bekannter OCIT-Typname (z. B. „veh“, „ped“, „tram“) in den Kopfzeilen erkannt.';
@@ -138,7 +143,8 @@
     }
 
     /* ---------- one data row ---------- */
-    // Fast path. Returns false when the row needs the slow path (nothing has been stored then).
+    // Fast path. Returns false if the row needs the slow path. In that case the function stores
+    // nothing.
     _rowFast(b, s, e0) {
       let e = e0;
       if (e > s && b[e - 1] === 13) e--;
@@ -196,7 +202,7 @@
       return true;
     }
 
-    // Slow path: the same steps on strings, with the reference functions of GZ.parser.
+    // Slow path. It does the same steps on strings. It uses the reference functions of GZ.parser.
     _rowSlow(b, s, e) {
       const r = P.splitLine(textDecoder.decode(b.subarray(s, e)).replace(/\r/g, ''));
       const t = this._slowTimestamp(r[0], r[1]);
@@ -225,7 +231,8 @@
       return this.fe[f] === this.fs[f] ? '' : this._trimmed(b, this.fs[f], this.fe[f]);
     }
 
-    // `str` is a trimmed cell text that is not a plain number in the fast path (or any text in the slow path).
+    // `str` is a trimmed cell text. In the fast path it is not a plain number. In the slow path it
+    // is any text.
     _cellToken(c, n, str) {
       if (NUM_RE.test(str)) {
         const v = +str;
@@ -237,7 +244,7 @@
       this.excIdx[c].push(n); this.excTok[c].push(id);
     }
 
-    // Cycle start detection: same rules as parseOcitText.
+    // Detects the start of a cycle. The rules are the same as in parseOcitText.
     _txStep(t, isZero, num) {
       const isZeroEdge = isZero && !this.prevTxZero;
       const isWrapEdge = !isZeroEdge && Number.isFinite(num) && this.prevTxNum !== null && num < this.prevTxNum;
@@ -253,9 +260,11 @@
       try { return P.parseTimestamp(ts); } catch (e) { return null; }
     }
 
-    // "DD.MM.YY" or "DD.MM.YYYY" in field 0 and "HH:MM:SS" in field 1. NaN: another format, use the slow path.
-    // The day start is cached. It is used only when the day has no clock change, so the result is the
-    // same as new Date(y, m, d, h, mi, s).
+    // Parses the date in field 0 ("DD.MM.YY" or "DD.MM.YYYY") and the time in field 1 ("HH:MM:SS").
+    // Returns NaN for another format. Then the caller uses the slow path.
+    // The function caches the start of the day. It uses the cache only if the day has no clock
+    // change.
+    // Then the result is the same as new Date(y, m, d, h, mi, s).
     _fastTime(b, s0, e0, s1, e1) {
       const l0 = e0 - s0;
       if (e1 - s1 !== 8 || (l0 !== 8 && l0 !== 10)) return NaN;
@@ -296,7 +305,7 @@
       const ovfI = this.ovfIdx[c], ovfV = this.ovfVal[c];
 
       if (excI.length > 0.2 * n || list.length > 60000) {
-        // Mostly text (for example a sparse column): dictionary.
+        // Mostly text (for example a sparse column): use a dictionary.
         const excAt = new Map();
         for (let k = 0; k < excI.length; k++) excAt.set(excI[k], list[excT[k]]);
         const ovfAt = new Map();

@@ -39,6 +39,9 @@ Measured in Chromium on `file://`, with synthetic data. Firefox is not measured.
 - Progression segments (jump, step, length) plus gzip give about 140 KB per day for noise-free data (25 MiB of text).
 - Typed arrays need about 10 MB per day. A 5-column formula over 30 days takes about 11 ms.
 - Today the file text goes through the `rawInput` textarea in the DOM. This keeps a second copy of the whole text.
+- App profile after the importer: `GZ.umlaufContext.buildAll` (called from `umlaufstatistiken.populateControls`) uses about 82 % of the extra memory.
+  It builds events, occupied arrays, segments and a scope object for each cycle for ALL detector columns at import time.
+  It adds about 149 MB at 25 MiB and about 675 MB at 74 MiB, and takes 0.7 to 2.8 s.
 
 ## Target architecture
 
@@ -113,6 +116,7 @@ The next profiling step is to find what the analyses keep.
 
 - Views use the numeric column API, with a lookup table per column to categorize values.
 - Remove the string arrays. Add an LRU cache for decoded days.
+- Make `GZ.umlaufContext.buildAll` lazy: build the data of a column only when a formula or a view uses it.
 
 ### Phase 6: several recordings per LSA (M to L)
 
@@ -131,6 +135,18 @@ The next profiling step is to find what the analyses keep.
 | Size of the refactor | Compatibility adapter, one module at a time |
 | Memory with many days | Decode on demand, LRU cache |
 | Synthetic benchmark data | Validate on a real export in Phase 1 |
+
+## Comment language
+
+All comments in the repository are in ASD-STE100 Simplified Technical English.
+This covers `js/`, `css/`, `index.html`, `tests/` and `mockups/`.
+It does not cover `vendor/` and the generated `tests/fixtures/golden-data.js`.
+
+- Write short sentences (25 words at most), in the active voice and present tense. Use articles.
+- Do not use contractions, "e.g.", "i.e.", "etc." or semicolons. Use "can" and "must" and not "may" or "should".
+- Use one term for one thing. Keep German UI names (for example "Umlaufprüfung") when they are the real name of a tab or a field.
+- New and changed comments must follow the same rules.
+- No certified STE checker is available offline. The rules above are the check.
 
 ## Running the tests
 

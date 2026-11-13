@@ -1,24 +1,27 @@
-/* GZ.state — central application state of one analysis. Plain data plus
-   small derived functions; rendering lives in js/views/*. */
+/* GZ.state holds the state of one analysis.
+   The state is plain data plus a few small functions that derive values.
+   The views in js/views render the state. */
 (function (GZ) {
   'use strict';
 
   const state = {
-    currentAnalysis: null, // {allStats, tMin, tMax, cycleStarts, otherColumns, times, seriesByCol, splValues, tcValues, splList}
-    // 'total' = whole recording, 'spl' = per signal plan. Set by the green time tab,
-    // read by the cycle check (see anomalyCtx).
+    // {allStats, tMin, tMax, cycleStarts, otherColumns, times, seriesByCol, splValues, tcValues,
+    // splList}
+    currentAnalysis: null,
+    // 'total' means the whole recording. 'spl' means one signal plan.
+    // The green time tab sets this value. The cycle check reads it (see anomalyCtx).
     statsScope: 'total',
-    phases: [], // {id, name, kuerzel, members:Set<colIndex>} - see tab "Stammdaten LSA"
-    // Manual corrections of a phase transition detail table (see
-    // js/views/umlaufpruefung.js), per phase TRANSITION TYPE (not per
-    // occurrence) - key "<fromPhase.id>→<toPhase.id>", value
-    // {rows:[{sgIndex, an, ab}]} (an/ab in seconds relative to the transition's own TX=0).
-    // Replaces the automatically detected row list for EVERY occurrence of this transition.
+    phases: [], // {id, name, kuerzel, members:Set<colIndex>}. See the tab "Stammdaten LSA".
+    // Manual corrections of a phase transition table. See js/views/umlaufpruefung.js.
+    // A correction applies to a phase TRANSITION TYPE, not to one occurrence.
+    // The key is "<fromPhase.id>→<toPhase.id>". The value is {rows:[{sgIndex, an, ab}]}.
+    // The values an and ab are in seconds from the TX=0 of the transition.
+    // A correction replaces the automatic row list for EVERY occurrence of this transition.
     pueOverrides: {},
-    umlaufSpalten: [], // {id, label, expr} - formula columns, see tab "Umlaufstatistiken"
-    detectors: null,   // {list, cache} - detector assignment, see GZ.detectors
-    topology: GZ.topology.create(), // intersection topology, see GZ.topology and the sub-tab "Topologie"
-    log: null          // log markers, see GZ.logs
+    umlaufSpalten: [], // {id, label, expr}. These are formula columns. See the tab "Umlaufstatistiken".
+    detectors: null,   // {list, cache}. This is the detector assignment. See GZ.detectors.
+    topology: GZ.topology.create(), // The intersection topology. See GZ.topology and the sub-tab "Topologie".
+    log: null          // The log markers. See GZ.logs.
   };
 
   function anomalyCtx() {

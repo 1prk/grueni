@@ -1,5 +1,5 @@
 /* Runs the browser test suite in Node.
-   The script list comes from tests/index.html, so Node and the browser run the same files.
+   The script list comes from tests/index.html. So Node and the browser run the same files.
      node tests/run-suite.js                   run all tests
      node tests/run-suite.js --update-golden   write tests/golden/golden-data.js (after an intended change) */
 'use strict';

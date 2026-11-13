@@ -256,7 +256,7 @@ SGS.forEach(s => {
    Detectors
    "truth" lists the signal groups a detector really belongs to.
    It drives the simulation only. The tool never reads it.
-   RD2 is named like a K2 detector but measures K1 (a naming trap).
+   RD2 has a name like a K2 detector but measures K1 (a naming trap).
    DF3 follows no naming rule but measures K2 (indexed incrementally).
    ===================================================================== */
 const DETECTORS = [
@@ -283,7 +283,7 @@ function matchRule(detector) {
 }
 DETECTORS.forEach(d => {
   const rule = matchRule(d);
-  d.kind = rule ? rule.kind : 'presence';                      // unknown names are treated as presence detectors
+  d.kind = rule ? rule.kind : 'presence';                      // the tool treats unknown names as presence detectors
   d.occ = new Uint8Array(N); d.intervals = [];
 });
 const markOccupied = (d, a, b) => {
@@ -298,7 +298,8 @@ DETECTORS.forEach(d => {
   d.truth.forEach(sgId => {
     const sg = sgById(sgId);
     if (d.kind === 'pulse') {
-      // One button press before each green. About 8 % of presses just miss a green and wait a long time.
+      // One button press before each green. About 8 % of presses just miss a green and wait a long
+      // time.
       sg.greens.forEach((g, k) => {
         const start = g.start - T0, gapStart = k ? sg.greens[k - 1].end - T0 + 1 : 0;
         const wait = rand() < 0.08 ? g.tu + rand() * g.tu : 3 + rand() * (g.tu - 8);
@@ -330,7 +331,8 @@ function dataScore(sg, d) {
 }
 SGS.forEach(s => { s.score = {}; DETECTORS.forEach(d => { s.score[d.id] = dataScore(s, d); }); });
 
-// Best data match. On a near tie (for example parallel green) prefer a signal group without a detector.
+// Best data match. On a near tie (for example parallel green) prefer a signal group without a
+// detector.
 function bestMatch(d) {
   if (d.kind === 'pulse') return null;
   const ranked = SGS.map(s => ({ sg: s, score: s.score[d.id] })).sort((x, y) => y.score - x.score);

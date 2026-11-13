@@ -1,19 +1,19 @@
-/* GZ.sampleData — synthetic OCIT export for the demo ("Beispieldaten laden").
-   One node, 4 hours (06:00–10:00), cycle based:
-   - SPL 12: traffic-actuated, free-running cycle time (Mo–Fr off-peak).
-   - SPL 14 (07:15–09:15): fixed time, cycle time 90 s, with one single
-     intervention (K1 and S1 shortened).
-   Signal groups K1, K2 (vehicles), F1 (pedestrians, on demand in SPL 12),
-   S1 (bus, on demand in SPL 12).
+/* GZ.sampleData builds a synthetic OCIT export for the demo ("Beispieldaten laden").
+   It has one junction and 4 hours (06:00 to 10:00). It is based on cycles:
+   - SPL 12: actuated, free-running cycle time (Monday to Friday, off-peak).
+   - SPL 14 (07:15 to 09:15): fixed time, cycle time 90 s, with one single intervention (K1 and
+     S1 shortened).
+   Signal groups: K1 and K2 (vehicles), F1 (pedestrians, on request in SPL 12),
+   S1 (bus, on request in SPL 12).
    Detectors (all OCIT type "single_loop"):
-   - IS1_1, IS1_2: induction loops of K1; IS2: induction loop of K2.
-   - RD2: radar, named like a K2 detector but it really measures K1 (naming trap
-     for the data check).
+   - IS1_1 and IS1_2: induction loops of K1. IS2: induction loop of K2.
+   - RD2: radar. It has the name of a K2 detector, but it measures K1. This is a trap for the
+     data check.
    - FT1: pedestrian push button of F1 (pulse detector).
-   - DF3: camera field of K2, no naming rule fits (indexed incrementally).
-   - IS9: counting loop, belongs to no signal group.
-   A matching synthetic log file ("Beispiel-Log") is generated as well.
-   Nothing here is measured data. */
+   - DF3: camera field of K2. No naming rule fits. The index increases step by step.
+   - IS9: counting loop. It belongs to no signal group.
+   The module also generates a matching synthetic log file ("Beispiel-Log").
+   None of the data is measured data. */
 (function (GZ) {
   'use strict';
   const { fmtDate, fmtTimeOnly, pad } = GZ.format;
@@ -24,7 +24,7 @@
   const PLAN_CHANGE_1_S = 1 * 3600 + 15 * 60;            // 07:15
   const PLAN_CHANGE_2_S = 3 * 3600 + 15 * 60;            // 09:15
 
-  // Signal state raw values (see GZ.parser.STATE_CAT)
+  // Raw values of the signal states (see GZ.parser.STATE_CAT).
   const RED = 3, RED_AMBER = 15, GREEN = 48, AMBER = 12;
 
   const SIGNAL_GROUPS = [
@@ -33,7 +33,7 @@
     { id: 'F1', type: 'ped',  desc: 'F1 Fußgänger quer Hauptstraße', redAmber: 0, amber: 0 },
     { id: 'S1', type: 'tram', desc: 'S1 Bus Hauptrichtung',          redAmber: 2, amber: 3 }
   ];
-  // truth = signal groups the detector really measures. Only the simulation reads it.
+  // truth: the signal groups that the detector really measures. Only the simulation reads it.
   const DETECTORS = [
     { id: 'IS1_1', desc: 'Induktionsschleife K1, Fahrstreifen 1', truth: ['K1'], mean: 5,  dur: [6, 20] },
     { id: 'IS1_2', desc: 'Induktionsschleife K1, Fahrstreifen 2', truth: ['K1'], mean: 9,  dur: [3, 12] },
@@ -53,7 +53,8 @@
     };
   }
 
-  // Builds the whole scenario once: cycles, signal states per second, detector states per second.
+  // Builds the whole scenario once: cycles, signal states for each second and detector states for
+  // each second.
   let scenario = null;
   function buildScenario() {
     if (scenario) return scenario;
@@ -64,7 +65,7 @@
     const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
     const planAt = t => (t >= PLAN_CHANGE_1_S && t < PLAN_CHANGE_2_S) ? '14' : '12';
 
-    // Cycles. sg[id] = { on, off } in seconds after cycle start, or null.
+    // Cycles. sg[id] = { on, off } in seconds after the start of the cycle, or null.
     const cycles = [];
     let t = 0, fixedCount = 0;
     for (;;) {
@@ -89,9 +90,9 @@
       if (t + cycle.tu > DURATION_S) break;
       cycle.t = t; cycles.push(cycle); t += cycle.tu;
     }
-    const rows = t;                                       // whole cycles only
+    const rows = t;                                       // Whole cycles only.
 
-    // Signal states per second
+    // Signal states for each second.
     const sig = {};
     SIGNAL_GROUPS.forEach(s => {
       const a = new Uint8Array(rows).fill(RED);
@@ -105,7 +106,7 @@
       sig[s.id] = a;
     });
 
-    // Detector states per second
+    // Detector states for each second.
     const det = {};
     const greensOf = id => cycles.filter(c => c.sg[id]).map(c => ({ start: c.t + c.sg[id].on, end: c.t + c.sg[id].off, tu: c.tu }));
     DETECTORS.forEach(d => {
@@ -117,7 +118,8 @@
         const sgDef = SIGNAL_GROUPS.find(s => s.id === sgId), greens = greensOf(sgId);
         greens.forEach((g, k) => {
           if (d.pulse) {
-            // One button press before each green. About 8 % of the presses just miss a green.
+            // One button press before each green. About 8 % of the presses come too late for the
+            // green.
             const gapStart = k ? greens[k - 1].end + 1 : 0;
             const wait = rand() < 0.08 ? g.tu + rand() * g.tu : 3 + rand() * (g.tu - 8);
             const press = Math.max(gapStart, g.start - wait);
@@ -125,7 +127,8 @@
             if (rand() < 0.3) { const again = press + randInt(5, 15); if (again < g.start - 2) mark(again, again + 2); }
             return;
           }
-          // Presence: a vehicle arrives during red and stays until shortly after the green start.
+          // Presence: a vehicle arrives during red. It stays until shortly after the start of the
+          // green.
           if (!k) return;
           const arrival = greens[k - 1].end + sgDef.amber + 1 + Math.floor(expRand(d.mean));
           if (arrival >= g.start - 1) return;
@@ -158,13 +161,13 @@
     lines.push(typeRow.join('\t'));
     lines.push(nameRow.join('\t'));
     lines.push(descRow.join('\t'));
-    lines.push(empty().join('\t'));                       // header line 7 is empty in the raw CSV
+    lines.push(empty().join('\t'));                       // Header line 7 is empty in the raw CSV.
 
     let cycleIndex = 0, lastPlan = '';
     for (let i = 0; i < sc.rows; i++) {
       while (cycleIndex + 1 < sc.cycles.length && i >= sc.cycles[cycleIndex + 1].t) cycleIndex++;
       const cycle = sc.cycles[cycleIndex];
-      // TC and SP are logged only when they change (the parser forward-fills them).
+      // TC and SP are logged only when they change. The parser forward-fills them.
       const tc = i === 0 ? '4' : '';
       const plan = cycle.plan, sp = plan !== lastPlan ? plan : '';
       lastPlan = plan;
@@ -175,7 +178,8 @@
     return lines.join('\n');
   }
 
-  // Synthetic log lines for the same period: level; timestamp; text; two extra columns.
+  // Synthetic log lines for the same period. The columns are level, timestamp and text, plus two
+  // extra columns.
   function generateSampleLog() {
     const sc = buildScenario();
     const intervention = sc.cycles.find(c => c.intervention);
@@ -192,7 +196,8 @@
       [PLAN_CHANGE_2_S + 1500, 'Warnung', 'Fußgängertaster FT1: Dauerbelegung'],
       [3 * 3600 + 45 * 60, 'Debug', 'Speicherstand geprüft']
     ];
-    // Semicolon separated. The last two columns are extra columns, they are ignored on import.
+    // The separator is a semicolon. The last two columns are extra columns. The import ignores
+    // them.
     return ['Stufe;Zeit;Text;Quelle;Nr'].concat(rows.map((r, i) => `${r[1]};${stamp(r[0])};${r[2]};Steuergerät;${1000 + i}`)).join('\n');
   }
 

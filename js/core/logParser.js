@@ -1,33 +1,35 @@
-/* GZ.logs — log markers from a CSV file.
+/* GZ.logs reads log markers from a CSV file.
 
-   Each line has columns: level, timestamp, text. Only these first three
-   columns are used. Further columns are ignored. The file is usually
-   semicolon separated; tab separated files work too. The timestamp is
-   "DD.MM.YYYY, HH:MM:SS" (the comma is optional; ISO "YYYY-MM-DD HH:MM:SS"
-   is accepted too). A first line without a timestamp is a header line.
-   When the columns cannot be split (for example a comma separated file,
-   where the timestamp itself contains a comma), the parser searches the
-   timestamp in the line: text before it is the level, text after it is
-   the message.
+   Each line has the columns level, timestamp and text. The parser uses only these first three
+   columns.
+   It ignores more columns.
+   The file is usually separated by semicolons. A file separated by tabs also works.
+   The timestamp format is "DD.MM.YYYY, HH:MM:SS". The comma is optional.
+   The ISO format "YYYY-MM-DD HH:MM:SS" is also accepted.
+   A first line without a timestamp is a header line.
+   Sometimes the parser cannot split the columns.
+   An example is a comma-separated file, where the timestamp contains a comma.
+   Then the parser searches for the timestamp in the line.
+   The text before the timestamp is the level. The text after it is the message.
 
-   The log text can be confidential. It stays in the browser memory: it is
-   not saved, not exported and not sent anywhere. */
+   The log text can be confidential. It stays in the browser memory.
+   The application does not save it, export it or send it anywhere. */
 (function (GZ) {
   'use strict';
 
   const DE_STAMP = /(\d{1,2})\.(\d{1,2})\.(\d{2,4}),?\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?/;
   const ISO_STAMP = /(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?/;
 
-  // Severity classes. Unknown level names fall into "other".
+  // Severity classes. A level name that is not known goes to "other".
   const SEVERITY = [
-    // Order matters: the first matching class wins.
+    // The order is important. The first class that matches wins.
     { id: 'critical', label: 'Schwerer Fehler', re: /^(schwerer\s+fehler|schwerfehler|kritisch|fatal|critical|crit|severe)$/i },
     { id: 'error', label: 'Fehler', re: /^(e|err|error|fehler)$/i },
     { id: 'warning', label: 'Warnung', re: /^(w|warn|warning|warnung)$/i },
     { id: 'info', label: 'Info', re: /^(i|info|information|hinweis)$/i },
     { id: 'debug', label: 'Debug', re: /^(d|debug|trace|verbose)$/i }
   ];
-  // Rank of a severity, for "this level and worse" filters.
+  // Rank of a severity. It is used for the filters "this level and worse".
   const RANK = { debug: 0, other: 1, info: 2, warning: 3, error: 4, critical: 5 };
 
   function severityOf(level) {
@@ -53,7 +55,7 @@
     return { t: new Date(y, mo - 1, d, h, mi, s, ms).getTime(), index: m.index, length: m[0].length };
   }
 
-  // Quote-aware split of one line (RFC 4180: "" inside quotes is one quote).
+  // Splits one line and respects quotes. RFC 4180: two quotes inside quotes are one quote.
   function splitFields(line, delimiter) {
     const out = [];
     let cur = '', inQuote = false;
@@ -70,7 +72,8 @@
     return out;
   }
 
-  // Semicolon first, then tab. null: no usable delimiter, search the timestamp instead.
+  // Tries the semicolon first, then the tab.
+  // The result is null if there is no usable delimiter. Then the parser searches for the timestamp.
   function detectDelimiter(lines) {
     const sample = lines.find(l => l.trim()) || '';
     if (sample.includes(';')) return ';';
@@ -78,7 +81,7 @@
     return null;
   }
 
-  // One line -> { t, level, text } or null. Columns 1..3 only.
+  // Converts one line to { t, level, text } or null. Only columns 1 to 3 are used.
   function parseLine(raw, delimiter) {
     if (delimiter) {
       const f = splitFields(raw, delimiter);
@@ -91,8 +94,9 @@
   }
 
   // Returns { entries: [{t, level, severity, text}], skipped, total }.
-  // entries are sorted by time. skipped counts non-empty lines without a timestamp
-  // (a header line in the first line is not counted).
+  // The entries are sorted by time.
+  // skipped counts non-empty lines without a timestamp.
+  // A header line in the first line is not counted.
   function parse(text) {
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
     const delimiter = detectDelimiter(lines);
@@ -131,8 +135,8 @@
   function clear() { GZ.state.data.log = empty(); }
   function hasEntries() { return state().entries.length > 0; }
 
-  // Entries that pass the current filters, optionally inside [tMin, tMax].
-  // entries are sorted by time, so the range is found by binary search.
+  // Returns the entries that pass the current filters. The entries can be limited to [tMin, tMax].
+  // The entries are sorted by time, so a binary search finds the range.
   function visible(tMin, tMax) {
     const st = state(), needle = st.search.trim().toLowerCase();
     const all = st.entries;
@@ -152,7 +156,7 @@
     }
     return out;
   }
-  // Visible entries within `marginMs` of a time span.
+  // Returns the visible entries within `marginMs` of a time span.
   function around(t0, t1, marginMs) {
     return visible(t0 - marginMs, t1 + marginMs);
   }

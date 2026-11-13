@@ -1,12 +1,13 @@
-/* GZ.slices — evaluation slices of one recording.
-   A slice selects part of the data: the whole recording (key null),
-   one signal plan (SPL), or one clock hour. Items belong to a slice by
-   their start time. Pure functions, no DOM. */
+/* GZ.slices gives the evaluation slices of one recording.
+   A slice selects a part of the data: the whole recording (key null), one signal plan (SPL), or
+   one clock hour.
+   An item belongs to a slice by its start time.
+   The functions are pure. They do not use the DOM. */
 (function (GZ) {
   'use strict';
   const { pad } = GZ.format;
 
-  // More hourly slices than this make the tables unreadable.
+  // If there are more hourly slices than this, the tables are not readable.
   const MAX_HOUR_SLICES = 48;
   const UNKNOWN_PLAN = '(unbekannt)';
 
@@ -25,8 +26,8 @@
     return plan === UNKNOWN_PLAN ? 'SPL ?' : 'SPL ' + plan;
   }
 
-  // Hourly slices from the first to the last sample. The label contains the
-  // date only when the recording spans more than one calendar day.
+  // Hourly slices from the first sample to the last sample.
+  // The label has the date only if the recording covers more than one calendar day.
   function buildHourSlices(tMin, tMax) {
     const slices = [];
     const multiDay = new Date(tMin).toDateString() !== new Date(tMax - 1).toDateString();
@@ -42,23 +43,23 @@
     return slices;
   }
 
-  // a = current analysis. Returns { plans, hours, hoursAvailable }.
+  // a is the current analysis. Returns { plans, hours, hoursAvailable }.
   function build(a) {
     const plans = a.splList.map(p => ({ key: p, kind: 'plan', label: planLabel(p) }));
     const hours = buildHourSlices(a.tMin, a.tMax);
     return { plans, hours, hoursAvailable: hours.length <= MAX_HOUR_SLICES };
   }
 
-  // Slices to show for a scope ('total' | 'spl' | 'hour'). The whole-recording
-  // scope has one unnamed slice with key null.
+  // Returns the slices to show for a scope ('total', 'spl' or 'hour').
+  // The scope 'total' has one unnamed slice with the key null.
   function forScope(slices, scope) {
     if (scope === 'spl') return slices.plans;
     if (scope === 'hour') return slices.hours;
     return [];
   }
 
-  // Does an item that starts at time t, under signal plan `plan`, belong to the slice?
-  // sliceKey: null (everything), a plan name, or 'H<ms>' for an hour.
+  // Tests if an item belongs to a slice. The item starts at time t under the signal plan `plan`.
+  // sliceKey is null (everything), a plan name, or 'H<ms>' for an hour.
   function contains(sliceKey, t, plan) {
     if (sliceKey == null) return true;
     if (sliceKey[0] === 'H' && /^H\d+$/.test(sliceKey)) {
@@ -68,8 +69,8 @@
     return plan === sliceKey;
   }
 
-  // Consecutive runs of the same signal plan: [{ plan, t0, t1 }].
-  // times/splValues are the parallel arrays of the analysis (SPL is forward-filled).
+  // Returns the runs of the same signal plan in sequence: [{ plan, t0, t1 }].
+  // times and splValues are the parallel arrays of the analysis. The SPL values are forward-filled.
   function planRuns(times, splValues, tMin, tMax) {
     const runs = [];
     for (let i = 0; i < times.length; i++) {
@@ -82,7 +83,8 @@
     return runs;
   }
 
-  // Colour of a slice in charts: signal plans use two greens, hours a light-to-dark ramp.
+  // Returns the color of a slice in charts. Signal plans use two greens. Hours use a ramp from
+  // light to dark.
   const HOUR_RAMP = ['#a9d8bd', '#62b586', '#1f8a4c', '#0d4a28'];
   const PLAN_COLORS = ['var(--plan-a)', 'var(--plan-b)', 'var(--plan-c)', 'var(--plan-d)'];
   function colorOf(slices, slice) {

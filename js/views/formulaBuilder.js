@@ -1,54 +1,64 @@
-/* GZ.views.formulaBuilder — Tab "Umlaufprüfung": Formel-Builder für
-   synthetische Detektoren. Variablen sind Aliase auf bestehende Signalgruppen-
-   (SG), Detektor- (DET) bzw. APW-/ÖPNV-Spalten. SG/DET sind Objekt-Handles
-   (siehe GZ.exprEngine): kein direkter WAHR/FALSCH-Wert mehr, sondern über
-   die Primitiven Zustand/Dauer/DauerSeit auszuwerten (z.B. "Zustand(D1)
-   == BELEGT" statt früher bloß "D1"). APW/ÖPNV bleiben Zahl (roher Wert).
-   Der aktuelle Auswertungszeitpunkt (früher als explizites TX-Argument
-   mitgegeben) ist jetzt vollständig implizit - keine Primitive verlangt
-   TX mehr als Argument, TX bleibt aber als normale NUM-Variable im scope
-   verfügbar (für eigene, fortgeschrittene Bedingungen in Funktionsrümpfen).
+/* GZ.views.formulaBuilder is the formula builder for synthetic detectors in the tab
+   "Umlaufprüfung".
+   Variables are aliases for existing signal group (SG), detector (DET) and APW/ÖPNV columns.
+   SG and DET are object handles (see GZ.exprEngine).
+   They have no direct TRUE or FALSE value any more.
+   The user evaluates them with the primitives Zustand, Dauer and DauerSeit.
+   An example is "Zustand(D1) == BELEGT". Before, it was only "D1".
+   APW and ÖPNV stay numbers (raw value).
+   The current evaluation time was an explicit TX argument before.
+   It is now fully implicit.
+   No primitive needs TX as an argument.
+   But TX stays available as a normal NUM variable in the scope.
+   It is for own, advanced conditions in function bodies.
 
-   Funktionen sind benutzerdefinierte, parametrisierte Ausdrücke aus den
-   Primitiven (z.B. "LangGenug(sg, schwelle) := DauerSeit(sg, GRUEN) >
-   schwelle"), aufrufbar aus Formeln (oder anderen Funktionen) mit konkreten
-   Argumenten ("LangGenug(K1, 30)"). Parameter sind generisch (kein fester
-   SG/DET/NUM-Typ in der Definition) - jeder Aufruf spezialisiert den Rumpf
-   neu mit den tatsächlichen Argumenttypen (siehe GZ.exprEngine.compile()/
-   compileFunctionDef()). Funktionen selbst haben KEINEN Spaltenbezug (nur
-   Formeln/Variablen haben den) und sind daher 1:1 über Konfigurationen
-   hinweg portabel.
+   Functions are user-defined, parameterized expressions made from the primitives.
+   An example is "LangGenug(sg, schwelle) := DauerSeit(sg, GRUEN) > schwelle".
+   A formula (or another function) can call a function with concrete arguments ("LangGenug(K1,
+   30)").
+   Parameters are generic.
+   The definition has no fixed SG, DET or NUM type.
+   Each call specializes the body again with the real argument types (see GZ.exprEngine.compile()
+   and compileFunctionDef()).
+   Functions have NO column reference (only formulas and variables have it).
+   So functions are portable 1:1 over configurations.
 
-   Formeln kombinieren alles über +,-,*,/,Vergleiche,AND/OR/NOT/Klammern und
-   Funktionsaufrufe und müssen zu WAHR/FALSCH auswerten. Tippen validiert nur
-   (Syntax/Typen, keine Datenauswertung) - erst "Berechnen" wertet über alle
-   TX aus und liefert je gültiger Formel eine boolesche Rohreihe, die
-   umlaufpruefung.js über getSyntheticColumns() als zusätzliche, farblich
-   abgesetzte Detektor-Spalte (Kürzel FORMEL) einbindet.
+   Formulas combine everything with +, -, *, /, comparisons, AND, OR, NOT, brackets and function
+   calls.
+   They must evaluate to TRUE or FALSE.
+   Typing only validates (syntax and types, no data evaluation).
+   Only "Berechnen" evaluates over all TX.
+   For each valid formula, it gives one boolean raw series.
+   umlaufpruefung.js adds it through getSyntheticColumns() as an additional detector column with
+   a different color (short name FORMEL).
 
-   Formeln können ANDERE Formeln direkt bei ihrem Namen referenzieren (z.B.
-   "M1 AND NOT R1", wenn "M1"/"R1" Namen anderer Formeln sind) - dafür meldet
-   currentVarTypes() jeden Formelnamen als BOOL-Bezeichner, im selben
-   Namensraum wie Variablen-Aliase (Kollision = Fehler). Da eine Formel dabei
-   von einer anderen abhängt, wertet berechnen() nicht mehr einfach in
-   formulas-Reihenfolge aus, sondern baut zuerst einen Abhängigkeits-Graphen
-   (aus den Bezeichner-Token jeder Formel) und wertet ihn topologisch
-   sortiert aus - eine bereits fertige Formel steht der nächsten als echter
-   JS-boolean im scope zur Verfügung. Zyklische Referenzen (direkt "M1
-   referenziert M1" oder indirekt über mehrere Formeln) werden erkannt und
-   alle beteiligten Formeln übersprungen (siehe skipReasonById), statt in
-   eine Endlosschleife oder stillschweigend falsche Werte zu laufen - anders
-   als bei benutzerdefinierten FUNKTIONEN (siehe oben) ist das hier nötig,
-   weil Formel-Referenzen NICHT inline expandiert werden, sondern echte
-   Datenabhängigkeiten zwischen vorab berechneten Rohreihen sind.
+   Formulas can reference OTHER formulas directly by name (for example "M1 AND NOT R1", if "M1"
+   and "R1" are names of other formulas).
+   For this, currentVarTypes() reports each formula name as a BOOL identifier.
+   It is in the same namespace as the variable aliases (a collision is an error).
+   One formula can depend on another.
+   So berechnen() does not evaluate in the order of the formulas list any more.
+   It first builds a dependency graph (from the identifier tokens of each formula).
+   Then it evaluates the graph in topological order.
+   A formula that is already finished is available to the next formula as a real JS boolean in
+   the scope.
+   The code finds cyclic references (direct, "M1 references M1", or indirect over several
+   formulas).
+   It skips all formulas that are part of a cycle (see skipReasonById).
+   This avoids an endless loop and silently wrong values.
+   This is different from user-defined FUNCTIONS (see above).
+   Here it is necessary because the code does NOT expand formula references inline.
+   They are real data dependencies between precalculated raw series.
 
-   Jede Formel trägt außerdem eine feste Identitätsfarbe (formulaColorFor(),
-   Position in der formulas-Liste) - dieselbe Farbe erscheint als Farbpunkt
-   in der Formel-Zeile, als Akzent unter ihrem Namen, wo immer sie in einer
-   ANDEREN Formel referenziert wird (identColorFor-Hook von GZ.exprEditor),
-   und als Hervorhebungsfarbe auf einer Objekt-Spur, falls ein
-   Hervorhebungsziel gesetzt ist (siehe getFormulaHighlights()) - eine
-   Formel bleibt so überall wiedererkennbar. */
+   Each formula also has a fixed identity color (formulaColorFor(), position in the formulas
+   list).
+   The same color appears in these places:
+   - as a color dot in the formula row,
+   - as an accent under its name, where another formula references it (identColorFor hook of
+     GZ.exprEditor),
+   - as a highlight color on an object track, if a highlight target is set (see
+     getFormulaHighlights()).
+   So the user can recognize a formula everywhere. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
@@ -57,7 +67,7 @@
   const { compile, compileFunctionDef, argRangesFor } = GZ.exprEngine;
   const { wzIstBelegt } = GZ.wartezeitLogic;
 
-  const SYNTH_INDEX_BASE = 1000000; // weit jenseits jedes realen Spaltenindex
+  const SYNTH_INDEX_BASE = 1000000; // far above each real column index
 
   let els = null;
   let vars = []; // {id, alias, colIndex}
@@ -67,30 +77,35 @@
   let syntheticCols = []; // [{index, kuerzel:'FORMEL', name, beschreibung, rawSeries}]
   let debounceTimers = new Map(); // "<kind>:<id>" -> timeout handle
 
-  // Identitätsfarbe je Formel (siehe formulaColorFor() unten, Position in
-  // der formulas-Liste) - bewusst Blau-/Violett-/Pinktöne, die mit KEINEM
-  // Signalzustand (Rot/Gelb/Grün) kollidieren, damit eine Hervorhebung nie
-  // mit einem echten Signalbild verwechselt werden kann. Zusätzlich per
-  // HSL-Abstand gegen die App-eigenen Töne geprüft (Zustand/Funktion/
-  // Variable/Akzent), NICHT nur gegen die Signalfarben: die ursprüngliche
-  // erste Farbe (#7c4dff) lag nur 5° Farbton von --req-marker entfernt (der
-  // Funktions-/Primitiven-Chip-Farbe) und war im Farb-Schlüssel praktisch
-  // nicht von ihr zu unterscheiden - jetzt hat jeder Eintrag mindestens
-  // ~18° Abstand zu jedem reservierten App-Ton.
+  // Identity color for each formula (see formulaColorFor() below, position in the formulas list).
+  // The colors are blue, violet and pink tones on purpose.
+  // They do not collide with ANY signal state (red, amber, green).
+  // So a highlight can never be confused with a real signal image.
+  // The code also checks them with an HSL distance against the own tones of the app (state,
+  // function, variable, accent).
+  // It does NOT check them only against the signal colors.
+  // The first original color (#7c4dff) was only 5° of hue away from --req-marker (the function and
+  // primitive chip color).
+  // In the color key, it was practically the same as that color.
+  // Now each entry has a distance of at least about 18° to each reserved app tone.
   const HIGHLIGHT_PALETTE = ['#3d5afe', '#00b8d4', '#e91e63', '#8e24aa', '#1a237e', '#ad1457'];
 
-  // Case-insensitive (AND/OR/NOT, wie im Tokenizer) bzw. exakt (TX und die
-  // Zustands-/Funktionsnamen, ebenfalls exakt wie im Tokenizer/PRIMITIVES von
-  // GZ.exprEngine) reservierte Wörter - als Alias verboten, sonst wäre die
-  // Variable in Formeln unerreichbar (der Tokenizer erkennt z.B. "GRUEN"
-  // immer als Zustands-Literal, unabhängig davon, was in varTypes steht).
+  // Reserved words.
+  // Case-insensitive (AND, OR, NOT, as in the tokenizer).
+  // Exact (TX and the state and function names, also exact as in the tokenizer and PRIMITIVES of
+  // GZ.exprEngine).
+  // An alias must not use them.
+  // Otherwise the variable is unreachable in formulas.
+  // The tokenizer always recognizes, for example, "GRUEN" as a state literal.
+  // It does not matter what is in varTypes.
   const RESERVED_CI = new Set(['AND', 'OR', 'NOT']);
-  // Aus GZ.exprEngine.PRIMITIVE_INFO/KAT_TOKENS abgeleitet statt hier separat
-  // gepflegt (dieselbe Lehre wie bei umlaufstatistiken.js' SG_ARG_FNS/
-  // DET_ARG_FNS: eine von Hand kopierte Liste wird bei einer neuen Primitive
-  // schlicht vergessen - WertBei/DauerBei fehlten hier tatsächlich, bis ihr
-  // Fehlen bei der WENN/LEER-Ergänzung auffiel). TX/LEER sind keine
-  // PRIMITIVE_INFO-Funktionen (bare Bezeichner ohne Klammern), daher separat.
+  // Derived from GZ.exprEngine.PRIMITIVE_INFO and KAT_TOKENS and not kept separately here.
+  // This is the same lesson as for SG_ARG_FNS and DET_ARG_FNS in umlaufstatistiken.js.
+  // A list that someone copied by hand is forgotten when a new primitive appears.
+  // WertBei and DauerBei were really missing here.
+  // The team found that they were missing only at the WENN and LEER addition.
+  // TX and LEER are not PRIMITIVE_INFO functions (bare identifiers with no brackets).
+  // So they are separate.
   const RESERVED_EXACT = new Set([
     'TX', 'LEER',
     ...Object.keys(GZ.exprEngine.KAT_TOKENS),
@@ -99,17 +114,19 @@
   const ALIAS_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
   const isReserved = alias => RESERVED_CI.has(alias.toUpperCase()) || RESERVED_EXACT.has(alias);
 
-  // ---------- Ausdrucks-Editor: die eigentliche Editor-Mechanik
-  // (contenteditable, Caret-Mechanik, Dropdown/Palette, Undo/Redo) lebt in
-  // GZ.exprEditor (siehe dort für das volle Modell) - wiederverwendet von
-  // oepnvQa.js (ÖPNV-Zeilenfilter) und umlaufstatistiken.js. Hier bleibt nur,
-  // was WIRKLICH formulaBuilder-spezifisch ist: exprCandidates()
-  // (Kandidatenliste) und die beiden setup()-Aufrufe in
-  // renderFuncRows()/renderFormulaRows().
+  // ---------- Ausdrucks-Editor:
+  // The editor mechanics (contenteditable, caret mechanics, dropdown and palette, undo and redo)
+  // are in GZ.exprEditor.
+  // See there for the full model.
+  // oepnvQa.js (ÖPNV row filter) and umlaufstatistiken.js reuse it.
+  // Only what is REALLY specific to formulaBuilder stays here.
+  // That is exprCandidates() (candidate list) and the two setup() calls in renderFuncRows() and
+  // renderFormulaRows().
 
-  // Vergleichs-/Rechenoperatoren für die Palette (siehe exprCandidates()) -
-  // mit umgebenden Leerzeichen eingefügt, damit ein reiner Klickweg lesbaren
-  // Text erzeugt ("DauerSeit(K1, GRUEN) > 45" statt "DauerSeit(K1,GRUEN)>45").
+  // Comparison and arithmetic operators for the palette (see exprCandidates()).
+  // The code inserts them with spaces around them.
+  // So a pure click path gives readable text ("DauerSeit(K1, GRUEN) > 45" and not
+  // "DauerSeit(K1,GRUEN)>45").
   const OPERATOR_INFO = [
     { label: '>', insert: ' > ', hint: 'größer als', desc: 'Zahlenvergleich: größer als' },
     { label: '>=', insert: ' >= ', hint: 'größer/gleich', desc: 'Zahlenvergleich: größer oder gleich' },
@@ -121,18 +138,23 @@
     { label: '-', insert: ' - ', hint: 'minus', desc: 'Subtraktion' },
     { label: '*', insert: ' * ', hint: 'mal', desc: 'Multiplikation' },
     { label: '/', insert: ' / ', hint: 'geteilt', desc: 'Division' },
-    { label: '( )', insert: '()', hint: 'Klammern', desc: 'Klammern zum Gruppieren', caret: 1 } // Cursor ZWISCHEN die Klammern
+    // cursor BETWEEN the brackets
+    { label: '( )', insert: '()', hint: 'Klammern', desc: 'Klammern zum Gruppieren', caret: 1 }
   ];
 
-  // Kandidaten für Autovervollständigung + Funktions-Palette: Primitiven
-  // (GZ.exprEngine.PRIMITIVE_INFO), aktuell definierte Funktionen/Variablen
-  // (Modul-State), Zustands-Konstanten (GZ.exprEngine.KAT_TOKENS), TX,
-  // AND/OR/NOT. insertText/selStart/selEnd beschreiben, was beim Einfügen an
-  // der Cursorposition eingesetzt wird und welcher Teilbereich davon
-  // anschließend als Platzhalter selektiert wird, damit man ihn direkt
-  // überschreiben kann (z.B. "Zustand(objekt)" mit "objekt" selektiert). TX
-  // wird bewusst NICHT in die eingefügten Primitiven-/Funktionsaufrufe
-  // aufgenommen (siehe GZ.exprEngine PRIMITIVE_INFO) - es bleibt implizit.
+  // Candidates for the autocomplete and the function palette.
+  // They are:
+  // - primitives (GZ.exprEngine.PRIMITIVE_INFO),
+  // - the functions and variables that are defined at this time (module state),
+  // - state constants (GZ.exprEngine.KAT_TOKENS),
+  // - TX, AND, OR and NOT.
+  // insertText, selStart and selEnd describe what the editor inserts at the cursor position.
+  // They also describe which part of it the editor then selects as a placeholder.
+  // So the user can overwrite it directly.
+  // An example is "Zustand(objekt)" with "objekt" selected.
+  // The code does NOT put TX in the inserted primitive and function calls on purpose (see
+  // GZ.exprEngine PRIMITIVE_INFO).
+  // It stays implicit.
   function exprCandidates() {
     const items = [];
     GZ.exprEngine.PRIMITIVE_INFO.forEach(p => {
@@ -162,11 +184,13 @@
     });
     items.push({ group: 'Sonstiges', label: 'TX', hint: 'reserviert', desc: 'aktueller Auswertungszeitpunkt - immer automatisch verfügbar, nicht selbst benennen/zuweisen', insertText: 'TX', selStart: 2, selEnd: 2, kind: 'var' });
     items.push({ group: 'Sonstiges', label: 'LEER', hint: 'reserviert', desc: '"kein Wert" (NaN) - passt sich jedem Ergebnistyp an, z.B. als "sonst"-Zweig von WENN()', insertText: 'LEER', selStart: 4, selEnd: 4, kind: 'var' });
-    // Vergleichsoperatoren + Zahl-Platzhalter: ohne sie endete der reine
-    // Klickweg zwangsläufig bei einem unvollständigen Ausdruck (z.B.
-    // "DauerSeit(K1, GRUEN)"), der noch zu WAHR/FALSCH ergänzt werden MUSS -
-    // fertigstellen ging also nur per Tastatur. Der Zahl-Eintrag fügt eine
-    // vorselektierte "0" ein, die man direkt überschreiben kann.
+    // Comparison operators and a number placeholder.
+    // Without them, a pure click path always ended at an incomplete expression (for example
+    // "DauerSeit(K1, GRUEN)").
+    // The user MUST still complete it to TRUE or FALSE.
+    // So the user could only finish it with the keyboard.
+    // The number entry inserts a preselected "0".
+    // The user can overwrite it directly.
     OPERATOR_INFO.forEach(op => {
       const caret = op.caret != null ? op.caret : op.insert.length;
       items.push({ group: 'Operatoren', label: op.label, hint: op.hint, desc: op.desc, insertText: op.insert, selStart: caret, selEnd: caret, kind: 'op' });
@@ -180,21 +204,23 @@
       if (!alias) return;
       items.push({ group: 'Variablen', label: alias, hint: '', desc: '', insertText: alias, selStart: alias.length, selEnd: alias.length, kind: 'var' });
     });
-    // Andere Formeln sind wie Variablen per bloßem Namen referenzierbar
-    // (siehe Datei-Kopfkommentar zu Formel-Referenzen) - kind:'var', damit
-    // sie sich nahtlos in dieselbe Kandidatenliste einreihen (Autovervoll-
-    // ständigung/Palette). Bewusst OHNE Ausschluss der gerade bearbeiteten
-    // Formel selbst - eine Selbstreferenz wird beim Berechnen als zyklisch
-    // erkannt und klar gemeldet, statt sie hier stillschweigend zu verstecken.
+    // Other formulas are referenceable like variables by their plain name (see the file header
+    // comment about formula references).
+    // Use kind:'var'.
+    // So they join the same candidate list (autocomplete and palette) with no break.
+    // The code does NOT exclude the formula that the user edits at this time, on purpose.
+    // The calculation finds a self-reference as cyclic and reports it clearly.
+    // The code does not hide it silently here.
     formulas.forEach(f => {
       const name = f.name.trim();
       if (!name) return;
       items.push({ group: 'Formeln', label: name, hint: 'WAHR/FALSCH', desc: f.exprText, insertText: name, selStart: name.length, selEnd: name.length, kind: 'var' });
     });
-    // Rohe Signalgruppen-/Detektor-/APW-/ÖPNV-Spalten - auch OHNE dass dafür
-    // schon eine Variable existiert. Auswahl legt bei Bedarf (siehe onAccept,
-    // GZ.exprEditor accept()) automatisch eine passende Variable an, statt
-    // das vorher manuell im Abschnitt "Variablen" verlangen zu müssen.
+    // Raw signal group, detector, APW and ÖPNV columns.
+    // They are available also WHEN no variable exists for them yet.
+    // If necessary, the selection automatically creates a matching variable (see onAccept,
+    // GZ.exprEditor accept()).
+    // The user does not need to create it manually first in the section "Variablen".
     sourceCols().forEach(col => {
       const existing = vars.find(v => v.colIndex === col.index);
       items.push({
@@ -231,10 +257,10 @@
     els.addFormulaBtn.onclick = () => { addFormula(); renderFormulaRows(); };
     els.calcBtn.onclick = berechnen;
 
-    // "Bausteine" (Variablen/Funktionen) starten eingeklappt - dieselbe
-    // open-Klassen-Mechanik wie .data-panel (siehe layout.css), nur lokal
-    // hier verdrahtet statt in app.js, da dieser Baustein spezifisch zum
-    // Formel-Builder gehört.
+    // The "Bausteine" (variables and functions) start collapsed.
+    // The mechanism is the same open class as for .data-panel (see layout.css).
+    // It is wired locally here and not in app.js, because this block is specific to the formula
+    // builder.
     if (els.bausteinPanel && els.bausteinPanelHead) {
       els.bausteinPanelHead.onclick = () => els.bausteinPanel.classList.toggle('open');
     }
@@ -247,15 +273,16 @@
       document.addEventListener('keydown', e => { if (e.key === 'Escape' && !els.helpModal.hidden) closeHelp(); });
     }
 
-    // Hervorhebungs-Popover (siehe renderFormulaRows()/positionHlPopover()):
-    // EIN globaler Klick-Handler statt je Popover einen eigenen - schließt
-    // jedes offene Popover, sobald außerhalb seines .up-formula-hl-wrap
-    // geklickt wird. Da das Öffnen/Schließen rein über das hidden-Attribut
-    // des bereits vorhandenen DOM-Knotens läuft (kein renderFormulaRows()-
-    // Neuaufbau bei jedem Klick), bleibt e.target während der gesamten
-    // Ereignisverarbeitung im Baum verankert - anders als bei einem vollen
-    // Neuaufbau, der e.target mitten in der Bubble-Phase aus dem DOM lösen
-    // und damit closest() fälschlich leer laufen lassen würde.
+    // Highlight popover (see renderFormulaRows() and positionHlPopover()).
+    // There is ONE global click handler and not one for each popover.
+    // It closes each open popover as soon as the user clicks outside its .up-formula-hl-wrap.
+    // Opening and closing runs only through the hidden attribute of the DOM node that already
+    // exists.
+    // There is no renderFormulaRows() rebuild at each click.
+    // So e.target stays attached to the tree during the whole event handling.
+    // A full rebuild is different.
+    // It can detach e.target from the DOM in the middle of the bubble phase.
+    // Then closest() wrongly finds nothing.
     document.addEventListener('click', e => {
       if (!e.target.closest('.up-formula-hl-wrap')) closeAllHlPopovers();
     });
@@ -268,12 +295,12 @@
     els.formulaRows.querySelectorAll('.up-formula-hl-pop').forEach(pop => { pop.hidden = true; });
   }
 
-  // Positioniert das Hervorhebungs-Popover einer Formel-Zeile relativ zum
-  // Augen-Symbol - position:fixed + hier berechnete Koordinaten statt
-  // position:absolute, da .panel weiter oben overflow:hidden setzt (für die
-  // abgerundeten Ecken) und ein absolut positioniertes Popover sonst am
-  // Panel-Rand abgeschnitten würde (dieselbe Begründung wie bei
-  // positionDropdown() in exprEditor.js).
+  // Positions the highlight popover of a formula row relative to the eye icon.
+  // It uses position:fixed with coordinates that the code calculates here.
+  // It does not use position:absolute.
+  // The reason is that .panel above sets overflow:hidden (for the rounded corners).
+  // A popover with absolute position is cut off at the panel edge.
+  // The reason is the same as for positionDropdown() in exprEditor.js.
   function positionHlPopover(rowEl) {
     const btn = rowEl.querySelector('.up-formula-hl-btn');
     const pop = rowEl.querySelector('.up-formula-hl-pop');
@@ -282,7 +309,7 @@
     pop.style.visibility = 'hidden';
     pop.hidden = false;
     requestAnimationFrame(() => {
-      if (pop.hidden) return; // in der Zwischenzeit wieder geschlossen
+      if (pop.hidden) return; // closed again in the meantime
       const pw = pop.offsetWidth, ph = pop.offsetHeight;
       let left = rect.right - pw;
       if (left < 8) left = 8;
@@ -295,19 +322,21 @@
     });
   }
 
-  // Quellspalten für Variablen: Signalgruppen (SG) und Detektoren (DET) als
-  // Objekt-Handles, APW/ÖPNV als Zahl. Bewusst OHNE bereits berechnete
-  // Formel-Spalten selbst (keine Formeln-referenzieren-Formeln-Verkettung -
-  // hält Auswertungsreihenfolge und Zyklen-Vermeidung trivial).
-  // TX ist der reservierte, immer implizit verfügbare Auswertungszeitpunkt
-  // (siehe RESERVED_EXACT/GZ.exprEngine) - niemals eine normale Spalte, die
-  // man als Variable/Objekt auswählen oder zuordnen müsste. Der Filter ist
-  // ein Sicherheitsnetz (case-insensitiv, unabhängig von kuerzel): sollte
-  // eine Roh-CSV ausnahmsweise doch eine Spalte namens "TX" unter SG/DET/
-  // APW/ÖPNV führen, darf sie hier nie auftauchen - sonst könnte man ihr
-  // versehentlich eine Variable zuordnen bzw. sie im Ausdrucks-Editor als
-  // "Objekt" auswählen, was mit dem echten, reservierten TX kollidieren
-  // würde.
+  // Source columns for variables.
+  // Signal groups (SG) and detectors (DET) are object handles. APW and ÖPNV are numbers.
+  // The list does NOT include the formula columns that the code already calculated.
+  // So there is no chain of formulas that reference formulas.
+  // This keeps the evaluation order and the cycle avoidance simple.
+  // TX is the reserved evaluation time that is always implicitly available (see RESERVED_EXACT and
+  // GZ.exprEngine).
+  // It is never a normal column that the user must select or assign as a variable or object.
+  // The filter is a safety net (case-insensitive, independent of kuerzel).
+  // A raw CSV can, in an exceptional case, have a column with the name "TX" under SG, DET, APW or
+  // ÖPNV.
+  // This column must never appear here.
+  // Otherwise the user can assign a variable to it by mistake.
+  // The user can also select it as an "object" in the expression editor.
+  // This collides with the real, reserved TX.
   const isTxCol = c => (c.name || '').trim().toUpperCase() === 'TX';
   function sourceCols() {
     const a = GZ.state.data.currentAnalysis;
@@ -327,12 +356,12 @@
     vars.push({ id: nextVarId++, alias: `VAR${nextVarId - 1}`, colIndex: cols.length ? cols[0].index : null });
   }
 
-  // Wandelt einen beliebigen Spaltennamen in einen gültigen, noch nicht
-  // vergebenen Bezeichner um (Basis für "Objekt aus dem Dropdown wählen" -
-  // siehe exprCandidates()/resolveOrCreateVarForCol() unten). Spaltennamen
-  // aus der OCIT-Kopfzeile sind i.d.R. bereits kurz und identifiergleich
-  // (z.B. "K1", "D1") - die Bereinigung ist nur ein Sicherheitsnetz für
-  // Ausnahmefälle (Leerzeichen, führende Ziffer, Duplikate).
+  // Converts any column name into a valid identifier that is not yet in use.
+  // It is the basis for "select an object from the dropdown" (see exprCandidates() and
+  // resolveOrCreateVarForCol() below).
+  // Column names from the OCIT header line are usually already short and the same as identifiers
+  // (for example "K1", "D1").
+  // The cleanup is only a safety net for exceptional cases (spaces, a leading digit, duplicates).
   function sanitizeIdent(base) {
     let s = (base || '').replace(/[^A-Za-z0-9_]/g, '_');
     if (!/^[A-Za-z_]/.test(s)) s = '_' + s;
@@ -347,12 +376,14 @@
     return `${root}${i}`;
   }
 
-  // Liefert den Alias einer bereits existierenden Variable für diese Spalte,
-  // oder legt (bei Auswahl eines "Objekts" aus dem Ausdrucks-Editor-Dropdown,
-  // siehe exprCandidates() oben/onAccept-Hook in GZ.exprEditor) still eine neue an - so
-  // muss man beim Formulieren einer Formel nicht erst manuell im Abschnitt
-  // "Variablen" eine Zeile anlegen. Rendert die Variablen-Liste neu, damit
-  // die neue/wiederverwendete Zuordnung dort sichtbar ist.
+  // Returns the alias of a variable that already exists for this column.
+  // Otherwise it silently creates a new variable.
+  // This happens when the user selects an "object" from the expression editor dropdown (see
+  // exprCandidates() above and the onAccept hook in GZ.exprEditor).
+  // So the user does not need to create a row in the section "Variablen" manually first when
+  // writing a formula.
+  // The function renders the variable list again.
+  // So the new or reused assignment is visible there.
   function resolveOrCreateVarForCol(col) {
     const existing = vars.find(v => v.colIndex === col.index);
     if (existing && existing.alias.trim()) return existing.alias.trim();
@@ -373,18 +404,18 @@
 
   function populateControls() {
     const cols = sourceCols();
-    // Nach neuem Datenimport: Spaltenverweise, die es nicht mehr gibt (andere
-    // Datei/Spaltenlayout), auf die erste verfügbare Quellspalte zurücksetzen
-    // statt auf eine ungültige Spalte zu verweisen. Funktionen haben keinen
-    // Spaltenbezug (siehe Datei-Kopfkommentar) und bleiben unverändert.
+    // After a new data import: reset column references that do not exist any more (other file or
+    // column layout) to the first available source column.
+    // Do not refer to an invalid column.
+    // Functions have no column reference (see the file header comment). They stay unchanged.
     vars.forEach(v => { if (!cols.find(c => c.index === v.colIndex)) v.colIndex = cols.length ? cols[0].index : null; });
     syntheticCols = [];
-    // Rohreihe je Formel gehört zur vorherigen Datei - erst nach dem nächsten
-    // "Berechnen" wieder gültig, sonst könnte getFormulaHighlights() stale
-    // Intervalle gegen eine neue Zeitreihe falscher Länge auswerten. Ein
-    // Hervorhebungs-Ziel, das es in der neuen Datei nicht mehr gibt, wird wie
-    // bei vars oben stillschweigend zurückgesetzt statt auf eine falsche
-    // Spalte zu verweisen.
+    // The raw series of each formula belongs to the previous file.
+    // It is valid again only after the next "Berechnen".
+    // Otherwise getFormulaHighlights() can evaluate stale intervals against a new time series of a
+    // wrong length.
+    // A highlight target that does not exist in the new file is silently reset, as for vars above.
+    // It does not point to a wrong column.
     formulas.forEach(f => {
       if (f.highlightCol != null && !cols.find(c => c.index === f.highlightCol)) f.highlightCol = null;
       f.rawSeries = null;
@@ -397,14 +428,14 @@
     els.hint.className = 'hint';
   }
 
-  // Baut die Funktionstabelle für GZ.exprEngine (Form { [name]: {params,
-  // exprText} }) aus allen STRUKTURELL gültigen Funktionsdefinitionen
-  // (gültiger, eindeutiger Name; gültige, eindeutige Parameter) - bewusst
-  // OHNE den Rumpf selbst hier zu validieren: eine Funktion mit defektem
-  // Rumpf bleibt aufrufbar, der Fehler taucht dann erst (klar zugeordnet)
-  // an der jeweiligen Aufrufstelle auf ("In Funktion „X“: …", siehe
-  // GZ.exprEngine parseCall()) statt die gesamte Funktionstabelle wegen
-  // einer einzelnen kaputten Definition zu verwerfen.
+  // Builds the function table for GZ.exprEngine (form { [name]: {params, exprText} }).
+  // It uses all STRUCTURALLY valid function definitions (valid, unique name and valid, unique
+  // parameters).
+  // The code does NOT validate the body itself here, on purpose.
+  // A function with a defective body stays callable.
+  // The error then appears only at the call site, with a clear assignment ("In Funktion „X“: …",
+  // see parseCall() in GZ.exprEngine).
+  // The code does not discard the whole function table because of one broken definition.
   function currentFuncDefs() {
     const defs = {};
     const errors = [];
@@ -424,18 +455,18 @@
     return { defs, errors };
   }
 
-  // types enthält NEBEN den Variablen-Aliasen auch jeden benannten Formelnamen
-  // als BOOL-Bezeichner (siehe Datei-Kopfkommentar zu Formel-Referenzen) -
-  // eine Formel kann so eine ANDERE Formel direkt beim Namen nennen
-  // ("M1 AND R1"), ohne dafür eine eigene Variable anzulegen. Teilt sich mit
-  // den Variablen-Aliasen dasselbe "seen"-Set (EIN gemeinsamer Bezeichner-
-  // Namensraum): eine Formel darf weder den Namen einer Variable noch einer
-  // anderen Formel tragen, sonst würde eine der beiden Bedeutungen im scope
-  // lautlos verdeckt. Ob eine so referenzierte Formel tatsächlich BERECHENBAR
-  // ist (kompiliert fehlerfrei, keine zyklische Referenz), prüft NICHT diese
-  // rein syntaktische Typprüfung, sondern erst berechnen() (Abhängigkeits-
-  // Graph) - eine (noch) ungültige/zyklische Formel zu referenzieren ist
-  // daher kein Compile-Fehler, sondern führt beim Berechnen zu "übersprungen".
+  // types contains, in addition to the variable aliases, each named formula name as a BOOL
+  // identifier (see the file header comment about formula references).
+  // So a formula can name ANOTHER formula directly ("M1 AND R1").
+  // It does not need its own variable for this.
+  // It shares the same "seen" set with the variable aliases (ONE common identifier namespace).
+  // A formula must not have the name of a variable or of another formula.
+  // Otherwise one of the two meanings is silently hidden in the scope.
+  // This purely syntactic type check does NOT check whether a referenced formula is really
+  // CALCULABLE (it compiles with no error and has no cyclic reference).
+  // Only berechnen() checks it (dependency graph).
+  // So a reference to a formula that is (still) invalid or cyclic is not a compile error.
+  // At calculation, it gives "übersprungen".
   function currentVarTypes() {
     const types = {};
     const aliasErrors = [];
@@ -533,29 +564,29 @@
     validateAllInline();
   }
 
-  // Feste Identitätsfarbe JEDER Formel (siehe HIGHLIGHT_PALETTE oben) -
-  // Position in der GESAMTEN formulas-Liste, nicht nur unter den aktuell
-  // hervorhebenden. Eine Formel behält so dieselbe Farbe überall, wo sie
-  // auftaucht: eigener Farbpunkt in der Liste, Referenz-Akzent in ANDEREN
-  // Formeln (siehe identColorFor unten) UND ihr Hervorhebungs-Band auf einer
-  // Objekt-Spur (siehe getFormulaHighlights()) - unabhängig davon, ob/wie
-  // viele andere Formeln gerade ein Hervorhebungsziel gesetzt haben.
+  // Fixed identity color of EACH formula (see HIGHLIGHT_PALETTE above).
+  // It uses the position in the WHOLE formulas list and not only among those that highlight at this
+  // time.
+  // So a formula keeps the same color everywhere it appears:
+  // - its own color dot in the list,
+  // - the reference accent in OTHER formulas (see identColorFor below),
+  // - its highlight band on an object track (see getFormulaHighlights()).
+  // It does not matter if or how many other formulas have a highlight target at this time.
   function formulaColorFor(f) {
     const idx = formulas.findIndex(x => x.id === f.id);
     return idx === -1 ? null : HIGHLIGHT_PALETTE[idx % HIGHLIGHT_PALETTE.length];
   }
-  // Für identColorFor(): Farbe der Formel MIT DIESEM NAMEN (falls vorhanden) -
-  // eine Formel-Referenz in einer ANDEREN Formel trägt dieselbe Farbe wie die
-  // referenzierte Formel selbst.
+  // For identColorFor(): the color of the formula WITH THIS NAME (if it exists).
+  // A formula reference in ANOTHER formula has the same color as the referenced formula itself.
   function formulaColorByName(name) {
     const f = formulas.find(x => x.name.trim() === name);
     return f ? formulaColorFor(f) : null;
   }
 
-  // Augen-Symbol fürs Hervorhebungs-Popover (siehe closeAllHlPopovers()/
-  // positionHlPopover()) - dieselbe Form wie im begutachteten Redesign-
-  // Mockup, damit "hier lässt sich etwas hervorheben" auch ohne Text auf
-  // Anhieb erkennbar ist.
+  // Eye icon for the highlight popover (see closeAllHlPopovers() and positionHlPopover()).
+  // It has the same shape as in the reviewed redesign mockup.
+  // So the user can see at first sight, also with no text, that "something can be highlighted
+  // here".
   const EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>';
 
   function renderFormulaRows() {
@@ -588,11 +619,12 @@
       </div>`;
     }).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
 
-    // Formelname ändern kann ANDERE Formeln betreffen, die ihn referenzieren
-    // (siehe currentVarTypes()) - wie bei Variablen-Aliasen/Funktionsnamen
-    // muss das eine Neuprüfung ALLER Zeilen anstoßen, nur eben debounced
-    // (150ms), damit normales Tippen des Namens nicht bei jedem Zeichen die
-    // komplette Liste (inkl. Seitenleiste) neu rendert.
+    // A change of a formula name can affect OTHER formulas that reference it (see
+    // currentVarTypes()).
+    // As for variable aliases and function names, it must start a new check of ALL rows.
+    // But the check is debounced (150 ms).
+    // So normal typing of the name does not render the complete list (with the sidebar) again at
+    // each character.
     const debouncedRevalidate = id => {
       clearTimeout(debounceTimers.get(`formula:${id}`));
       debounceTimers.set(`formula:${id}`, setTimeout(validateAllInline, 150));
@@ -603,18 +635,18 @@
       const f = formulas.find(x => x.id === id);
       rowEl.querySelector('.up-formula-name').oninput = e => { f.name = e.target.value; debouncedRevalidate(id); };
       rowEl.querySelector('.up-formula-remove').onclick = () => { formulas = formulas.filter(x => x.id !== id); renderFormulaRows(); validateAllInline(); };
-      // Öffnen/Schließen rein über das hidden-Attribut des bereits
-      // gerenderten Popover-Knotens (siehe closeAllHlPopovers()) - KEIN
-      // renderFormulaRows()-Neuaufbau nur fürs Auf-/Zuklappen, damit der
-      // globale Klick-außerhalb-Handler in init() e.target zuverlässig noch
-      // im DOM vorfindet (siehe dortiger Kommentar).
+      // Opening and closing runs only through the hidden attribute of the popover node that the
+      // code already rendered (see closeAllHlPopovers()).
+      // There is NO renderFormulaRows() rebuild only to open or close.
+      // So the global click-outside handler in init() always finds e.target still in the DOM (see
+      // the comment there).
       const hlBtn = rowEl.querySelector('.up-formula-hl-btn');
-      // preventDefault auf mousedown verhindert, dass der Button dem gerade
-      // fokussierten Ausdrucks-Editor den Fokus entzieht (siehe dieselbe
-      // Absicherung bei .expr-palette-btn in exprEditor.js) - sonst löst ein
-      // Klick auf das Auge zusätzlich noch den blur-Handler des Editors aus
-      // (der Autovervollständigung schließt und den Editor-Inhalt neu
-      // einrasten lässt), rein als Nebenwirkung des Fokuswechsels.
+      // preventDefault on mousedown stops the button from taking the focus from the expression
+      // editor that has the focus.
+      // (See the same protection at .expr-palette-btn in exprEditor.js.)
+      // Without it, a click on the eye also starts the blur handler of the editor.
+      // The blur handler closes the autocomplete and makes the editor content settle again.
+      // This is only a side effect of the focus change.
       hlBtn.addEventListener('mousedown', ev => ev.preventDefault());
       hlBtn.onclick = ev => {
         ev.stopPropagation();
@@ -636,21 +668,23 @@
       GZ.exprEditor.setup(rowEl, {
         getText: () => f.exprText,
         setText: v => { f.exprText = v; },
-        // Andere Formeln sind wie Variablen per bloßem Namen referenzierbar
-        // (siehe currentVarTypes()/Datei-Kopfkommentar zu Formel-Referenzen) -
-        // daher hier ebenfalls als "bekannt" gemeldet, damit ihr Name beim
-        // Tippen die Referenz-Akzentfarbe bekommt (siehe identColorFor unten).
-        // Der eigene Name bleibt bewusst mit drin (keine Sonderbehandlung für
-        // Selbstreferenz) - eine versehentliche Selbstreferenz wird beim
-        // Berechnen als zyklisch erkannt und klar gemeldet (siehe berechnen()).
+        // Other formulas are referenceable like variables by their plain name (see
+        // currentVarTypes() and the file header comment about formula references).
+        // So the code also reports them as "known" here.
+        // Then their name gets the reference accent color while the user types (see identColorFor
+        // below).
+        // The own name stays in the set on purpose (no special handling for a self-reference).
+        // The calculation finds an accidental self-reference as cyclic and reports it clearly (see
+        // berechnen()).
         knownNames: () => new Set([
           ...vars.map(v => v.alias.trim()).filter(Boolean),
           ...formulas.map(x => x.name.trim()).filter(Boolean)
         ]),
         getCandidates: exprCandidates,
-        // Eine referenzierte Formel trägt ihre eigene Identitätsfarbe (siehe
-        // formulaColorFor()) statt der generischen Variablenfarbe - macht auf
-        // einen Blick sichtbar, DASS und WELCHE andere Formel hier eingeflossen ist.
+        // A referenced formula has its own identity color (see formulaColorFor()) and not the
+        // generic variable color.
+        // So it is visible at first sight THAT another formula is part of this one, and WHICH
+        // formula it is.
         identColorFor: formulaColorByName,
         onRevalidate: () => validateFormulaRow(rowEl, f)
       });
@@ -658,23 +692,25 @@
     });
   }
 
-  // Live-Validierung: parst + typprüft nur (siehe exprEngine.compile) - wertet
-  // NICHT gegen Daten aus. Aktualisiert ausschließlich den Status-Span, nicht
-  // die gesamte Zeile, damit Eingabefokus/Cursorposition beim Tippen erhalten
-  // bleibt (kein voller renderFormulaRows()-Aufruf pro Tastendruck).
+  // Live validation.
+  // It only parses and checks types (see exprEngine.compile).
+  // It does NOT evaluate against data.
+  // It updates only the status span and not the whole row.
+  // So the input focus and the cursor position stay while the user types.
+  // There is no full renderFormulaRows() call for each key press.
   function validateFormulaRow(rowEl, f) {
     const statusEl = rowEl.querySelector('.up-formula-status');
     const { types, aliasErrors } = currentVarTypes();
     const { defs: funcDefs, errors: funcErrors } = currentFuncDefs();
     const wrap = rowEl.querySelector('.expr-input-wrap');
     const markHighlight = pos => { if (wrap && wrap.__exprRefreshHighlight) wrap.__exprRefreshHighlight(pos); };
-    // Spiegelt den Status zusätzlich als Randfarbe der ganzen Karte (siehe
-    // .up-formula-row-{ok,err,pending} in components.css) - sofort sichtbar
-    // beim Überfliegen der Liste, ohne bis zum Status-Zeichen lesen zu
-    // müssen. Der Fehlertext erscheint zusätzlich als Zeile unter dem
-    // Ausdruck (nicht nur im Tooltip) - bewusst NUR bei "err", nicht bei
-    // "pending" (siehe incomplete-Zweig unten), sonst würde beim normalen
-    // Tippen ständig eine Meldung aufblitzen, die keine ist.
+    // Also mirrors the status as the border color of the whole card (see
+    // .up-formula-row-{ok,err,pending} in components.css).
+    // It is visible immediately when the user scans the list.
+    // The user does not need to read to the status character.
+    // The error text also appears as a line under the expression (not only in the tooltip).
+    // This is ONLY for "err" and not for "pending" (see the incomplete branch below).
+    // Otherwise a message flashes all the time during normal typing, and it is not a real error.
     const setRowState = (state, errMsg) => {
       rowEl.classList.remove('up-formula-row-ok', 'up-formula-row-err', 'up-formula-row-pending');
       rowEl.classList.add('up-formula-row-' + state);
@@ -689,7 +725,7 @@
       statusEl.textContent = '✕';
       statusEl.className = 'up-formula-status err';
       statusEl.title = desc;
-      markHighlight(null); // Fehler liegt in Alias-/Funktionsdefinitionen, nicht im Formel-Text selbst
+      markHighlight(null); // The error is in the alias or function definitions and not in the formula text itself
       setRowState('err', desc);
       return;
     }
@@ -701,9 +737,11 @@
       markHighlight(null);
       setRowState('ok');
     } else if (result.incomplete) {
-      // Noch nicht fertig statt falsch (siehe exprEngine ExprError) - neutral
-      // anzeigen und KEINE rote Fehlerwelle zeichnen, sonst blinkt beim
-      // normalen Tippen/Zusammenklicken ständig ein Fehler auf, der keiner ist.
+      // Not finished yet and not wrong (see ExprError in exprEngine).
+      // Show it neutral.
+      // Do NOT draw a red error wave.
+      // Otherwise an error that is not an error flashes all the time during normal typing or
+      // clicking together.
       statusEl.textContent = '…';
       statusEl.className = 'up-formula-status pending';
       statusEl.title = result.message;
@@ -718,10 +756,10 @@
     }
   }
 
-  // Revalidiert Funktionen, Formeln UND Variablen gemeinsam - eine Änderung
-  // an EINER Variable/Funktion kann die Gültigkeit jeder Formel (und, bei
-  // Funktionen, auch anderer Funktionen) beeinflussen, daher kein isoliertes
-  // Neuprüfen nur der geänderten Zeile.
+  // Validates functions, formulas AND variables together again.
+  // A change to ONE variable or function can affect the validity of each formula (and, for
+  // functions, also of other functions).
+  // So the code does not check only the changed row in isolation.
   function validateAllInline() {
     if (!els.formulaRows) return;
     const { defs: funcDefs } = currentFuncDefs();
@@ -777,10 +815,10 @@
     renderBausteinSummary();
   }
 
-  // Ein-Zeilen-Zusammenfassung im (standardmäßig eingeklappten) Bausteine-
-  // Kopf, siehe .baustein-panel in components.css - damit der Inhalt auch
-  // zugeklappt auf einen Blick erkennbar bleibt, statt ihn erst aufklappen
-  // zu müssen.
+  // One-line summary in the header of the Bausteine block (collapsed by default), see
+  // .baustein-panel in components.css.
+  // So the content is recognizable at first sight also when the block is collapsed.
+  // The user does not need to expand it first.
   function renderBausteinSummary() {
     if (!els.bausteinPanelSummary) return;
     const parts = [
@@ -790,54 +828,55 @@
     els.bausteinPanelSummary.textContent = parts.length ? parts.join(', ') : 'Keine Variablen/Funktionen definiert';
   }
 
-  // Baut für eine SG-/DET-Variable EINMAL (nicht pro Zeile) ihre Segmente +
-  // einen fortlaufenden Punkt-Sweep (GZ.segments.makePointSegmentSweep) - SG
-  // nutzt die in allStats bereits vorberechneten Segmente, DET wird einmal
-  // frisch gebaut (analog zu umlaufpruefung.js' detSegsByCol). Das Handle-
-  // Objekt selbst bleibt über den gesamten Berechnen()-Durchlauf stabil; nur
-  // sein interner Sweep-Zeiger rückt pro Zeile vor (siehe advance() unten).
+  // Builds, for an SG or DET variable, its segments and a continuous point sweep
+  // (GZ.segments.makePointSegmentSweep) ONCE (not for each row).
+  // SG uses the segments that allStats already precalculated.
+  // DET is built fresh once (like detSegsByCol in umlaufpruefung.js).
+  // The handle object itself stays stable over the whole berechnen() pass.
+  // Only its internal sweep pointer advances for each row (see advance() below).
   //
-  // cycleMetricsByIdx (je Umlaufindex vorberechnet, siehe GZ.segments.
-  // computeCycleSgMetrics/computeCycleDetMetrics) speist die umlaufweisen
-  // exprEngine-Primitiven An/Ab/TF/RG/GE/Ausgeloest/AnzahlAusloesungen -
-  // cycleMetrics (der von den Primitiven gelesene Live-Wert) wird in
-  // berechnen() beim Vorrücken über cyclePtr mitgeführt, analog zu sweep.
+  // cycleMetricsByIdx (precalculated for each cycle index, see GZ.segments.computeCycleSgMetrics
+  // and computeCycleDetMetrics) feeds the per-cycle exprEngine primitives An, Ab, TF, RG, GE,
+  // Ausgeloest and AnzahlAusloesungen.
+  // cycleMetrics is the live value that the primitives read.
+  // berechnen() moves it along through cyclePtr when it advances, like sweep.
   function buildObjectHandle(a, type, col, TU_MED) {
     if (type === 'SG') {
       const sgEntry = a.allStats.find(s => s.col.index === col.index);
       const segs = sgEntry ? sgEntry.segs : [];
       const greens = sgEntry ? sgEntry.stats.greens : [];
-      // computeCycleSgMetrics liefert seit der Mehrfach-Vorkommen-Erkennung
-      // ein Array von Vorkommen je Umlauf (siehe dortigen Kopfkommentar) -
-      // der zeilenweise Formel-Builder kennt (wie bisher) nur EIN Vorkommen
-      // je Umlauf und nimmt bewusst das chronologisch erste; die
-      // Mehrfach-Erkennung gilt vorerst nur für Umlaufstatistiken (siehe
+      // computeCycleSgMetrics now returns an array of occurrences for each cycle (see the header
+      // comment there).
+      // This is a result of the multiple-occurrence detection.
+      // The row-by-row formula builder knows only ONE occurrence for each cycle, as before.
+      // It uses the chronologically first occurrence on purpose.
+      // The multiple detection applies only to Umlaufstatistiken for now (see
       // GZ.umlaufContext.buildAll()).
       const sgMetricsByIdx = computeCycleSgMetrics(segs, greens, a.cycleStarts, a.tMax, TU_MED).map(occs => occs[0] || null);
       return {
         class: 'SG', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
         cycleMetricsByIdx: sgMetricsByIdx,
-        // rawSample: für die WertBei()-Primitive (siehe exprEngine.js), z.B.
-        // WertBei(K2, Ab(K1)) - das rohe Signalbild von K2 im Moment des
-        // Abwurfs von K1, statt dessen kategorisierten Zustand() zum jeweils
-        // AKTUELLEN Zeitpunkt.
+        // rawSample: for the WertBei() primitive (see exprEngine.js), for example WertBei(K2,
+        // Ab(K1)).
+        // It is the raw signal image of K2 at the time of the stop of K1.
+        // It is not the categorized Zustand() at the CURRENT time.
         rawSample: makeRawValueSampler(a.times, a.seriesByCol.get(col.index)),
-        // durationAt: für die DauerBei()-Primitive - wie Dauer(objekt), nur
-        // für einen beliebigen statt den jeweils AKTUELLEN Zeitpunkt.
+        // durationAt: for the DauerBei() primitive.
+        // It is like Dauer(objekt), but for any time and not for the CURRENT time.
         durationAt: makeSegmentDurationSampler(segs)
       };
     }
     const segs = buildSegments(a.times, a.seriesByCol.get(col.index), categorizeDetRaw);
     const rawVals = a.seriesByCol.get(col.index);
     const occupied = a.times.map((_, k) => wzIstBelegt(rawVals[k]));
-    // An/Ab/TF/RG/GE sind universell (siehe exprEngine.js PRIMITIVES-
-    // Kopfkommentar) - ein Detektor/Wert hat mit BELEGT genau denselben
-    // Begriff eines "aktiven Zustands" wie eine Signalgruppe mit GRUEN,
-    // daher dieselbe computeCycleSgMetrics()-Grundlage (nur erstes Vorkommen
-    // je Umlauf, wie bei SG oben) statt einer eigenen Berechnung. Ausgeloest/
-    // AnzahlAusloesungen bleiben eigene, umlauf-weite Aggregate
-    // (computeCycleDetMetrics) - beide Kennzahl-Arten werden hier zu EINEM
-    // cycleMetrics-Objekt je Umlauf zusammengeführt.
+    // An, Ab, TF, RG and GE are universal (see the PRIMITIVES header comment in exprEngine.js).
+    // A detector or value has, with BELEGT, exactly the same idea of an "active state" as a signal
+    // group with GRUEN.
+    // So the code uses the same computeCycleSgMetrics() basis (only the first occurrence for each
+    // cycle, as for SG above).
+    // It does not use its own calculation.
+    // Ausgeloest and AnzahlAusloesungen stay own, cycle-wide aggregates (computeCycleDetMetrics).
+    // The code merges both kinds of key figures here into ONE cycleMetrics object for each cycle.
     const belegtSegs = segs.filter(s => s.cat === 'BELEGT');
     const anAbByIdx = computeCycleSgMetrics(segs, belegtSegs, a.cycleStarts, a.tMax, TU_MED).map(occs => occs[0] || null);
     const aggByIdx = computeCycleDetMetrics(a.times, occupied, a.cycleStarts, a.tMax);
@@ -853,20 +892,21 @@
     return {
       class: 'DET', sweep: makePointSegmentSweep(segs), cycleMetrics: null,
       cycleMetricsByIdx: detMetricsByIdx,
-      // rawSample: für die WertBei()-Primitive (siehe exprEngine.js) - anders
-      // als cycleMetrics unverändert über den gesamten Berechnen()-Durchlauf
-      // (kein Fortschreiten pro Zeile nötig, da sample() selbst per
-      // Binärsuche beliebige Zeitpunkte auflöst).
+      // rawSample: for the WertBei() primitive (see exprEngine.js).
+      // Unlike cycleMetrics, it stays unchanged over the whole berechnen() pass.
+      // It does not need to advance for each row, because sample() itself resolves any time with a
+      // binary search.
       rawSample: makeRawValueSampler(a.times, rawVals),
-      // durationAt: für die DauerBei()-Primitive, z.B. "wie lange war dieser
-      // Detektor im Moment des Abwurfs von K1 schon belegt".
+      // durationAt: for the DauerBei() primitive.
+      // An example is "how long was this detector already occupied at the time of the stop of K1".
       durationAt: makeSegmentDurationSampler(segs)
     };
   }
 
-  // Wertet ALLE aktuell gültigen Formeln über die gesamte Aufzeichnung aus
-  // (eine boolesche Rohreihe je TX) und ersetzt syntheticCols vollständig -
-  // erst hier, nicht während des Tippens (siehe validateFormulaRow oben).
+  // Evaluates ALL formulas that are valid at this time over the whole recording (one boolean raw
+  // series for each TX).
+  // It replaces syntheticCols completely.
+  // This happens only here and not while the user types (see validateFormulaRow above).
   function berechnen() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -883,8 +923,9 @@
       return;
     }
 
-    // Einmal global (nicht je Variable) - Grundlage der umlaufweisen
-    // An/Ab/TF/RG/GE-Primitiven UND des TU_MED-Bezeichners im scope unten.
+    // Once globally (not for each variable).
+    // It is the basis of the per-cycle primitives An, Ab, TF, RG and GE AND of the TU_MED
+    // identifier in the scope below.
     const TU_MED = computeGlobalTU(cycleStarts);
 
     const scopeSpecs = vars.map(v => {
@@ -895,22 +936,24 @@
       return { alias, type, series: col ? seriesByCol.get(col.index) : null };
     }).filter(s => s.alias);
 
-    // TX = Sekunden seit Umlaufbeginn des aktuellen Zyklus, per fortlaufendem
-    // Zeiger über cycleStarts (wie überall sonst im Code) statt Binärsuche
-    // je Zeile - amortisiert O(n) über die gesamte Aufzeichnung. Dient den
-    // Zustand/Dauer/DauerSeit-Primitiven rein deklarativ (siehe exprEngine.js
-    // Kopfkommentar) - der eigentliche Auswertungszeitpunkt läuft über das
-    // jeweilige Objekt-Handle (handle.sweep.advance() unten), nicht über TX.
-    // TU/TU_MED/SPL ergänzen das für die umlaufweisen Primitiven relevante
-    // Vokabular (aktuelle Umlaufdauer, Median-Umlaufzeit, aktives
-    // Signalprogramm) - dieselben Bezeichner wie in Umlaufstatistiken.
+    // TX = seconds since the cycle start of the current cycle.
+    // The code uses a continuous pointer over cycleStarts (as everywhere else in the code).
+    // It does not use a binary search for each row.
+    // The cost is amortized O(n) over the whole recording.
+    // It serves the primitives Zustand, Dauer and DauerSeit in a purely declarative way (see the
+    // header comment of exprEngine.js).
+    // The real evaluation time runs through the object handle of each object
+    // (handle.sweep.advance() below) and not through TX.
+    // TU, TU_MED and SPL add the vocabulary that is relevant for the per-cycle primitives.
+    // They are the current cycle duration, the median cycle time and the active signal program.
+    // They are the same identifiers as in Umlaufstatistiken.
     const varTypesWithTx = { ...types, TX: 'NUM', TU: 'NUM', TU_MED: 'NUM', SPL: 'TEXT' };
 
     // ---------- 1) Kompilieren (rein syntaktisch/typgeprüft) ----------
     const byId = new Map(formulas.map(f => [f.id, f]));
     const nameToId = new Map(formulas.map(f => [f.name.trim(), f.id]).filter(([n]) => n));
     const compiledById = new Map();
-    const skipReasonById = new Map(); // id -> Meldung (Kompilierfehler ODER Abhängigkeits-/Zyklusproblem)
+    const skipReasonById = new Map(); // id -> message (compile error OR dependency or cycle problem)
     formulas.forEach(f => {
       const compiled = compile(f.exprText, varTypesWithTx, funcDefs);
       if (compiled.ok) compiledById.set(f.id, compiled);
@@ -918,11 +961,11 @@
     });
 
     // ---------- 2) Abhängigkeiten ermitteln ----------
-    // Welche ANDEREN Formelnamen referenziert diese Formel als bloßen
-    // Bezeichner (kein Funktionsaufruf)? Über denselben Tokenizer wie das
-    // eigentliche Parsen ermittelt (nicht per Regex) - erkennt so zuverlässig
-    // NUR echte Bezeichner-Vorkommen, nie z.B. einen gleichlautenden Namen
-    // innerhalb eines Text-Literals.
+    // Which OTHER formula names does this formula reference as a plain identifier (not a function
+    // call)?
+    // The code finds this with the same tokenizer as the real parsing (not with a regex).
+    // So it finds reliably ONLY real identifier occurrences.
+    // It never finds, for example, the same name inside a text literal.
     const depsById = new Map();
     compiledById.forEach((_, id) => {
       const f = byId.get(id);
@@ -930,26 +973,26 @@
       const tokens = GZ.exprEngine.tokenize(f.exprText);
       tokens.forEach((tok, idx) => {
         if (tok.type !== 'IDENT') return;
-        if (tokens[idx + 1] && tokens[idx + 1].type === '(') return; // Funktionsaufruf, keine Formel-Referenz
+        if (tokens[idx + 1] && tokens[idx + 1].type === '(') return; // function call, not a formula reference
         const depId = nameToId.get(tok.value);
-        // Absichtlich OHNE "depId !== id"-Ausschluss: eine Selbstreferenz
-        // (Formel referenziert sich direkt beim eigenen Namen) muss als
-        // Ein-Knoten-Zyklus im Graphen sichtbar sein, sonst erkennt visit()
-        // unten (das einen Zyklus über ein erneutes Antreffen eines Knotens
-        // MIT Zustand "in Bearbeitung" erkennt) ihn nie - ohne diese Kante
-        // hätte die Formel schlicht keine Abhängigkeiten und würde (mit
-        // ihrem eigenen, zu diesem Zeitpunkt noch undefinierten scope-Wert)
-        // einfach falsch statt erkennbar zyklisch berechnet.
+        // This has NO "depId !== id" exclusion on purpose.
+        // A self-reference (a formula references its own name directly) must be visible in the
+        // graph as a cycle with one node.
+        // Otherwise visit() below never finds it.
+        // visit() finds a cycle when it meets a node again that has the state "in progress".
+        // Without this edge, the formula has no dependencies.
+        // Then the code calculates it wrongly (with its own scope value, which is not yet defined
+        // at this time) and not as a recognizable cycle.
         if (depId != null) deps.add(depId);
       });
       depsById.set(id, deps);
     });
 
     // ---------- 3) Topologisch ordnen + Zyklen erkennen ----------
-    // Klassische DFS mit 3 Zuständen (0 unbesucht, 1 in Bearbeitung, 2
-    // fertig): ein Rücksprung auf einen Knoten MIT Zustand 1 ist ein Zyklus -
-    // alle Knoten vom Zyklusbeginn bis zum Stapelende sind daran beteiligt
-    // und werden komplett übersprungen (nicht nur der zuletzt besuchte).
+    // This is a classic DFS with 3 states (0 not visited, 1 in progress, 2 finished).
+    // A jump back to a node WITH state 1 is a cycle.
+    // All nodes from the start of the cycle to the end of the stack are part of it.
+    // The code skips all of them completely (not only the node that it visited last).
     const order = [], resolved = new Set(), cyclic = new Set(), state = new Map();
     function visit(id, stack) {
       if (state.get(id) === 2) return resolved.has(id);
@@ -982,22 +1025,21 @@
     });
 
     // ---------- 4) In Abhängigkeitsreihenfolge auswerten ----------
-    // Jede bereits fertige Formel steht nachfolgenden (die sie referenzieren)
-    // als BOOL-Wert im scope zur Verfügung - dieselbe Rohreihe, die auch die
-    // synthetische FORMEL-Spalte speist.
+    // Each formula that is already finished is available as a BOOL value in the scope to the next
+    // formulas that reference it.
+    // It is the same raw series that also feeds the synthetic FORMEL column.
     const rawSeriesById = new Map();
     order.forEach(id => {
       const f = byId.get(id);
       const compiled = compiledById.get(id);
       const deps = depsById.get(id);
-      // scopeSpecs (und damit die Objekt-Handles/Sweeps) sind über ALLE
-      // Formeln hinweg dieselben Instanzen (einmal vor der Schleife gebaut,
-      // siehe oben) - vor jedem neuen Formel-Durchlauf müssen ihre Sweeps
-      // daher zurückgesetzt werden, sonst bliebe der Zeiger vom vorherigen
-      // Durchlauf am Ende der Zeitreihe stehen und jede Formel AUSSER der
-      // ersten, die eine bestimmte Variable nutzt, würde fälschlich "kein
-      // Segment" (Zustand/Dauer/DauerSeit -> 0/null) für die gesamte
-      // Aufzeichnung liefern.
+      // scopeSpecs (and with them the object handles and sweeps) are the same instances over ALL
+      // formulas.
+      // The code builds them once before the loop (see above).
+      // So the code must reset their sweeps before each new formula pass.
+      // Otherwise the pointer from the previous pass stays at the end of the time series.
+      // Then each formula that uses a specific variable, EXCEPT the first one, wrongly gives "no
+      // segment" (Zustand, Dauer and DauerSeit -> 0 or null) for the whole recording.
       scopeSpecs.forEach(s => { if (s.handle) s.handle.sweep.reset(); });
       const rawSeries = new Array(times.length);
       let cyclePtr = 0;
@@ -1008,9 +1050,9 @@
         const cycleEnd = cyclePtr + 1 < cycleStarts.length ? cycleStarts[cyclePtr + 1] : a.tMax;
         const tuSeconds = cycleStarts.length ? Math.round((cycleEnd - cycleStarts[cyclePtr]) / 1000) : NaN;
 
-        // __cycleStart: siehe GZ.umlaufContext.buildAll() - dieselbe interne,
-        // für Nutzer-Formeln nicht referenzierbare Konvention, hier je Zeile
-        // auf den Beginn des aktuellen Umlaufs (cyclePtr) aktualisiert.
+        // __cycleStart: see GZ.umlaufContext.buildAll().
+        // It is the same internal convention that user formulas cannot reference.
+        // Here the code updates it for each row to the start of the current cycle (cyclePtr).
         const scope = { TX: txSeconds, TU: tuSeconds, TU_MED: TU_MED == null ? NaN : TU_MED, SPL: a.splValues ? (a.splValues[i] || '') : '', __cycleStart: cycleStarts.length ? cycleStarts[cyclePtr] : NaN };
         scopeSpecs.forEach(s => {
           if (s.handle) {
@@ -1029,10 +1071,11 @@
     });
 
     // ---------- 5) Ergebnis in ORIGINALER Reihenfolge zusammenstellen ----------
-    // (nicht Auswertungsreihenfolge - die Objekt-Liste in umlaufpruefung.js
-    // soll stabil in der vom Nutzer angelegten Formel-Reihenfolge bleiben.)
+    // (Not in evaluation order.
+    // The object list in umlaufpruefung.js must stay stable in the formula order that the user
+    // created.)
     const computed = [];
-    const skippedList = []; // {name, message} - für Hint-Zeile UND Snackbar
+    const skippedList = []; // {name, message} - for the hint line AND the snackbar
     formulas.forEach(f => {
       const name = f.name.trim() || `F${f.id}`;
       const rawSeries = rawSeriesById.get(f.id);
@@ -1041,10 +1084,11 @@
         skippedList.push({ name, message: skipReasonById.get(f.id) || 'Unbekannter Fehler' });
         return;
       }
-      // Für getFormulaHighlights(): dieselbe Rohreihe, die auch die
-      // synthetische FORMEL-Spalte speist, direkt an der Formel selbst
-      // hinterlegen - dort in WAHR/FALSCH-Intervalle zu übersetzen ist billig
-      // genug, um es bei Bedarf (statt hier vorab) zu tun.
+      // For getFormulaHighlights().
+      // The code stores the same raw series that also feeds the synthetic FORMEL column directly at
+      // the formula itself.
+      // It is cheap enough to translate it there into TRUE and FALSE intervals when needed.
+      // So the code does not do this in advance here.
       f.rawSeries = rawSeries;
       computed.push({
         index: SYNTH_INDEX_BASE + f.id, kuerzel: 'FORMEL', name,
@@ -1068,26 +1112,28 @@
     if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
   }
 
-  // Lesezugriff für umlaufpruefung.js: zuletzt berechnete synthetische
-  // Spalten (leer, solange "Berechnen" noch nicht geklickt wurde bzw. nach
-  // einem neuen Datenimport - siehe populateControls()).
+  // Read access for umlaufpruefung.js.
+  // It returns the synthetic columns that the code calculated last.
+  // The result is empty as long as the user has not clicked "Berechnen", and after a new data
+  // import (see populateControls()).
   function getSyntheticColumns() { return syntheticCols; }
 
-  // Lesezugriff für umlaufpruefung.js: je Formel mit gesetztem Hervorhebungs-
-  // Ziel die WAHR-Intervalle (aus derselben Rohreihe wie die synthetische
-  // FORMEL-Spalte, siehe berechnen()) plus Zielspalte (Kürzel+Name - NICHT
-  // Rohindex, siehe Kopfkommentar unten) und zugeteilte Farbe. Leer, solange
-  // "Berechnen" noch nicht geklickt wurde (kein f.rawSeries) oder kein Ziel
-  // gewählt ist.
+  // Read access for umlaufpruefung.js.
+  // For each formula with a highlight target, it returns the TRUE intervals (from the same raw
+  // series as the synthetic FORMEL column, see berechnen()).
+  // It also returns the target column (short name and name, NOT raw index, see the header comment
+  // below) and the assigned color.
+  // The result is empty as long as the user has not clicked "Berechnen" (no f.rawSeries) or no
+  // target is selected.
   //
-  // WICHTIG: das Ziel wird über Kürzel+Name statt Rohindex identifiziert.
-  // sourceCols() liefert für Signalgruppen den ROHEN CSV-Spaltenindex
-  // (col.index aus parser.js), während umlaufpruefung.js seine eigenen
-  // SG-Objekte stattdessen über die POSITION im allStats-Array indiziert
-  // (siehe dortiges allObjects()) - beide Zählweisen fallen nur zufällig
-  // zusammen, wenn vor der ersten Signalgruppe keine andere Spalte in der
-  // CSV steht. Kürzel+Name ist die einzige zwischen beiden Dateien stabile
-  // Kennung (dasselbe Muster wie bei vars/getConfig() oben).
+  // IMPORTANT: the code identifies the target by short name and name and not by raw index.
+  // For signal groups, sourceCols() returns the RAW CSV column index (col.index from parser.js).
+  // umlaufpruefung.js indexes its own SG objects by the POSITION in the allStats array instead (see
+  // allObjects() there).
+  // The two counts are the same only by chance.
+  // This happens when no other column is before the first signal group in the CSV.
+  // Short name and name are the only identifier that is stable between the two files.
+  // The pattern is the same as for vars and getConfig() above.
   function getFormulaHighlights() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return [];
@@ -1109,9 +1155,9 @@
       .filter(Boolean);
   }
 
-  // Für die Konfiguration speichern/laden (siehe umlaufpruefung.js): Spalten
-  // werden über Kürzel+Name statt Rohindex referenziert (siehe GZ.configIO)
-  // - bleibt über neue Exports derselben Anlage hinweg gültig.
+  // For saving and loading the configuration (see umlaufpruefung.js).
+  // The code references columns by short name and name and not by raw index (see GZ.configIO).
+  // It stays valid over new exports of the same intersection.
   function getConfig() {
     const cols = sourceCols();
     return {
@@ -1119,8 +1165,8 @@
         const col = cols.find(c => c.index === v.colIndex);
         return { alias: v.alias, colKuerzel: col ? col.kuerzel : null, colName: col ? col.name : null };
       }),
-      // Funktionen haben keinen Spaltenbezug (siehe Datei-Kopfkommentar) -
-      // params als Kopie speichern, nicht die Live-Referenz.
+      // Functions have no column reference (see the file header comment).
+      // Save params as a copy and not as the live reference.
       funcs: funcs.map(f => ({ name: f.name, params: f.params.slice(), bodyText: f.bodyText })),
       formulas: formulas.map(f => {
         const col = cols.find(c => c.index === f.highlightCol);
@@ -1132,13 +1178,14 @@
     };
   }
 
-  // Setzt Variablen/Funktionen/Formeln aus einer geladenen Konfiguration und
-  // berechnet sofort (damit umlaufpruefung.js im Anschluss die dann
-  // existierenden FORMEL-Spalten in seiner eigenen applyConfig() by-Name
-  // auswählen kann - siehe dortige Aufrufreihenfolge). Spalten, die es in der
-  // aktuell geladenen CSV nicht (mehr) gibt, werden übersprungen und gemeldet
-  // statt die restliche Konfiguration abzubrechen - Funktionen betrifft das
-  // nicht (kein Spaltenbezug, immer vollständig übernehmbar).
+  // Sets variables, functions and formulas from a loaded configuration and calculates immediately.
+  // So umlaufpruefung.js can then select the FORMEL columns that now exist by name in its own
+  // applyConfig() (see the call order there).
+  // The code skips columns that do not exist (any more) in the CSV that is loaded at this time and
+  // reports them.
+  // It does not stop the rest of the configuration.
+  // This does not affect functions.
+  // They have no column reference and the code can always take them over completely.
   function applyConfig(cfg) {
     if (!cfg) return { skipped: [] };
     const cols = sourceCols();
@@ -1153,7 +1200,8 @@
       let highlightCol = null;
       if (f.highlightColKuerzel && f.highlightColName) {
         const col = cols.find(c => c.kuerzel === f.highlightColKuerzel && c.name === f.highlightColName);
-        highlightCol = col ? col.index : null; // still ohne Hervorhebung, aber kein Skip-Eintrag (rein optisch, nicht kritisch)
+        // silently with no highlight, but no skip entry (purely visual, not critical)
+        highlightCol = col ? col.index : null;
       }
       return { id: nextFormulaId++, name: f.name, exprText: f.exprText, highlightCol, rawSeries: null };
     });

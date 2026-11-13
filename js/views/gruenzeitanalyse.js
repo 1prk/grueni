@@ -1,11 +1,13 @@
-/* GZ.views.gruenzeitanalyse — tab "Grünzeitanalyse": quantitative green time
-   quality assessment. One report with four sections:
-   1  Fixed time or actuated?  (cycle time, green time distribution per signal group)
-   2  Green time trend per cycle (time plot or CDF)
-   3  Where in the cycle does the green window move?  (start / end)
+/* GZ.views.gruenzeitanalyse is the tab "Grünzeitanalyse": quantitative assessment of the green
+   time quality.
+   It is one report with four sections:
+   1  Fixed time or actuated?  (cycle time, green time distribution for each signal group)
+   2  Green time trend for each cycle (time plot or CDF)
+   3  Where in the cycle does the green window move?  (start and end)
    4  How often and how much green? (share of cycles, share of the cycle, red time)
-   Every section can be evaluated for the whole recording, per signal plan
-   (SPL) or per clock hour. Log markers appear in the time charts. */
+   The user can evaluate each section for the whole recording, for each signal plan (SPL) or for
+   each clock hour.
+   Log markers appear in the time charts. */
 (function (GZ) {
   'use strict';
   const { esc, fmtNum, fmtTimeShort, fmtHoursMinutes, fmtDauer, fmtTs } = GZ.format;
@@ -16,8 +18,8 @@
   let els = null;
   let model = null;       // GZ.greenTime model of the current analysis
   let slices = null;      // GZ.slices.build() of the current analysis
-  let xMaxGreen = 60;     // common x axis of the green time histograms
-  let tuMax = 100;        // common x axis of the cycle position charts
+  let xMaxGreen = 60;     // Common x axis of the green time histograms
+  let tuMax = 100;        // Common x axis of the cycle position charts
   const state = { scope: 'total', mode: 'time', selected: [] };
 
   const analysis = () => GZ.state.data.currentAnalysis;
@@ -79,13 +81,13 @@
 
   function setScope(scope) {
     state.scope = scope;
-    GZ.state.data.statsScope = scope === 'spl' ? 'spl' : 'total';   // other tabs use it for their own flags
+    GZ.state.data.statsScope = scope === 'spl' ? 'spl' : 'total';   // Other tabs use it for their own flags.
     els.scopeGroup.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scope === scope));
     renderAll();
   }
 
   /* ---------------- Slices of the current scope ---------------- */
-  // Returns [{ key, kind, label }]. The whole recording is one slice with key null.
+  // Returns [{ key, kind, label }]. The whole recording is one slice with the key null.
   function scopeSlices() {
     return state.scope === 'total' ? [{ key: null }] : GZ.slices.forScope(slices, state.scope);
   }
@@ -179,7 +181,7 @@
       els.sgPick.closest('section').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }));
 
-    // Claim: one statement per signal plan
+    // Claim: one statement for each signal plan
     const parts = slices.plans.filter(p => GT.plantHasData(model, p.key)).map(p => {
       const cyc = GT.cyclesInSlice(model, p.key);
       return { label: p.label, actuated: GT.plantActuated(model, p.key), count: cyc.length, duration: cyc.reduce((s, c) => s + c.tu, 0) };
@@ -225,7 +227,7 @@
     const a = analysis();
     const all = GT.stats(model, sg, null);
     const runs = GZ.slices.planRuns(a.times, a.splValues, a.tMin, a.tMax);
-    // Background bands: one per clock hour or one per signal plan run
+    // Background bands: one for each clock hour or one for each signal plan run
     const bandSource = state.scope === 'hour'
       ? slices.hours.map(h => ({ key: h.key, t0: h.t0, t1: Math.min(h.t1, a.tMax), name: h.label }))
       : runs.map(r => ({ key: r.plan, t0: r.t0, t1: r.t1, name: GZ.slices.planLabel(r.plan) }));
@@ -378,8 +380,9 @@
   }
 
   /* ---------------- Section 5: dark periods ----------------
-     Background (VwV-StVO to § 37 para 2): traffic signals should usually stay in
-     operation at night too. Switching off is justified only after a case-by-case check. */
+     Background (VwV-StVO on § 37 paragraph 2): traffic signals must normally stay in operation
+     also at night.
+     Switching them off is justified only after a check of each case. */
   function darkPeriods(segs) {
     return segs.filter(s => s.cat === 'DUNKEL').map(s => ({ start: s.start, end: s.end, sec: (s.end - s.start) / 1000 }));
   }
@@ -394,7 +397,8 @@
     const span = (a.tMax - a.tMin) / 1000;
     els.tableDark.innerHTML = '<thead><tr><th>Signalgruppe</th><th>Dunkel gesamt</th><th>Anteil an der Aufzeichnung</th><th>Zeiträume</th><th>Längster Zeitraum</th></tr></thead><tbody>' +
       rows.map(r => `<tr><td><span class="name">${esc(r.col.name)}</span></td><td>${fmtDauer(r.total)}</td><td>${fmtNum(r.total / span * 100, 1)} %</td><td>${r.periods.length}</td><td>${fmtDauer(r.longest)}</td></tr>`).join('') + '</tbody>';
-    // The longest periods of the signal group with the most dark time, as links into the cycle check
+    // The longest periods of the signal group with the most dark time, as links into the cycle
+    // check
     const lead = rows.slice().sort((p, q) => q.total - p.total)[0];
     const longest = lead.periods.slice().sort((p, q) => q.sec - p.sec).slice(0, 8).sort((p, q) => p.start - q.start);
     els.claimDark.innerHTML = `Dunkel bei ${rows.length} von ${a.allStats.length} Signalgruppen, längster Zeitraum ${fmtDauer(Math.max(...rows.map(r => r.longest)))}.`;
@@ -416,7 +420,8 @@
     renderCycleChart(); renderTable1(); renderTrend(); renderTable3(); renderTable4(); renderDark();
   }
 
-  // Redraw after a size change, a tab switch or a log change. Tables do not depend on the width.
+  // Redraw after a size change, a tab switch or a log change. The tables do not depend on the
+  // width.
   function refresh() {
     if (!model || !analysis()) return;
     renderCycleChart(); renderTrend();

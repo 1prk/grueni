@@ -1,8 +1,9 @@
-/* GZ.xlsxWriter — minimaler, abhängigkeitsfreier XLSX-Schreiber (ZIP im
-   "store"-Verfahren + das kleinstmögliche gültige OOXML-Spreadsheet-Paket:
-   Content-Types, Beziehungen, Workbook, ein Worksheet mit Inline-Strings).
-   Kein Vendoring einer Fremdbibliothek, passend zum Rest der Anwendung
-   (kein Build-Schritt, keine externen Ressourcen). */
+/* GZ.xlsxWriter is a minimal XLSX writer without dependencies.
+   It writes a ZIP in "store" mode.
+   The ZIP holds the smallest valid OOXML spreadsheet package:
+   content types, relationships, a workbook and one worksheet with inline strings.
+   The module does not vendor a library from a third party.
+   This fits the rest of the application: no build step and no external resources. */
 (function (GZ) {
   'use strict';
 
@@ -25,7 +26,7 @@
   function u16(v) { return [v & 0xff, (v >> 8) & 0xff]; }
   function u32(v) { return [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff]; }
 
-  // Feste, plausible DOS-Zeit/-Datum (kosmetisch, Excel wertet das nicht aus).
+  // A fixed DOS time and date that look plausible. They are only cosmetic. Excel does not use them.
   const DOS_TIME = 0, DOS_DATE = 0x5821; // 2024-01-01
 
   function buildZip(files) {
@@ -107,7 +108,7 @@
     return s.slice(0, 31);
   }
 
-  // headerRow: string[]. dataRows: array of arrays, each cell number|string|null.
+  // headerRow is string[]. dataRows is an array of arrays. Each cell is a number, a string or null.
   function buildWorkbookBlob(sheetName, headerRow, dataRows) {
     const enc = new TextEncoder();
     const rowsXml = [rowXml(1, headerRow)];
@@ -148,11 +149,11 @@
     return new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
 
-  // Mehrblatt-Variante von buildWorkbookBlob: sheets = [{name, header, rows}, ...],
-  // sonst gleiche Zellregeln (Zahl -> <v>, sonst Inline-String). Nutzt
-  // dieselben Zell-/ZIP-Helfer, braucht aber je Blatt einen zusätzlichen
-  // Content-Types- und Beziehungs-Eintrag statt der fest verdrahteten
-  // Einzelblatt-Referenzen von buildWorkbookBlob.
+  // Multi-sheet variant of buildWorkbookBlob: sheets = [{name, header, rows}, ...].
+  // The cell rules are the same (number -> <v>, other -> inline string).
+  // It uses the same cell and ZIP helpers.
+  // Each sheet needs one more content-types entry and one more relationship entry.
+  // buildWorkbookBlob has fixed references to its single sheet instead.
   function buildMultiSheetWorkbookBlob(sheets) {
     const enc = new TextEncoder();
     const sheetFiles = sheets.map((s, i) => {

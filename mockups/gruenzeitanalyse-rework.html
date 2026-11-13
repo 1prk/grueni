@@ -608,7 +608,8 @@ function renderCdfTrend(host, sg, height) {
     return;
   }
   [50, 85, 95].forEach(p => svgEl('line', { x1: m.l, x2: W - m.r, y1: y(p / 100), y2: y(p / 100), stroke: 'var(--text-faint)', 'stroke-dasharray': '2,2' }, svg));
-  svgEl('path', { d: cdfPath(sorted, x, y, lo, hi), fill: 'none', stroke: 'var(--text-faint)', 'stroke-width': 1.2, 'stroke-dasharray': '4,3' }, svg);   // whole recording
+  // whole recording
+  svgEl('path', { d: cdfPath(sorted, x, y, lo, hi), fill: 'none', stroke: 'var(--text-faint)', 'stroke-width': 1.2, 'stroke-dasharray': '4,3' }, svg);
   keys.forEach(k => {
     const ks = sgStats(sg, k); if (!ks.n) return;
     const path = svgEl('path', { d: cdfPath(ks.durs, x, y, lo, hi), fill: 'none', stroke: sliceColor(k), 'stroke-width': 2 }, svg);

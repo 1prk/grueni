@@ -1,85 +1,93 @@
-/* GZ.views.umlaufstatistiken — Tab "Umlaufstatistiken": beliebig viele
-   selbst definierte Spalten (Bezeichnung + Formel in der GZ.exprEngine-
-   Ausdruckssprache - derselben, die auch der Formel-Builder in
-   Umlaufprüfung nutzt, siehe js/core/exprEngine.js/umlaufContext.js), je
-   einmal ausgewertet über ALLE Umläufe der Aufzeichnung. Ergebnis: eine
-   gefensterte Tabelle (Performance bei vielen Umläufen, wie
-   js/views/umlaufpruefung.js) + eine Aggregatstatistik-Tabelle je Spalte
-   (Zahl -> Ø/Median/StdAbw/Min/Max/P85, Wahr/Falsch -> Anteil) + Excel-
-   Export (beide Tabellen, IMMER über die komplette Aufzeichnung, unabhängig
-   vom sichtbaren Fenster). Dieselben Spalten erscheinen ZUSÄTZLICH als
-   eigene KENNZAHL-Spur in der vereinheitlichten Objekt-Liste des Tabs
-   "Umlaufprüfung" (siehe getSyntheticColumns() unten sowie dortiges
-   kennzahlCols()/traceMeta) - dort als Balken im zeitlichen Kontext der
-   Signalgruppen, hier als vollständige Tabelle zum genauen Ablesen/Export.
+/* GZ.views.umlaufstatistiken is the tab "Umlaufstatistiken".
+   It has any number of columns that the user defines.
+   Each column has a name and a formula.
+   The formula is in the expression language of GZ.exprEngine.
+   The formula builder in Umlaufprüfung uses the same language (see js/core/exprEngine.js and
+   umlaufContext.js).
+   The code evaluates each column once for ALL cycles of the recording.
+   The result is a windowed table (for performance with many cycles, as in
+   js/views/umlaufpruefung.js).
+   There is also an aggregate statistics table for each column.
+   For a number, it shows mean, median, standard deviation, min, max and P85.
+   For true or false, it shows the share.
+   The Excel export has both tables.
+   The export ALWAYS covers the complete recording, not only the visible window.
+   The same columns ALSO appear as a separate KENNZAHL track in the unified object list of the
+   tab "Umlaufprüfung".
+   (See getSyntheticColumns() below and kennzahlCols() and traceMeta there.)
+   There the columns are bars in the time context of the signal groups.
+   Here they are a full table for exact reading and export.
 
-   Anders als der zeilenweise Formel-Builder (eine boolesche Rohreihe je
-   Formel, Primitiven Zustand/Dauer/DauerSeit) wertet dieser Tab GENAU EINMAL
-   JE UMLAUF aus und lässt beliebige Ergebnistypen zu (GZ.exprEngine.
-   compileValue() statt compile()) - die Primitiven An/Ab/TF/RG/GE/
-   Ausgeloest/AnzahlAusloesungen lesen dafür aus handle.cycleMetrics statt
-   handle.sweep (siehe GZ.umlaufContext.buildAll()). WertBei(objekt, zeitpunkt)
-   liest stattdessen über handle.rawSample() den tatsächlichen Rohwert (z.B.
-   einen APW-Countdown ODER das Signalbild einer Signalgruppe) zu einem
-   beliebigen Zeitpunkt im Umlauf - meist selbst wieder ein An/Ab/TF/RG/GE-
-   Aufruf, z.B. WertBei(APW_01, Ab(K1)) oder WertBei(K2, Ab(K1)).
-   Zustand/Dauer/DauerSeit sind hier bewusst NICHT nutzbar (kein
-   wohldefinierter "aktueller Zeitpunkt" für einen ganzen Umlauf) - siehe
-   findPerRowOnlyUsage().
+   The row-based formula builder is different.
+   It uses one boolean raw series for each formula and the primitives Zustand, Dauer and
+   DauerSeit.
+   This tab evaluates EXACTLY ONCE FOR EACH CYCLE and allows any result type
+   (GZ.exprEngine.compileValue() and not compile()).
+   For this, the primitives An, Ab, TF, RG, GE, Ausgeloest and AnzahlAusloesungen read from
+   handle.cycleMetrics and not from handle.sweep (see GZ.umlaufContext.buildAll()).
+   WertBei(object, time) uses handle.rawSample() instead.
+   It reads the real raw value at any time in the cycle.
+   The value can be an APW countdown OR the signal image of a signal group.
+   Most of the time, the time is again an An, Ab, TF, RG or GE call.
+   Examples are WertBei(APW_01, Ab(K1)) and WertBei(K2, Ab(K1)).
+   Zustand, Dauer and DauerSeit are NOT usable here on purpose.
+   A whole cycle has no well-defined "current time" (see findPerRowOnlyUsage()).
 
-   Einige Primitiven (TF/RG/GE/Versatz/Ueberschneidung) haben zusätzlich zu
-   ihrem Zahlen-/Wahrheitswert eine eindeutige ZEITSPANNE innerhalb des
-   Umlaufs (z.B. Versatz(K1,K2): von Abwurf K1 bis Anwurf K2) - exprEngine.js
-   liefert die optional über compileValue().spanRun mit, hier je Umlauf
-   ausgewertet (evaluated[].spans) und über getSyntheticColumns() weiter-
-   gereicht, damit die Kennzahl-Spur in der Umlaufprüfung den Balken exakt
-   über diese Spanne zeichnen kann statt über die ganze Zeile (siehe dortiger
-   Kommentar zu tr.span). Nur vorhanden, wenn der GESAMTE Spaltenausdruck
-   genau einer dieser Primitiven-Aufrufe ist (nicht etwa in eine Rechnung
-   eingebettet) - sonst bleibt spans null und die Spur fällt dort auf die
-   volle Zeilenbreite zurück. */
+   Some primitives have a unique TIME SPAN in the cycle in addition to their number or truth
+   value.
+   The primitives are TF, RG, GE, Versatz and Ueberschneidung.
+   An example is Versatz(K1,K2): from the stop of K1 to the start of K2.
+   exprEngine.js gives the span as an option through compileValue().spanRun.
+   This module evaluates it for each cycle (evaluated[].spans).
+   getSyntheticColumns() passes it on.
+   So the Kennzahl track in Umlaufprüfung can draw the bar exactly over this span and not over
+   the whole row (see the comment there about tr.span).
+   The span exists only if the WHOLE column expression is exactly one of these primitive calls.
+   It does not exist if the call is part of a calculation.
+   In that case, spans stays null and the track in Umlaufprüfung uses the full row width. */
 (function (GZ) {
   'use strict';
   const { esc, fmtTs, fmtTimeShort } = GZ.format;
   const { mean, median, stdDev, percentile } = GZ.stats;
 
-  const KENNZAHL_INDEX_BASE = 2000000; // eigener Bereich, unabhängig von formulaBuilder.js' SYNTH_INDEX_BASE
+  const KENNZAHL_INDEX_BASE = 2000000; // separate range, independent of SYNTH_INDEX_BASE in formulaBuilder.js
 
   let els = null;
   let nextColId = 1;
-  let ctxAll = null; // {index, cycles} - einmal je Analyse gebaut (GZ.umlaufContext.buildAll)
-  let evaluated = []; // parallel zu GZ.state.data.umlaufSpalten: {col, error, incomplete, values, spans, kind, skip}
-  // Indizes in ctxAll.cycles, die NICHT durch eine LEER-Spalte ausgeblendet
-  // wurden (siehe usesLeer()/recompute()) - Tabelle/Statistik/Export/
-  // Kennzahl-Spur iterieren hierüber statt über ctxAll.cycles direkt.
+  let ctxAll = null; // {index, cycles} - the code builds it once for each analysis (GZ.umlaufContext.buildAll)
+  let evaluated = []; // parallel to GZ.state.data.umlaufSpalten: {col, error, incomplete, values, spans, kind, skip}
+  // Indices in ctxAll.cycles that a LEER column did NOT hide (see usesLeer() and recompute()).
+  // The table, the statistics, the export and the Kennzahl track loop over these indices.
+  // They do not loop over ctxAll.cycles directly.
   let visibleIdx = [];
   let windowCount = 25, windowStartIdx = 0, showAll = false;
 
-  // Aus GZ.exprEngine.PRIMITIVE_INFO abgeleitet statt hier separat gepflegt -
-  // EINZIGE Stelle, die "welche Primitive erwartet SG/DET als Argument bzw.
-  // ist nur zeilenweise nutzbar" kennt, ist das objArgType/perRowOnly-Feld
-  // dort (siehe Kommentar an PRIMITIVE_INFO); ein neues Primitiv wird so
-  // automatisch hier mitberücksichtigt, ohne dass diese Datei angefasst
-  // werden muss.
+  // The code derives this from GZ.exprEngine.PRIMITIVE_INFO.
+  // It does not keep a separate copy here.
+  // The only place that knows "which primitive expects SG or DET as argument" or "which primitive
+  // works only row by row" is the objArgType and perRowOnly field there (see the comment at
+  // PRIMITIVE_INFO).
+  // So this file includes a new primitive automatically.
+  // Nobody must change this file.
   const PRIMITIVE_INFO = GZ.exprEngine.PRIMITIVE_INFO;
   const SG_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'SG').map(p => p.name));
   const DET_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'DET').map(p => p.name));
-  // objArgType 'OBJ' (z.B. An/Ab/TF/Versatz/WertBei/...): SG ODER DET gültig -
-  // Vorschlagsliste kombiniert beide statt nur eine (siehe candidatesFor()).
+  // objArgType 'OBJ' (for example An, Ab, TF, Versatz, WertBei, ...): SG OR DET is valid.
+  // The suggestion list combines both and not only one (see candidatesFor()).
   const OBJ_ARG_FNS = new Set(PRIMITIVE_INFO.filter(p => p.objArgType === 'OBJ').map(p => p.name));
-  // Zeilenweise Primitiven des Formel-Builders (perRowOnly) - hier
-  // syntaktisch zwar bekannt (gemeinsamer PRIMITIVES-Katalog), aber ohne
-  // handle.sweep würde ihr Aufruf zur Laufzeit abstürzen statt einen Wert zu
-  // liefern. Wird VOR der Auswertung geprüft (siehe findPerRowOnlyUsage()),
-  // nicht erst beim Absturz bemerkt - daher aus US_FUNCTIONS ausgeschlossen.
+  // Row-by-row primitives of the formula builder (perRowOnly).
+  // The shared PRIMITIVES catalog knows them syntax-wise.
+  // But without handle.sweep, a call would crash at run time and not give a value.
+  // The code checks for them BEFORE the evaluation (see findPerRowOnlyUsage()).
+  // It does not find them only at the crash.
+  // So US_FUNCTIONS does not include them.
   const PER_ROW_ONLY_FNS = new Set(PRIMITIVE_INFO.filter(p => p.perRowOnly).map(p => p.name));
   const US_FUNCTIONS = PRIMITIVE_INFO.filter(p => !p.perRowOnly).map(p => p.name);
   const US_SCALARS = ['TU', 'TU_MED', 'SPL', 'LEER', 'EREIGNIS'];
 
-  // exprEngine.js meldet unbekannte Namen ohne Vorschlag ("Unbekannte
-  // Variable/Funktion "X""). Für Umlaufstatistiken lokal um eine "meinten
-  // Sie …?"-Ergänzung per Editierdistanz erweitert, statt den gemeinsamen
-  // Formel-Builder-Motor dafür anzufassen.
+  // exprEngine.js reports unknown names with no suggestion ("Unbekannte Variable/Funktion "X"").
+  // For Umlaufstatistiken, this file adds a local "meinten Sie …?" text with an edit distance.
+  // This avoids a change to the shared formula builder engine.
   function levenshtein(a, b) {
     const m = a.length, n = b.length;
     if (m === 0) return n;
@@ -158,10 +166,10 @@
     els.exportBtn.addEventListener('click', exportXlsx);
   }
 
-  // Neue Analyse: Spaltenliste bewusst zurückgesetzt (wie GZ.state.data.phases
-  // in Stammdaten LSA) - Formeln beziehen sich auf konkrete Signalgruppen-/
-  // Detektornamen der vorherigen Aufzeichnung und wären beim Wechsel auf eine
-  // andere Anlage ohnehin hinfällig.
+  // New analysis: the code resets the column list on purpose (as it does for GZ.state.data.phases
+  // in Stammdaten LSA).
+  // The formulas refer to signal group names and detector names of the previous recording.
+  // They are invalid anyway when the user changes to a different intersection.
   function populateControls() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -243,19 +251,22 @@
   }
 
   /* ---------------- Autocomplete ---------------- */
-  // Nutzt den mit formulaBuilder.js/oepnvQa.js geteilten GZ.exprEditor
-  // (siehe dort) - hier bleibt nur die Kandidatenliste, kontextsensitiv nach
-  // der Funktion, in der der Cursor gerade steht (siehe objArgType an
-  // PRIMITIVE_INFO): innerhalb einer OBJ-Primitive (An/Ab/TF/RG/GE/Versatz/
-  // Ueberschneidung/WertBei/DauerBei/...) -> Signalgruppen- UND Detektor-/
-  // APW-Namen, innerhalb einer DET-Primitive (Ausgeloest/AnzahlAusloesungen)
-  // -> nur Detektor-/APW-Namen, sonst Funktionen + skalare Bezeichner
-  // (TU/TU_MED/SPL/LEER/EREIGNIS).
+  // This uses GZ.exprEditor, which formulaBuilder.js and oepnvQa.js share (see there).
+  // Only the candidate list stays here.
+  // It depends on the function in which the cursor is at this time (see objArgType at
+  // PRIMITIVE_INFO).
+  // Inside an OBJ primitive (An, Ab, TF, RG, GE, Versatz, Ueberschneidung, WertBei, DauerBei, ...),
+  // the list shows signal group names AND detector or APW names.
+  // Inside a DET primitive (Ausgeloest, AnzahlAusloesungen), the list shows only detector or APW
+  // names.
+  // In all other cases, the list shows functions and scalar identifiers (TU, TU_MED, SPL, LEER,
+  // EREIGNIS).
   const US_PRIMITIVE_INFO = GZ.exprEngine.PRIMITIVE_INFO.filter(p => US_FUNCTIONS.includes(p.name));
 
-  // Name der Funktion, deren Argumentliste caretPos gerade umschließt, oder
-  // null (Top-Level bzw. Lexer-Fehler - während des Tippens meist
-  // irrelevant, dann schlicht keine kontextsensitive Einschränkung).
+  // Name of the function whose argument list encloses caretPos.
+  // The result is null at top level or after a lexer error.
+  // While the user types, this is mostly not important.
+  // Then there is no context restriction.
   function ownerFnAt(text, caretPos) {
     let tokens;
     try { tokens = GZ.exprEngine.tokenize(text); } catch (e) { return null; }
@@ -273,8 +284,8 @@
     return stack.length ? stack[stack.length - 1] : null;
   }
 
-  // Liefert die getCandidates()-Funktion für EINE Spaltenzeile (siehe
-  // GZ.exprEditor Kopfkommentar - caretPos wird von dort durchgereicht).
+  // Returns the getCandidates() function for ONE column row.
+  // See the header comment of GZ.exprEditor. It passes caretPos from there.
   function candidatesFor(col) {
     return caretPos => {
       const text = col.expr || '';
@@ -304,15 +315,15 @@
 
   /* ---------------- Auswertung ---------------- */
 
-  // Position eines Fehlers (ein einzelner Zeichen-Offset, siehe ExprError in
-  // exprEngine.js) auf die Spanne des dort stehenden Tokens ausgeweitet, für
-  // eine lesbare <mark>-Hervorhebung statt eines einzelnen Zeichens.
+  // Position of an error (one character offset, see ExprError in exprEngine.js), widened to the
+  // span of the token at that position.
+  // This gives a readable <mark> highlight and not a single character.
   function findTokenSpanAt(text, pos) {
     try {
       const tokens = GZ.exprEngine.tokenize(text);
       const tok = tokens.find(t => t.pos <= pos && pos < t.end) || tokens.find(t => t.pos === pos);
       if (tok && tok.end > tok.pos) return { start: tok.pos, end: tok.end };
-    } catch (e) { /* Text selbst nicht tokenisierbar - Einzelzeichen-Fallback unten */ }
+    } catch (e) { /* The text itself cannot be tokenized. Use the single-character fallback below. */ }
     return { start: pos, end: Math.min(pos + 1, text.length) };
   }
 
@@ -327,10 +338,10 @@
     const errBox = rowEl.querySelector('.us-col-error');
     const exprEl = rowEl.querySelector('.us-col-expr');
     const wrap = rowEl.querySelector('.expr-input-wrap');
-    // "incomplete" = mitten im Tippen ein für sich unfertiger, aber kein
-    // wirklich falscher Ausdruck (siehe ExprError.incomplete in
-    // exprEngine.js) - bewusst NICHT als roter Fehler markiert, sonst
-    // blinkt bei jedem Tastendruck eine Fehlermeldung auf.
+    // "incomplete" is an expression that is not finished in the middle of typing, but it is not
+    // really wrong (see ExprError.incomplete in exprEngine.js).
+    // The code does NOT mark it as a red error on purpose.
+    // Otherwise an error message flashes at each key press.
     if (!entry || !entry.error || entry.incomplete) {
       errBox.hidden = true;
       exprEl.classList.remove('invalid');
@@ -350,18 +361,18 @@
       for (let i = 0; i < tokens.length - 1; i++) {
         if (tokens[i].type === 'IDENT' && PER_ROW_ONLY_FNS.has(tokens[i].value) && tokens[i + 1].type === '(') return tokens[i];
       }
-    } catch (e) { /* Tokenize-Fehler übernimmt compileValue() bereits */ }
+    } catch (e) { /* compileValue() already takes over tokenize errors. */ }
     return null;
   }
 
-  // Verwendet der Spaltenausdruck irgendwo das LEER-Literal (siehe
-  // exprEngine.js)? Rein syntaktisch per Tokenizer geprüft (kein Auswerten
-  // nötig) - Grundlage für die Zeilen-Ausblendung in recompute()/visibleRows:
-  // eine Spalte, die LEER referenziert, markiert damit explizit "eine Zeile,
-  // für die ich LEER liefere, gehört gar nicht erst in die Tabelle" (siehe
-  // dortigen Kommentar) - eine Spalte OHNE LEER liefert NaN dagegen weiterhin
-  // ganz normal als "–"-Zelle (z.B. An(K1) ohne Grün in diesem Umlauf bleibt
-  // sichtbar, das ist keine bewusste Filterung).
+  // Does the column expression use the LEER literal anywhere (see exprEngine.js)?
+  // The code checks this by syntax with the tokenizer (no evaluation is necessary).
+  // It is the basis of the row hiding in recompute() and visibleRows.
+  // A column that references LEER says explicitly: "a row for which I give LEER does not belong in
+  // the table".
+  // A column WITHOUT LEER still shows NaN as a normal "–" cell.
+  // For example, An(K1) with no green in this cycle stays visible.
+  // This is not a deliberate filter.
   function usesLeer(text) {
     try { return GZ.exprEngine.tokenize(text).some(t => t.type === 'IDENT' && t.value === 'LEER'); }
     catch (e) { return false; }
@@ -417,13 +428,13 @@
 
     const validCols = currentValidCols();
 
-    // Zeilen-Ausblendung: jede Spalte, deren Ausdruck LEER referenziert,
-    // wirkt als Filter - eine Zeile, für die eine SOLCHE Spalte LEER (NaN)
-    // liefert, fällt aus der GESAMTEN Tabelle/Statistik/Export/Kennzahl-Spur
-    // heraus, statt dort als "–"-Zelle zu erscheinen (siehe usesLeer()-
-    // Kommentar). Spalten OHNE LEER beeinflussen die Sichtbarkeit nicht -
-    // ihr NaN (z.B. An(K1) ohne Grün in diesem Umlauf) bleibt wie bisher
-    // eine normale "–"-Zelle in einer weiterhin sichtbaren Zeile.
+    // Row hiding: each column whose expression references LEER works as a filter.
+    // A row for which such a column gives LEER (NaN) disappears from the WHOLE table, the
+    // statistics, the export and the Kennzahl track.
+    // It does not appear there as a "–" cell (see the comment at usesLeer()).
+    // Columns WITHOUT LEER do not change the visibility.
+    // Their NaN (for example An(K1) with no green in this cycle) stays a normal "–" cell in a row
+    // that is still visible.
     const filterCols = validCols.filter(c => usesLeer(c.col.expr));
     visibleIdx = [];
     for (let i = 0; i < ctxAll.cycles.length; i++) {
@@ -436,11 +447,12 @@
     els.exportBtn.disabled = validCols.length === 0;
 
     const errCount = evaluated.filter(e => e.error && !e.incomplete).length;
-    // Umlauf-Anzahl getrennt von Zeilen-Anzahl ausgewiesen: seit der
-    // Mehrfach-Ereignis-Aufteilung (siehe GZ.umlaufContext.buildAll()) kann
-    // ein Umlauf mehr als eine Zeile haben (mehrfaches Vorkommen einer
-    // Signalgruppe in diesem Umlauf) - sonst wirkt eine höhere Zeilenzahl
-    // als die tatsächliche Anzahl erkannter Umläufe wie ein Zählfehler.
+    // The code shows the number of cycles separately from the number of rows.
+    // Since the multiple-event split (see GZ.umlaufContext.buildAll()), a cycle can have more than
+    // one row.
+    // This happens when a signal group occurs more than once in this cycle.
+    // Without a separate count, a row count that is higher than the real number of detected cycles
+    // looks like a counting error.
     const umlaufCount = ctxAll.cycles.reduce((n, c) => n + (c.eventIdx === 0 ? 1 : 0), 0);
     const zusatzZeilen = ctxAll.cycles.length - umlaufCount;
     const umlaufInfo = zusatzZeilen > 0
@@ -453,35 +465,38 @@
       : `${validCols.length} von ${cols.length} Spalte(n) gültig` + (errCount ? ` · ${errCount} mit Fehler` : '') + ` · ${umlaufInfo}${filterInfo}.`;
     els.hint.className = errCount ? 'hint warn' : 'hint';
 
-    // Umlaufprüfung zeigt die gültigen Spalten als eigene KENNZAHL-Spur je
-    // Umlauf an (siehe getSyntheticColumns() unten) - Objekt-Liste + Render
-    // dort nach jeder Neuberechnung auffrischen, gleiches Muster wie
-    // formulaBuilder.js berechnen(). Guard, da Umlaufprüfung beim Start in
-    // beliebiger Reihenfolge zu diesem Modul initialisiert werden kann.
+    // Umlaufprüfung shows the valid columns as a separate KENNZAHL track for each cycle (see
+    // getSyntheticColumns() below).
+    // After each new calculation, refresh the object list and the render there.
+    // The pattern is the same as berechnen() in formulaBuilder.js.
+    // The guard is necessary because Umlaufprüfung can initialize before or after this module at
+    // start-up.
     if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
   }
 
-  // Lesezugriff für umlaufpruefung.js (siehe dort kennzahlCols()): die
-  // zuletzt berechneten, gültigen Spalten als synthetische KENNZAHL-Objekte -
-  // EIN vorberechneter Wert je Umlaufindex (valuesByCycleIdx), nicht eine
-  // Rohreihe je Messzeile wie FORMEL (siehe formulaBuilder.js
-  // getSyntheticColumns()). index bleibt über Neuberechnungen hinweg stabil
-  // (col.id), solange die Spalte nicht gelöscht/neu angelegt wird.
-  // spansByCycleIdx: parallel zu valuesByCycleIdx, {startSec,endSec}|null je
-  // Umlauf - nur gesetzt, wenn die Formel GENAU eine der Objekt-bezogenen
-  // Primitiven ist (TF/RG/GE/Versatz/Ueberschneidung, siehe exprEngine.js
-  // spanRun) - für die Balkendarstellung dort (tr.span).
+  // Read access for umlaufpruefung.js (see kennzahlCols() there).
+  // It returns the valid columns that the code calculated last, as synthetic KENNZAHL objects.
+  // It has ONE precalculated value for each cycle index (valuesByCycleIdx).
+  // It does not have one raw series for each measurement row, as FORMEL has (see
+  // getSyntheticColumns() in formulaBuilder.js).
+  // index stays stable over recalculations (col.id), as long as the user does not delete the column
+  // or create it again.
+  // spansByCycleIdx is parallel to valuesByCycleIdx.
+  // For each cycle, it is {startSec,endSec} or null.
+  // It is set only if the formula is EXACTLY one of the object-related primitives (TF, RG, GE,
+  // Versatz, Ueberschneidung, see spanRun in exprEngine.js).
+  // It is for the bar display there (tr.span).
   //
-  // ctxAll.cycles ist seit der Mehrfach-Ereignis-Aufteilung (siehe
-  // GZ.umlaufContext.buildAll()) NICHT mehr 1:1 mit den Umlaufindizes -
-  // Umlaufprüfung erwartet aber GENAU einen Wert je Umlaufindex (Kennzahl-
-  // Spur, eine Zeile je Umlauf). Daher hier bewusst nur das JEWEILS ERSTE
-  // Ereignis je Umlauf (cyc.eventIdx === 0) zurückgereicht - Umlaufprüfungs
-  // Kennzahl-Spur zeigt (anders als die Tabelle hier) noch keine weiteren
-  // Ereignisse desselben Umlaufs an. Durch eine LEER-Spalte ausgeblendete
-  // Zeilen (siehe visibleIdx/recompute()) liefern hier bewusst NaN statt des
-  // tatsächlich berechneten Werts - eine aus der Tabelle ausgeblendete Zeile
-  // soll auch in der Kennzahl-Spur nicht auftauchen.
+  // Since the multiple-event split (see GZ.umlaufContext.buildAll()), ctxAll.cycles is NO LONGER
+  // 1:1 with the cycle indices.
+  // But Umlaufprüfung expects EXACTLY ONE value for each cycle index (Kennzahl track, one row for
+  // each cycle).
+  // So this function returns on purpose only the FIRST event of each cycle (cyc.eventIdx === 0).
+  // The Kennzahl track in Umlaufprüfung does not yet show more events of the same cycle (unlike the
+  // table here).
+  // Rows that a LEER column hid (see visibleIdx and recompute()) give NaN on purpose.
+  // They do not give the value that the code really calculated.
+  // A row that is hidden in the table must also not appear in the Kennzahl track.
   function getSyntheticColumns() {
     if (!ctxAll) return [];
     const visibleSet = new Set(visibleIdx);
@@ -538,11 +553,12 @@
     for (let i = from; i < to; i++) {
       const realIdx = visibleIdx[i];
       const cyc = ctxAll.cycles[realIdx];
-      // Ereignis: nur angezeigt, wenn dieser Umlauf ueberhaupt mehr als eine
-      // Zeile hat (Mehrfach-Vorkommen einer Signalgruppe, siehe
-      // GZ.umlaufContext.buildAll()) - sonst "-" statt einer immer-"1" auf
-      // jeder Zeile. Plain Zahl (1, 2, 3, ...) statt "1/3" - die Gesamtzahl
-      // steht ohnehin schon in der Umlaufinfo-Zeile, nicht in jeder Zelle.
+      // Event: the code shows it only if this cycle has more than one row (multiple occurrence of a
+      // signal group, see GZ.umlaufContext.buildAll()).
+      // Otherwise it shows "-". It does not show a "1" on each row.
+      // It is a plain number (1, 2, 3, ...) and not "1/3".
+      // The total number is already in the cycle info line.
+      // It is not necessary in each cell.
       const ereignis = cyc.eventCount > 1 ? String(cyc.eventIdx + 1) : '–';
       const cells = [String(i + 1), String(cyc.cycleIdx + 1), ereignis, fmtTimeShort(cyc.start), esc(cyc.SPL || '–'), String(cyc.TU)]
         .concat(validCols.map(c => formatCellHtml(c.values[realIdx])));
@@ -557,10 +573,10 @@
     const sorted = [...vals].sort((a, b) => a - b);
     return { n: vals.length, mean: mean(vals), median: median(vals), sd: stdDev(vals), min: Math.min(...vals), max: Math.max(...vals), p85: percentile(sorted, 85) };
   }
-  // Nur über visibleIdx (siehe recompute()) statt c.values direkt - durch
-  // eine LEER-Spalte ausgeblendete Zeilen fließen dadurch in KEINER Spalte
-  // mehr in die Aggregatstatistik ein, nicht nur in der ausblendenden
-  // Spalte selbst (eine ausgeblendete Zeile gilt für die ganze Tabelle).
+  // Use only visibleIdx (see recompute()) and not c.values directly.
+  // So rows that a LEER column hid are in NO column of the aggregate statistics.
+  // This is not only true for the column that hides them.
+  // A hidden row is hidden for the whole table.
   function visibleValues(c) { return visibleIdx.map(i => c.values[i]); }
   function numericValues(c) { return visibleValues(c).filter(v => typeof v === 'number' && !Number.isNaN(v)); }
 
@@ -616,10 +632,10 @@
     const header = ['#', 'Start', 'SPL', 'TU', 'TX', 'Ereignis'].concat(validCols.map(c => c.col.label || '(ohne Bezeichnung)'));
     const rows = visibleIdx.map((realIdx, i) => {
       const cyc = ctxAll.cycles[realIdx];
-      // Ereignis: plain Zahl statt "1/3" (siehe renderResultsTable) - hier
-      // ohne "-"-Sonderfall für den Normalfall, da im Export jede Zeile für
-      // sich lesbar bleiben soll, ohne Nachbarzeilen zum Verständnis
-      // heranziehen zu müssen.
+      // Event: plain number and not "1/3" (see renderResultsTable).
+      // Here there is no "-" special case for the normal case.
+      // In the export, each row must be readable alone.
+      // The reader must not need the neighbor rows to understand it.
       const base = [i + 1, fmtTs(new Date(cyc.start)), cyc.SPL, cyc.TU, cyc.TX, cyc.eventIdx + 1];
       validCols.forEach(c => base.push(exportValue(c.values[realIdx])));
       return base;

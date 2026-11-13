@@ -1,16 +1,18 @@
-/* GZ.table - typed columns for time series recordings (domain layer, no DOM).
+/* GZ.table has typed columns for time series recordings (domain layer, no DOM).
 
-   A recording is a Table: one time axis (Float64Array of ms) and one Column per signal or detector column.
+   A recording is a Table. A Table has one time axis (a Float64Array of ms)
+   and one Column for each signal or detector column.
    Column kinds:
-   - 'u8', 'u16', 'u32': numbers 0 .. 999999999 in a typed array. Cells that are not a plain number
-     (for example "INV" or an empty cell) are listed in `exc`. Their place in `data` holds 0.
-   - 'dict': text columns. `data` holds a code per row, `dict` holds the distinct texts.
-   A cell always has one raw text (the trimmed text of the CSV cell). rawAt() returns it.
+   - 'u8', 'u16' and 'u32': numbers from 0 to 999999999 in a typed array.
+     A cell that is not a plain number is listed in `exc`. Examples are "INV" and an empty cell.
+     The place of such a cell in `data` holds 0.
+   - 'dict': text columns. `data` has a code for each row. `dict` has the different texts.
+   A cell always has one raw text. This is the trimmed text of the CSV cell. rawAt() returns it.
 
    Column: { index, kind, data, exc, dict }
-     index  field number in the CSV (0 based)
+     index  the field number in the CSV (0-based)
      exc    null, or { idx: Uint32Array (rows, ascending), tok: Uint32Array (token numbers), tokens: string[] }
-     dict   string[] for kind 'dict', else null */
+     dict   string[] for the kind 'dict', else null */
 (function (GZ) {
   'use strict';
 
@@ -22,7 +24,7 @@
     return { index, kind: 'dict', data: codes, exc: null, dict };
   }
 
-  // Row of the exception list that belongs to row i, or -1.
+  // Returns the row of the exception list that belongs to row i, or -1.
   function excRow(col, i) {
     const idx = col.exc.idx;
     let lo = 0, hi = idx.length - 1;
@@ -37,7 +39,7 @@
     return col.exc !== null && excRow(col, i) >= 0;
   }
 
-  // Raw text of cell i.
+  // Returns the raw text of cell i.
   function rawAt(col, i) {
     if (col.kind === 'dict') return col.dict[col.data[i]];
     if (col.exc !== null) {
@@ -47,7 +49,7 @@
     return String(col.data[i]);
   }
 
-  // All raw texts of a column as an array. Equal texts share one string.
+  // Returns all raw texts of a column as an array. Equal texts share one string.
   function columnStrings(col) {
     const data = col.data, n = data.length, out = new Array(n);
     if (col.kind === 'dict') {
@@ -77,9 +79,12 @@
     return out;
   }
 
-  // Looks like the Map of text arrays that parseOcitText returns (key: CSV column, value: array of raw texts),
-  // but builds each array only when it is asked for. get(), has(), forEach(), keys(), values(), entries() and
-  // iteration work, so `new Map(series)` also works. releaseStrings() drops the built arrays.
+  // LazySeriesMap looks like the Map of text arrays that parseOcitText returns.
+  // The key is the CSV column. The value is an array of raw texts.
+  // It builds each array only when a caller asks for it.
+  // get(), has(), forEach(), keys(), values(), entries() and iteration work.
+  // So `new Map(series)` also works.
+  // releaseStrings() drops the arrays that exist.
   class LazySeriesMap {
     constructor(columns) {
       this._cols = new Map(columns.map(c => [c.index, c]));

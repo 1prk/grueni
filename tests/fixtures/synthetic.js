@@ -1,7 +1,8 @@
-/* GZT.fixtures: deterministic test recordings in the OCIT table layout.
-   - synthetic(): a wide recording (100 value columns) built from a controller cycle model.
-     Fixed-time plan first, then actuated plan. No random calls other than the seeded generator.
-   - edgeCases(): small hand-made texts for the odd cases of the parser.
+/* GZT.fixtures has deterministic test recordings in the OCIT table layout.
+   - synthetic() builds a wide recording (100 value columns) from a controller cycle model.
+     The recording has a fixed-time plan first and then an actuated plan.
+     The only source of random numbers is the seeded generator.
+   - edgeCases() gives small hand-made texts for the odd cases of the parser.
    The code runs in Node (vm) and in the browser. It does not read files. */
 (function (root) {
   'use strict';
@@ -16,14 +17,15 @@
     };
   }
 
-  // i seconds after 06:00:00 on 03.11.26 (a day without a clock change)
+  // Returns the date and time i seconds after 06:00:00 on 03.11.26. This day has no clock change.
   function clock(i) {
     const s = 6 * 3600 + i;
     return ['03.11.26', pad2(Math.floor(s / 3600) % 24) + ':' + pad2(Math.floor(s / 60) % 60) + ':' + pad2(s % 60)];
   }
 
-  // o: {longname, no, cols:[{type,name,desc}], rows:[[...fields]], delim, eol, quoteHeader, noFinalEol}
-  // Every row starts with: date, time, TX, TC, SP, then one field per column.
+  // o: {longname, no, cols:[{type,name,desc}], rows:[[...fields]], delim, eol, quoteHeader,
+  // noFinalEol}
+  // Every row starts with date, time, TX, TC and SP. Then it has one field for each column.
   function build(o) {
     const cols = o.cols, N = cols.length, d = o.delim || '\t', eol = o.eol || '\n';
     const pad = n => new Array(Math.max(0, n)).fill('');
@@ -185,11 +187,11 @@
     const bad = [];
     const good = i => { const c = clock(i); return [c[0], c[1], i, '', '', sgVal(i), detVal(i)]; };
     for (let i = 0; i < 5; i++) bad.push(good(i));
-    bad.push(['', '06:00:05', 5, '', '', 48, 0]);               // empty date
-    bad.push(['xx.yy.zz', '06:00:06', 6, '', '', 48, 0]);       // unreadable date
-    bad.push(['   ', '06:00:07', 7, '', '', 48, 0]);            // blank date
-    bad.push(['03.11.26', '06:00:08', '8']);                    // short row
-    bad.push(['03.11.26', '06:00:04', 4, '', '', 48, 1]);       // duplicate time
+    bad.push(['', '06:00:05', 5, '', '', 48, 0]);               // Empty date.
+    bad.push(['xx.yy.zz', '06:00:06', 6, '', '', 48, 0]);       // Unreadable date.
+    bad.push(['   ', '06:00:07', 7, '', '', 48, 0]);            // Blank date.
+    bad.push(['03.11.26', '06:00:08', '8']);                    // Short row.
+    bad.push(['03.11.26', '06:00:04', 4, '', '', 48, 1]);       // Duplicate time.
     for (let i = 9; i < 13; i++) bad.push(good(i));
     cases.badRows = build({ cols: SG_DET, rows: bad });
 

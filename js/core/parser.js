@@ -1,6 +1,7 @@
-/* GZ.parser — OCIT-Rohtabelle einlesen (Zeile 1-7 Kopf, ab Zeile 8
-   Messdaten) und Rohwerte in Signalbild-Kategorien übersetzen.
-   Siehe ocit-tabellenstruktur-Referenz für das Tabellenlayout. */
+/* GZ.parser reads the raw OCIT table.
+   Lines 1 to 7 are the header. The measurement data starts at line 8.
+   The parser also translates raw values into signal image categories.
+   For the table layout, see the reference "ocit-tabellenstruktur". */
 (function (GZ) {
   'use strict';
 
@@ -14,12 +15,12 @@
     DUNKEL: 'Dunkel', UNBEKANNT: 'Unbekannt', INV: 'Ungültig (INV)', LUECKE: 'Datenlücke'
   };
 
-  // OCIT-Typname (Type/Subtype aus der Roh-CSV) -> Kategorie-Kürzel.
-  // Die Roh-CSV enthält KEIN fertiges Kürzel wie "SG" - das leitet erst der
-  // CSV-Import (VBA: GetTypKategorie -> GetTypAbkuerzung) daraus ab. Type und
-  // Subtype können je nach Quelle auf unterschiedliche Kopfzeilen verteilt
-  // sein, deshalb werden alle Kopfzeilen je Spalte nach einem bekannten
-  // Typnamen durchsucht, statt eine feste Zeile anzunehmen.
+  // Maps an OCIT type name (type or subtype from the raw CSV) to a category abbreviation (kuerzel).
+  // The raw CSV has NO ready abbreviation such as "SG". The CSV import derives it.
+  // In the VBA import this is GetTypKategorie and then GetTypAbkuerzung.
+  // Type and subtype can be in different header lines, depending on the source.
+  // So the parser searches all header lines of a column for a known type name.
+  // It does not assume a fixed line.
   const TYPNAME_TO_KUERZEL = {
     veh: 'SG', tram: 'SG', ped: 'SG', blind: 'SG', cyclist: 'SG', left: 'SG', right: 'SG',
     single_loop: 'DET',
@@ -29,10 +30,11 @@
     none: 'N/A'
   };
 
-  // Detector names follow a naming convention (IS = induction loop, DF = camera
-  // field, RD = radar, FT/BT/FTV = pedestrian push button, each followed by a
-  // number and an optional "_<lane>" suffix). A column without a known OCIT
-  // type name is still taken as a detector (DET) when its name matches.
+  // Detector names follow a naming convention.
+  // IS means induction loop. DF means camera field. RD means radar.
+  // FT, BT and FTV mean pedestrian push button.
+  // Each prefix has a number and an optional suffix "_<lane>".
+  // A column without a known OCIT type name is still a detector (DET) if its name matches.
   const DETECTOR_NAME_RE = /^(IS|DF|RD|FT|BT|FTV)\d+(?:_\d+)?$/i;
 
   function looksLikeTimeOnly(s) {
@@ -48,7 +50,7 @@
       throw new Error('Zeitstempel „' + s + '“ nicht lesbar');
     }
     const [dd, mm, yy] = dmy, [hh, mi, ss] = hms;
-    const year = yy >= 100 ? yy : 2000 + yy; // "26" -> 2026, "2026" bleibt 2026
+    const year = yy >= 100 ? yy : 2000 + yy; // "26" becomes 2026. "2026" stays 2026.
     return new Date(year, mm - 1, dd, hh, mi, ss).getTime();
   }
 
@@ -65,8 +67,9 @@
     return -1;
   }
 
-  // Typischer Aufzeichnungsschritt: Median der ersten Zeitdifferenzen statt
-  // nur times[1]-times[0] (robust gegen Duplikate/Lücken am Datenanfang).
+  // Typical recording step. It is the median of the first time differences.
+  // The code does not use only times[1]-times[0].
+  // The median is robust against duplicates and gaps at the start of the data.
   function estimateStep(times) {
     if (times.length < 2) return 1000;
     const diffs = [];
@@ -77,15 +80,17 @@
     return diffs.length ? GZ.stats.median(diffs) : 1000;
   }
 
-  // Kategorisierung eines Rohwerts einer AMPEL(SG)-Spalte (Signalbild-Bitfeld).
+  // Returns the category of a raw value of a signal group (SG) column.
+  // The raw value is a bit field of the signal image.
   function categorizeSgRaw(raw) {
     if (raw.toUpperCase() === 'INV') return 'INV';
     const num = Number(raw);
     return Number.isFinite(num) ? (STATE_CAT[num] ?? 'UNBEKANNT') : 'UNBEKANNT';
   }
-  // Kategorisierung eines Rohwerts einer DETEKTOR(DET)-Spalte: 0 = frei, jeder
-  // andere numerische Wert (1 = belegt, sonst Belegungsgrad in %) wird hier
-  // vereinfacht als "belegt" gewertet.
+  // Returns the category of a raw value of a detector (DET) column.
+  // The value 0 means free.
+  // The code simplifies each other numeric value to "occupied".
+  // The value 1 means occupied. Any other value is the degree of occupancy in percent.
   function categorizeDetRaw(raw) {
     if (raw.toUpperCase() === 'INV') return 'INV';
     const num = Number(raw);
@@ -93,10 +98,11 @@
     return num === 0 ? 'FREI' : 'BELEGT';
   }
 
-  // Quote-fähiges Splitting: OCIT-/Excel-Exporte quoten Felder oft
-  // ("Longname","Knoten Nord, West"). Naives split(',') zerlegt solche Felder
-  // falsch; "" innerhalb eines gequoteten Felds ist ein escaptes
-  // Anführungszeichen (RFC 4180).
+  // Splits a line and respects quotes.
+  // OCIT and Excel exports often put quotes around fields, for example ("Longname","Knoten Nord,
+  // West").
+  // A simple split(',') splits such fields in the wrong way.
+  // Two quotes inside a quoted field are one escaped quote (RFC 4180).
   function splitLine(l) {
     const delim = l.includes('\t') ? '\t' : ',';
     const out = [];
@@ -118,20 +124,21 @@
     return out;
   }
 
-  // Header analysis, shared by parseOcitText and GZ.csvImport.
-  // `header` holds the first 7 lines, each split into fields.
+  // Header analysis. parseOcitText and GZ.csvImport share it.
+  // `header` has the first 7 lines. Each line is split into fields.
   function analyzeHeader(header) {
-    const nameRow = header[4] || [];   // Zeile 5: Kurzname der Spalte (K1, K2, DF1, ...)
-    const beschrRow = header[5] || []; // Zeile 6: Klartext-Beschreibung
+    const nameRow = header[4] || [];   // Line 5 has the short name of the column (K1, K2, DF1, ...).
+    const beschrRow = header[5] || []; // Line 6 has the description in plain text.
     const colCount = Math.max(...header.map(r => r.length));
 
-    // Zeile 1: Knoten-Metadaten als Label/Wert-Paare, z. B.
-    // "Longname",[NAME],"No",[INDEX]
+    // Line 1: junction metadata as label and value pairs.
+    // For example: "Longname",[NAME],"No",[INDEX]
     const knotenName = extractLabeledValue(header[0], 'Longname');
     const knotenNr = extractLabeledValue(header[0], 'No');
 
-    // Spalte C/D/E (0-indiziert 2/3/4) = TX/TC/SP, per Label gesucht mit
-    // Spalte 3 (Index 2) als Fallback gemäß Konvention.
+    // The columns C, D and E (0-based index 2, 3 and 4) are TX, TC and SP.
+    // The code searches for each of them by its label.
+    // By convention, the fallback is the index 2, 3 and 4.
     let txCol = findColumnByLabel(header, 'TX');
     if (txCol === -1) txCol = 2;
     let tcCol = findColumnByLabel(header, 'TC');
@@ -151,10 +158,10 @@
           break;
         }
       }
-      // Zeile 5 liefert den eigentlichen Signalgruppennamen (z. B. "K1"). In
-      // der Praxis steht in Zeile 6 (Beschreibung) oft nur die OCIT-Codierung
-      // ohne echten Mehrwert - deshalb ist der Name aus Zeile 5 die primäre
-      // Anzeige, Beschreibung nur eine optionale Zusatzinfo.
+      // Line 5 gives the real signal group name (for example "K1").
+      // Line 6 (description) often has only the OCIT code in practice. It adds no value.
+      // So the name from line 5 is the main display text.
+      // The description is only optional extra information.
       const name = (nameRow[c] || '').trim() || `Sp.${c + 1}`;
       const beschreibung = (beschrRow[c] || '').trim();
       if ((kuerzel === '' || kuerzel === 'N/A') && DETECTOR_NAME_RE.test(name)) { kuerzel = 'DET'; typName = 'detector_by_name'; }
@@ -189,10 +196,10 @@
     const cycleStarts = [];
     let prevTx = null;
     let prevTxNum = null;
-    // TC und SP werden datensparsam geloggt: ein Wert steht nur in der Zeile,
-    // in der er sich ändert, danach bleibt die Zelle leer, bis sich der Wert
-    // wieder ändert. Beim Einlesen wird das aufgefüllt (letzter bekannter
-    // Wert gilt, bis ein neuer expliziter Wert erscheint).
+    // The data logger saves TC and SP in a sparing way.
+    // A value is only in the row where it changes.
+    // After that the cell stays empty until the value changes again.
+    // The import fills the gaps. The last known value is valid until a new explicit value appears.
     let lastTc = '', lastSpl = '';
     let skippedRows = 0;
     for (const r of dataRows) {
@@ -211,14 +218,16 @@
       const txVal = (r[txCol] || '').trim();
       if (txVal !== '') {
         const txNum = Number(txVal);
-        // Normalfall: TX zählt seit Umlaufbeginn hoch und die Zeile mit dem
-        // exakten Rücksprung auf "0" markiert den nächsten Umlaufbeginn.
+        // Normal case: TX counts up from the start of the cycle.
+        // The row with the exact jump back to "0" marks the start of the next cycle.
         const isZeroEdge = txVal === '0' && prevTx !== '0';
-        // Fallback für Datenlücken: fehlt genau diese "0"-Zeile im Rohexport
-        // (z. B. eine ausgelassene Sekunde), springt TX ohne isZeroEdge direkt
-        // von einem hohen Wert auf einen kleinen zurück (z. B. 89 -> 1). Ohne
-        // diesen Fallback verschmelzen zwei Umläufe unerkannt zu einem
-        // einzigen mit verdoppelter Umlaufzeit (z. B. 90s+90s -> 180s).
+        // Fallback for data gaps.
+        // The "0" row can be missing in the raw export, for example when the data has no row for
+        // one second.
+        // Then TX jumps from a high value to a small value without isZeroEdge (for example 89 ->
+        // 1).
+        // Without this fallback, two cycles merge into one cycle with a double cycle time.
+        // The merge is not detected. An example is 90 s + 90 s -> 180 s.
         const isWrapEdge = !isZeroEdge && Number.isFinite(txNum) && prevTxNum !== null && txNum < prevTxNum;
         if (isZeroEdge || isWrapEdge) cycleStarts.push(t);
         prevTx = txVal;

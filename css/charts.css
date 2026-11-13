@@ -1,9 +1,9 @@
-/* Styles für die D3-Diagramme: Signalzeitendiagramm-Spuren, Grünzeit-Trend
-   und Wartezeit-Streudiagramm. Segmentfarben werden im JS über die
-   --sig-*-Variablen gesetzt (style, nicht attr, damit CSS-Variablen in SVG
-   aufgelöst werden). */
+/* Styles for the D3 charts: tracks of the signal time chart, green time trend and wait time
+   scatter chart.
+   The JS sets the segment colors with the --sig-* variables.
+   It uses style and not attr, so that the SVG resolves the CSS variables. */
 
-/* ---------- Signalzeitendiagramm / Umlaufprüfung: Spuren-Zeilen ---------- */
+/* ---------- Signal time chart and cycle check: track rows ---------- */
 .lane-row{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
 .lane-row.lane-header{ margin-bottom:5px; font-size:11px; font-weight:700; color:var(--text-muted); }
 .lane-name{ width:56px; flex-shrink:0; font-family:var(--mono); font-size:12.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -45,10 +45,10 @@
 
 .up-group-caption{ font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--text-muted); padding:10px 16px 4px; }
 .up-group-caption .win-label{ display:inline; font-weight:400; color:var(--text-faint); margin-left:8px; min-width:0; }
-/* Feste, gemeinsame Breite für Haupt- UND Unterzeilen (Detektor/tFZ/ZwL) -
-   sonst richten sich unterschiedlich lange Beschriftungen (z.B. "↳ZwL D1")
-   je Zeile individuell aus (width:auto) und die Spuren rutschen gegeneinander
-   versetzt ("eingerückt") statt bündig untereinander zu stehen. */
+/* Fixed common width for main rows AND sub-rows (detector, tFZ, ZwL).
+   Otherwise labels of different length (for example "↳ZwL D1") align each row on its own
+   (width:auto).
+   Then the tracks shift against each other ("indented") and do not stand flush under each other. */
 .up-main-row .lane-name, .up-sub-row .lane-name{ width:118px; }
 .up-main-row .lane-name{ font-weight:700; }
 .up-main-row .lane-num{ width:36px; }
@@ -56,15 +56,14 @@
 .up-sub-row .lane-name{ font-size:10.5px; font-weight:600; color:var(--text-muted); }
 .up-sub-row .lane-num{ width:36px; }
 
-/* PÜ-Werkzeug: Lese-Ansicht (siehe umlaufpruefung.js renderPueDetailPanel())
-   - per Klick auf einen Phasenübergang geöffnete Zeilenliste, lokal auf die
-   Übergangs-Referenzzeit bezogen (nicht die Umlauf-TX). NUR ANZEIGE - die
-   Bearbeitung selbst (Zeilen hinzufügen/entfernen, An/Ab überschreiben)
-   lebt im Tab „Stammdaten LSA" (siehe dort .sd-pue-* weiter unten), von
-   hier aus per "Bearbeiten"-Knopf erreichbar. Zeilen UND die Achsen-Zeile
-   (.up-pue-axis-row) teilen sich dasselbe Grid-Spaltenraster (statt Flex),
-   damit die Sekunden-Ticks der gemeinsamen Achse exakt über den Balken der
-   Zeilen darunter stehen. */
+/* Phase transition tool (PÜ): read view (see renderPueDetailPanel() in umlaufpruefung.js).
+   It is a list of rows that opens with a click on a phase transition.
+   The rows are relative to the reference time of the transition, not to the TX of the cycle.
+   DISPLAY ONLY. The editing is in the tab "Stammdaten LSA" (see .sd-pue-* further down).
+   There the user adds and removes rows and overrides An and Ab.
+   The user reaches it from here with the button "Bearbeiten".
+   The rows AND the axis row (.up-pue-axis-row) share the same grid columns (not flex).
+   So the second ticks of the common axis stand exactly above the bars of the rows below. */
 .up-pue-panel{ margin:8px 16px 4px; padding:10px 12px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); }
 .up-pue-panel-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; margin-bottom:8px; }
 .up-pue-panel-sub{ font-weight:400; color:var(--text-muted); }
@@ -83,17 +82,18 @@
 .up-pue-axis-track svg text{ font-family:var(--mono); font-size:9.5px; fill:var(--text-faint); }
 .up-pue-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:6px 0; }
 
-/* PÜ-Werkzeug: Bearbeitung (Stammdaten LSA) - eine Zeilenliste je in der
-   Aufzeichnung tatsächlich vorkommendem Übergangstyp (siehe stammdatenLsa.js
-   renderPueSection()), sonst dieselbe Optik wie die Lese-Ansicht oben, nur
-   mit echten Eingabefeldern statt reinem Text. #sdPueBody legt die Blöcke
-   selbst als Grid an (statt einer einzelnen Spalte) - bis zu 3 nebeneinander.
-   grid-template-columns wird von renderPueSection() dynamisch gesetzt
-   (repeat(min(Anzahl Blöcke, 3), 1fr)) statt hier fest/über auto-fit
-   vorgegeben, damit z.B. ein einzelner Übergang die volle verfügbare Breite
-   nutzt statt auf einer Mindestspaltenbreite stehenzubleiben, und 3
-   nebeneinander die volle Fensterbreite ausfüllen statt an einer gedeckelten
-   max-width stehenzubleiben. */
+/* Phase transition tool (PÜ): editing (Stammdaten LSA).
+   It has one row list for each transition type that occurs in the recording (see
+   renderPueSection() in stammdatenLsa.js).
+   The look is the same as the read view above, but with real input fields and not plain text.
+   #sdPueBody lays out the blocks itself as a grid (not a single column). Up to 3 blocks stand
+   side by side.
+   renderPueSection() sets grid-template-columns dynamically: repeat(min(number of blocks, 3),
+   1fr).
+   It is not fixed here and not set with auto-fit.
+   So a single transition uses the full available width. It does not stay at a minimum column
+   width.
+   And 3 blocks side by side fill the full window width. They do not stay at a capped max-width. */
 #sdPueBody{ display:grid; gap:16px; align-items:start; }
 .sd-pue-block{ padding:12px 14px; background:var(--bg-surface-2); border:1px solid var(--border); border-radius:var(--radius-md); transition:box-shadow .3s, border-color .3s; }
 .sd-pue-block.sd-pue-highlight{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-bg); }
@@ -119,20 +119,20 @@
 .sd-pue-addrow{ margin-top:8px; font-size:11px; padding:4px 10px; }
 .sd-pue-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:6px 0; }
 
-/* Manuelle Zeitmessung (Strg+Klick), siehe umlaufpruefung.js wireMeasure() */
+/* Manual time measurement (Ctrl+click), see wireMeasure() in umlaufpruefung.js */
 .lane-track svg{ cursor:default; }
 .measure-cap-halo, .measure-line-halo{ stroke:#fff; stroke-width:3; }
 .measure-cap{ stroke:var(--text); stroke-width:1.4; }
 .measure-line{ stroke:var(--text); stroke-width:1.2; stroke-dasharray:2,2; }
 .measure-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:var(--text); text-anchor:middle; paint-order:stroke; stroke:#fff; stroke-width:2.5px; }
 
-/* Hover-Fadenkreuz (alle Spuren eines Umlaufs), siehe umlaufpruefung.js
-   wireCrosshair() - durchgezogen (statt gestrichelt) und in Akzentfarbe, um
-   sich klar von der gestrichelten schwarzen Strg+Klick-Messung abzuheben. */
+/* Hover crosshair (all tracks of a cycle), see wireCrosshair() in umlaufpruefung.js.
+   The line is solid (not dashed) and has the accent color.
+   So it is clearly different from the dashed black Ctrl+click measurement. */
 .crosshair-line-halo{ stroke:#fff; stroke-width:3; }
 .crosshair-line{ stroke:var(--accent-strong); stroke-width:1.2; }
 
-/* ---------- Grünzeit-Trend / Wartezeit: Streudiagramm & CDF ---------- */
+/* ---------- Green time trend and wait time: scatter chart and CDF ---------- */
 .trend-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px 0; font-size:11.5px; color:var(--text-muted); flex-wrap:wrap; }
 .trend-sg-checks{ display:flex; flex-wrap:wrap; gap:5px 16px; padding:10px 16px 0; font-size:12px; }
 .trend-sg-check{ display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
@@ -165,45 +165,47 @@
 
 .seg-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; text-anchor:middle; }
 
-/* Zeitraster (renderLane gridStepMs) - dünn/hell genug, um nicht mit dem
-   Segmentinhalt (auch auf vollflächigem GRUEN) zu konkurrieren. */
+/* Time grid (renderLane gridStepMs). It is thin and light enough not to compete with the segment
+   content,
+   also on a full-area GRUEN. */
 .lane-grid line{ stroke:rgba(0,0,0,.16); stroke-width:1; }
 :root[data-theme="dark"] .lane-grid line, .dark .lane-grid line{ stroke:rgba(255,255,255,.18); }
 
-/* Rand-verankerte Beschriftungen (renderLane edgeLabelsFor), z.B. An-/
-   Ab-Sekunden direkt auf der Grünzeit statt nur in der separaten Zahlen-
-   spalte links der Spur. */
+/* Labels at the edge (renderLane edgeLabelsFor). An example is the An and Ab seconds directly on
+   the green time.
+   Without them the seconds are only in the separate number column left of the track. */
 .seg-edge-label{ font-family:var(--mono); font-size:9px; font-weight:700; fill:#fff; pointer-events:none; paint-order:stroke; stroke:rgba(0,0,0,.35); stroke-width:2px; stroke-linejoin:round; }
 .seg-edge-label-left{ text-anchor:start; }
 .seg-edge-label-right{ text-anchor:end; }
 .seg-edge-overflow{ font-family:var(--mono); font-size:12px; font-weight:900; fill:#fff; text-anchor:middle; pointer-events:none; }
 
-/* Formel-Hervorhebung (renderLane highlights) - siehe formulaBuilder.js
-   getFormulaHighlights(): markiert, wann eine Formel auf der Spur eines
-   gewählten Objekts wahr war. Rein dekorativ (pointer-events:none), damit
-   Klicks/Strg-Messung weiter das darunterliegende Segment treffen. */
+/* Formula highlight (renderLane highlights), see getFormulaHighlights() in formulaBuilder.js.
+   It marks when a formula was true on the track of a selected object.
+   It is purely decorative (pointer-events:none).
+   So clicks and the Ctrl measurement still hit the segment below. */
 .formula-hl-band{ opacity:.22; pointer-events:none; }
 .formula-hl-edge{ stroke-width:1.4; stroke-dasharray:4,2; opacity:.9; pointer-events:none; }
 
-/* ---------- Spur-Stil "Minimal" (renderLane laneStyle:'minimal') ----------
-   Angelehnt an klassische Signalzeitenpläne: umrandete Kästen auf dünner
-   roter Grundlinie statt flächiger Balken. Beide Gelbphasen (Rot-Gelb und
-   Gelb) sind voll gefüllt und tragen je einen Diagonalstrich (als eigene
-   Linie gezeichnet, siehe timelineLane.js). Konturen als echte Haarlinie
-   (stroke-width < 1), wie im gedruckten Plan. */
+/* ---------- Track style "Minimal" (renderLane laneStyle:'minimal') ----------
+   It follows classic signal timing plans: boxes with an outline on a thin red baseline, not area
+   bars.
+   Both amber phases (red-amber and amber) are fully filled. Each has one diagonal stroke
+   (drawn as its own line, see timelineLane.js).
+   The outlines are a real hairline (stroke-width < 1), as in the printed plan. */
 .seg-minimal{ stroke:var(--lane-outline); stroke-width:.5; }
 .seg-amber-slash line{ stroke:var(--lane-outline); stroke-width:.5; }
-/* Beschriftungen im Minimal-Stil: Arial wie im gedruckten Signalzeitenplan
-   (statt der sonst app-weiten Monospace), flacher Text ohne Halo (kein
-   paint-order/stroke wie beim Standardstil - dort noetig fuer weißen Text
-   auf farbigem Grund, hier stoert der Rand nur). */
+/* Labels in the Minimal style: Arial as in the printed signal timing plan
+   (not the monospace of the rest of the application).
+   The text is flat without a halo (no paint-order or stroke as in the standard style).
+   The standard style needs the halo for white text on a colored background. Here the outline
+   only disturbs. */
 .lane-minimal .seg-edge-label{
   font-family:Arial, Helvetica, sans-serif; font-weight:400; font-size:10px;
   fill:var(--text); stroke:none; paint-order:normal;
 }
 .lane-minimal .seg-edge-overflow{ font-family:Arial, Helvetica, sans-serif; fill:var(--text); }
 
-/* d3-drawn primitives shared across charts */
+/* D3-drawn primitives that all charts share */
 .d3-axis-x .domain{ display:none; }
 .d3-axis-x .tick line{ display:none; }
 .d3-axis-x .tick text{ font-family:var(--mono); font-size:10px; fill:var(--text-faint); }
@@ -216,8 +218,9 @@
   .lane-row{ gap:5px; }
   .axis{ margin-left:120px; }
   .spl-bar-label-fixed{ width:120px; }
-  /* überschreibt die per JS gesetzte inline grid-template-columns (siehe
-     stammdatenLsa.js renderPueSection()) - auf schmalen Bildschirmen immer
-     eine einzelne Spalte, sonst würden 2-3 Blöcke unbrauchbar schmal. */
+  /* Overrides the inline grid-template-columns that JS sets (see renderPueSection() in
+     stammdatenLsa.js).
+     On narrow screens it always uses a single column. Otherwise 2 or 3 blocks are too narrow to
+     use. */
   #sdPueBody{ grid-template-columns:1fr !important; }
 }

@@ -1,6 +1,7 @@
-/* GZ.charts.tooltipHelper — gemeinsames Positionierungsverhalten für die
-   kleinen HTML-Tooltips in Trend-/Wartezeit-Diagrammen: folgt dem Cursor,
-   klappt an den Rändern des Containers um statt abgeschnitten zu werden. */
+/* GZ.charts.tooltipHelper has the shared positioning behavior of the small HTML tooltips in
+   trend charts and wait time charts.
+   The tooltip follows the cursor.
+   At the edges of the container it flips to the other side. It is not cut off. */
 (function (GZ) {
   'use strict';
 

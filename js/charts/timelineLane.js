@@ -1,8 +1,8 @@
-/* GZ.charts.timelineLane — D3-Renderer für EINE Signal-/Detektor-Spur.
-   Wird sowohl vom Signalzeitendiagramm (Grünzeitanalyse) als auch von der
-   Umlaufprüfung (eine Spur je Umlauf) verwendet. Arbeitet auf echten
-   Pixelmaßen (viewBox = gemessene Containergröße), damit Kreise/Linien nicht
-   durch nicht-uniforme Skalierung verzerrt werden. */
+/* GZ.charts.timelineLane is the D3 renderer for ONE signal or detector track.
+   Both the signal time chart (Grünzeitanalyse) and the cycle check (one track for each cycle)
+   use it.
+   It works with real pixel sizes (viewBox = measured container size).
+   So circles and lines are not distorted by a non-uniform scale. */
 (function (GZ) {
   'use strict';
   const fmtTimeShort = GZ.format.fmtTimeShort;
@@ -18,29 +18,28 @@
     GELB: 'url(#gz-pat-wedge-y)',
     BELEGT: 'var(--accent)'
   };
-  // "Minimal": Darstellung angelehnt an klassische Signalzeitenpläne (LISA+
-  // u.ä.) - dünne rote Grundlinie, darüber UMRANDETE Kästen statt flächiger
-  // Balken. Beide Gelbphasen (Rot-Gelb am Freigabebeginn und Gelb am
-  // Freigabeende) werden voll gefüllt und tragen je EINEN Diagonalstrich,
-  // genau wie im gedruckten Plan (siehe Slash-Block in renderLane()).
+  // "Minimal": a look that follows classic signal timing plans (LISA+ and similar).
+  // It has a thin red baseline and OUTLINED boxes above it, not area bars.
+  // Both amber phases (red-amber at the start of the green and amber at the end of the green)
+  // are fully filled. Each has ONE diagonal stroke, as in the printed plan (see the slash block in
+  // renderLane()).
   const MINIMAL_FILL = {
     GRUEN: 'var(--sig-green)',
     DUNKEL: 'var(--sig-dark)',
     UNBEKANNT: 'url(#gz-pat-unknown)',
     INV: 'url(#gz-pat-unknown)',
     LUECKE: 'url(#gz-pat-gap)',
-    ROTGELB: 'var(--sig-yellow)', // voll gefüllt
-    GELB: 'var(--sig-yellow)',    // voll gefüllt + Diagonalstrich
+    ROTGELB: 'var(--sig-yellow)', // Fully filled
+    GELB: 'var(--sig-yellow)',    // Fully filled plus a diagonal stroke
     BELEGT: 'var(--accent)'
   };
 
   const CAT_LABEL = GZ.parser.CAT_LABEL;
 
   let defsInstalled = false;
-  // Einmalig global installierte <defs> mit den Schraffur-Mustern - per
-  // url(#id) aus jeder Spuren-SVG referenzierbar (IDs sind dokumentweit
-  // eindeutig), damit nicht jede der potenziell vielen Spuren-SVGs eigene
-  // Pattern-Definitionen mitschleppen muss.
+  // <defs> with the hatch patterns. The code installs them once, globally.
+  // Each track SVG can reference them with url(#id). The IDs are unique in the whole document.
+  // So each of the many track SVGs does not need to carry its own pattern definitions.
   function ensurePatternDefs() {
     if (defsInstalled) return;
     defsInstalled = true;
@@ -70,9 +69,9 @@
     pGap.append('rect').attr('width', 6).attr('height', 6).style('fill', '#f2f4f6');
     pGap.append('rect').attr('width', 3).attr('height', 6).style('fill', '#d8dce1');
 
-    // Zwangslöschzeit-Fenster (Umlaufprüfung, ÖV-Fahrzeiten): helle
-    // Referenz-Schraffur statt Volltonfarbe, um sie optisch von den
-    // tatsächlich gemessenen Soll-/Verlustzeit-Segmenten abzuheben.
+    // Forced clearance time window (cycle check, public transport travel times):
+    // a light reference hatch and not a solid color.
+    // It looks different from the measured planned-time and lost-time segments.
     const pZwl = defs.append('pattern').attr('id', 'gz-pat-zwl')
       .attr('width', 7).attr('height', 7).attr('patternUnits', 'userSpaceOnUse')
       .attr('patternTransform', 'rotate(45)');
@@ -91,62 +90,68 @@
   //   onGreenClick, onSegClick, fillFor, segLabelFor, segLabelColorFor,
   //   segOpacityFor, edgeLabelsFor, gridStepMs, laneStyle, highlights,
   //   width, height}
-  // endMarks: [{t, label}] - durchgezogene senkrechte Markierungslinie(n) an
-  // einem fest definierten Zeitpunkt, unabhängig von den Segmenten (z.B. das
-  // Ende eines Phasenübergangs im PÜ-Werkzeug, siehe stammdatenLsa.js/
-  // umlaufpruefung.js) - visuell bewusst von cycleMarks/splMarks (gestrichelt)
-  // unterschieden, da es kein Umlaufbeginn/Signalprogrammwechsel ist.
-  // onSegClick(d, event): wie onGreenClick, aber für JEDES Segment
-  // (unabhängig von cat) und ohne die "angepinnt"-Randmarkierung - z.B. für
-  // Umlaufprüfung, um einen Klick auf einen Phasenübergang zum Öffnen des
-  // PÜ-Detailwerkzeugs zu nutzen (siehe dort togglePueDetail()).
-  // segCursor(d)->'pointer'|'default'|undefined: welche Segmente per Cursor
-  // als klickbar markiert werden - ohne diese Option nur GRUEN+onGreenClick
-  // (bisheriges Verhalten); mit onSegClick i.d.R. nur eine ECHTE Teilmenge
-  // der Segmente klickbar (z.B. nur benannte Phasenübergänge, nicht jedes
-  // Segment der Spur), daher eigene Funktion statt einer pauschalen Regel.
-  // highlights: [{start, end, color, name}] - Formel-Hervorhebung (siehe
-  // formulaBuilder.js getFormulaHighlights()): eine frei einfärbbare Markierung
-  // "diese Formel war hier wahr", als halbtransparentes Band über die volle
-  // Spurhöhe PLUS gestrichelte Randlinien an echten Intervallgrenzen (nicht am
-  // Zeilenrand, falls das Intervall über die Zeile hinausreicht - dieselbe
-  // "nur den tatsächlichen Rand zeigen"-Logik wie bei edgeLabelsFor). Rein
-  // dekorativ (pointer-events:none), damit Klicks/Strg-Messung weiterhin das
-  // darunterliegende Segment treffen, nicht das Overlay.
-  // laneStyle: 'default' (bisherige, flächige Darstellung) oder 'minimal'
-  // (umrandete Kästen auf dünner roter Grundlinie, Rot-Gelb voll, Gelb mit
-  // Diagonalstrich - siehe MINIMAL_FILL oben). Rein visuell: dieselben
-  // Segmentdaten, dieselben Beschriftungen/Interaktionen.
-  // gridStepMs: optionales festes Zeitraster (z.B. 5000 = 5s-Schritte) als
-  // dünne, helle senkrechte Hilfslinien ÜBER den Segmenten (damit sie auch
-  // auf vollflächig gefüllten Segmenten wie GRUEN als Ablesehilfe sichtbar
-  // bleiben) - verankert an wMin (Sekunden seit Zeilenbeginn treffen so
-  // direkt runde Rasterwerte). Bewusst nur dort genutzt, wo eine Zeile einen
-  // kurzen, festen Zeitausschnitt zeigt (Umlaufprüfung) - bei den langen
-  // Zeitfenstern anderer renderLane()-Aufrufer (Signalzeitendiagramm,
-  // Phasenauswertung) undefined lassen, sonst entstehen tausende Linien.
-  // edgeLabelsFor(d)->{left,right}|null: wie segLabelFor, aber zwei an den
-  // Segmenträndern verankerte Beschriftungen statt einer zentrierten (z.B.
-  // An-/Ab-Sekunden einer Grünzeit) - siehe layoutEdgeLabels() unten für die
-  // Behandlung zu schmaler Segmente.
-  // segLabelFor(d)->string: optional centered text label per Segment (z.B.
-  //   Sekundenwert) - immer sichtbar, unabhängig von der Segmentbreite/vom
-  //   Zoomlevel (kann bei sehr schmalen Segmenten über Nachbarsegmente
-  //   hinausragen/überlappen - das ist gewollt, besser als Werte zu
-  //   verstecken).
-  // segLabelColorFor(d)->string: optionale Textfarbe je Label (Default: weiß
-  //   über .seg-label), z.B. für Segmente mit hellem Schraffur-Untergrund.
-  // segOpacityFor(d)->number: optionale Deckkraft je Segment (z.B. für
-  //   ausgeschlossene ÖPNV-Ereignisse), gilt für Segment UND Label.
-  // width/height optional: wenn nicht angegeben, wird der Container gemessen
-  // (clientWidth/-Height erzwingt einen synchronen Reflow). Wer renderLane in
-  // einer Schleife für viele Spuren gleicher Größe aufruft (z. B. Umlauf-
-  // prüfung), sollte einmalig VOR der Schleife messen und hier durchreichen -
-  // sonst entsteht Layout-Thrashing (Schreiben einer Spur invalidiert das
-  // Layout, die nächste Breitenmessung erzwingt es neu, x-mal in Folge).
-  // Rückgabe: true wenn gerendert, false wenn der Container (noch) keine
-  // messbare Größe hat (z. B. verstecktes Tab) - der Aufrufer rendert dann
-  // beim nächsten Sichtbarwerden erneut.
+  // endMarks: [{t, label}]. Solid vertical marker lines at a fixed point in time. They do not
+  // depend on the segments.
+  //   An example is the end of a phase transition in the PÜ tool (see stammdatenLsa.js and
+  //   umlaufpruefung.js).
+  //   They look different from cycleMarks and splMarks (dashed) on purpose.
+  //   They are not a cycle start or a signal plan change.
+  // onSegClick(d, event): like onGreenClick, but for EVERY segment (not only by cat) and without
+  // the "pinned" edge marker.
+  //   An example is the cycle check: a click on a phase transition opens the PÜ detail tool (see
+  //   togglePueDetail() there).
+  // segCursor(d) -> 'pointer' | 'default' | undefined: tells which segments show a clickable
+  // cursor.
+  //   Without this option, only GRUEN with onGreenClick is clickable (the earlier behavior).
+  //   With onSegClick, usually only a REAL subset of the segments is clickable
+  //   (for example only named phase transitions, not each segment of the track).
+  //   So this is its own function and not a general rule.
+  // highlights: [{start, end, color, name}]. Formula highlight (see getFormulaHighlights() in
+  // formulaBuilder.js).
+  //   It is a free-color marker for "this formula was true here".
+  //   It is a semi-transparent band over the full track height PLUS dashed border lines at real
+  //   interval borders.
+  //   The border lines are not at the row edge when the interval extends past the row.
+  //   This is the same logic "show only the real edge" as for edgeLabelsFor.
+  //   It is purely decorative (pointer-events:none).
+  //   So clicks and the Ctrl measurement still hit the segment below, not the overlay.
+  // laneStyle: 'default' (the earlier area display) or 'minimal'
+  //   (outlined boxes on a thin red baseline, red-amber fully filled, amber with a diagonal stroke,
+  //   see MINIMAL_FILL above).
+  //   It is purely visual: the same segment data, the same labels and the same interactions.
+  // gridStepMs: an optional fixed time grid (for example 5000 = steps of 5 s).
+  //   It is drawn as thin, light vertical help lines ABOVE the segments,
+  //   so they stay visible as a reading aid also on fully filled segments such as GRUEN.
+  //   The anchor is wMin, so seconds since the row start hit round grid values.
+  //   Use it only where a row shows a short, fixed time section (cycle check).
+  //   Leave it undefined for the long time windows of other renderLane() callers (signal time
+  //   chart, Phasenauswertung).
+  //   Otherwise there are thousands of lines.
+  // edgeLabelsFor(d) -> {left,right} | null: like segLabelFor, but two labels at the segment edges
+  // and not one in the center
+  //   (for example the An and Ab seconds of a green time).
+  //   See layoutEdgeLabels() below for how it handles segments that are too narrow.
+  // segLabelFor(d) -> string: an optional centered text label for each segment (for example a
+  // seconds value).
+  //   It is always visible, independent of the segment width and of the zoom level.
+  //   For very narrow segments it can extend over neighboring segments or overlap them.
+  //   This is intended. It is better than to hide values.
+  // segLabelColorFor(d) -> string: an optional text color for each label (default: white through
+  // .seg-label),
+  //   for example for segments with a light hatch background.
+  // segOpacityFor(d) -> number: an optional opacity for each segment (for example for excluded ÖPNV
+  // events).
+  //   It applies to the segment AND the label.
+  // width and height are optional. If you do not give them, the code measures the container.
+  //   clientWidth and clientHeight force a synchronous reflow.
+  //   If you call renderLane in a loop for many tracks of the same size (for example the cycle
+  //   check),
+  //   measure once BEFORE the loop and pass the values here.
+  //   Otherwise you get layout thrashing: writing one track invalidates the layout,
+  //   the next width measurement forces it again, many times in a row.
+  // Returns true if it rendered, and false if the container has no measurable size (yet), for
+  // example in a hidden tab.
+  //   The caller then renders again when the container becomes visible.
   function renderLane(svgEl, opts) {
     ensurePatternDefs();
     const width = opts.width != null ? opts.width : svgEl.clientWidth;
@@ -162,9 +167,9 @@
 
     const minimal = laneStyle === 'minimal';
     const fillMap = minimal ? MINIMAL_FILL : CAT_FILL;
-    // Im Minimal-Stil sind die Kästen etwas niedriger als die Spurhöhe, damit
-    // die Umrandung frei steht und die dünne Grundlinie an den Rändern
-    // sichtbar durchläuft (wie im gedruckten Plan).
+    // In the Minimal style the boxes are a little lower than the track height.
+    // So the outline stands free, and the thin baseline runs through visibly at the edges (as in
+    // the printed plan).
     const segInset = minimal ? 3 : 1.5;
     const baseH = minimal ? 2 : baselineHeight;
 
@@ -189,11 +194,11 @@
       .style('cursor', d => segCursor ? (segCursor(d) || 'default') : ((d.cat === 'GRUEN' && onGreenClick) ? 'pointer' : 'default'));
     segSel.append('title').text(segTitle);
 
-    // Einzelner Diagonalstrich in BEIDEN Gelbphasen - Rot-Gelb am Anfang wie
-    // Gelb am Ende der Freigabe (siehe MINIMAL_FILL) - bewusst als echte
-    // Linie je Segment statt als Schraffur-Muster: im Signalzeitenplan trägt
-    // jedes Gelb-Kästchen GENAU EINEN Strich, unabhängig von seiner Breite
-    // (ein Muster würde je nach Breite mal mehrere, mal gar keinen zeigen).
+    // One single diagonal stroke in BOTH amber phases: red-amber at the start and amber at the end
+    // of the green (see MINIMAL_FILL).
+    // It is a real line for each segment on purpose and not a hatch pattern.
+    // In the signal timing plan each amber box has EXACTLY ONE stroke, independent of its width.
+    // A pattern would show many strokes or none, depending on the width.
     if (minimal) {
       const amberSegs = visSegs.filter(d => d.cat === 'GELB' || d.cat === 'ROTGELB');
       svg.append('g').attr('class', 'seg-amber-slash').selectAll('line')
@@ -203,9 +208,9 @@
         .style('pointer-events', 'none');
     }
 
-    // Zeitraster ÜBER den Segmenten (nicht dahinter), sonst wäre es unter
-    // vollflächig deckenden Füllungen (z.B. GRUEN) unsichtbar - dünn/hell
-    // genug, um nicht mit dem Segmentinhalt zu konkurrieren.
+    // The time grid is ABOVE the segments (not behind them).
+    // Otherwise it would be invisible under fully opaque fills (for example GRUEN).
+    // It is thin and light enough not to compete with the segment content.
     if (gridStepMs) {
       const gridTicks = [];
       const first = Math.ceil(wMin / gridStepMs) * gridStepMs;
@@ -216,24 +221,26 @@
         .style('pointer-events', 'none');
     }
 
-    // Zwei am Segmentrand verankerte Beschriftungen statt einer zentrierten
-    // (siehe edgeLabelsFor-Kopfkommentar) - z.B. An/Ab-Sekunden einer
-    // Grünzeit direkt auf dem Balken. Bei zu schmalem Segment (geschätzte
-    // Textbreite beider Labels + Mindestabstand größer als die Segment-
-    // breite) bleiben beide Labels an ihren äußeren Rändern (nie versteckt,
-    // dieselbe Philosophie wie segLabelFor), zusätzlich markiert ein kleiner
-    // Trenner in der Mitte, dass hier eng zusammengequetscht wurde, statt
-    // die beiden Zahlen kommentarlos ineinanderlaufen zu lassen.
+    // Two labels at the segment edge and not one centered label (see the header comment of
+    // edgeLabelsFor).
+    // An example is the An and Ab seconds of a green time directly on the bar.
+    // If the segment is too narrow, both labels stay at their outer edges. They are never hidden.
+    // This is the same idea as segLabelFor.
+    // "Too narrow" means: the estimated text width of both labels plus the minimum gap is larger
+    // than the segment width.
+    // In addition, a small divider in the middle shows that the labels are squeezed together.
+    // The code does not let the two numbers run into each other without a sign.
     if (edgeLabelsFor) {
-      const CHAR_W = 5.4; // ~0.6 * 9px Schriftgröße (var(--mono)), grobe Schätzung
+      const CHAR_W = 5.4; // About 0.6 * 9px font size (var(--mono)), a rough estimate
       const PAD = 3, GAP = 6, MARKER_W = 6;
-      // labels.left/labels.right sind EINZELN optional (null/undefined =
-      // kein Rand-Label an dieser Seite) - z.B. für ein Segment, das über
-      // den sichtbaren Zeitausschnitt hinausreicht: der Aufrufer kennt dann
-      // nur den WIRKLICH hier liegenden Rand (siehe umlaufpruefung.js'
-      // edgeLabelsFor-Kopfkommentar zu über Umlaufgrenzen hinausreichenden
-      // Grünzeiten) und darf den anderen einfach weglassen, statt einen
-      // Wert zu zeigen, der zu einem ganz anderen (Nachbar-)Segment gehört.
+      // labels.left and labels.right are each optional (null or undefined = no edge label on this
+      // side).
+      // An example is a segment that extends past the visible time section.
+      // The caller then knows only the edge that is REALLY here
+      // (see the header comment of edgeLabelsFor in umlaufpruefung.js about green times that extend
+      // past cycle borders).
+      // The caller can simply omit the other label.
+      // It must not show a value that belongs to a completely different (neighbor) segment.
       const edgeData = visSegs.map(d => {
         const labels = edgeLabelsFor(d);
         if (!labels) return null;
@@ -243,13 +250,13 @@
         const segW = x1 - x0;
         const leftW = hasLeft ? String(labels.left).length * CHAR_W : 0;
         const rightW = hasRight ? String(labels.right).length * CHAR_W : 0;
-        // "Eng, aber lesbar" (Marker in der Mitte) vs. "so knapp, dass sogar
-        // der Marker selbst nur zusätzlich überlappen würde" (dann lieber
-        // GAR keinen Marker zeigen, statt drei Zeichen ineinander zu
-        // quetschen - die beiden Zahlen bleiben trotzdem immer sichtbar,
-        // auch wenn sie sich dabei selbst berühren/überlappen). Nur relevant,
-        // wenn BEIDE Seiten ein Label haben - bei nur einem Label gibt es
-        // keine zwei Zahlen, die kollidieren könnten.
+        // "Tight, but readable" (marker in the middle) versus "so tight that even the marker itself
+        // would only overlap more".
+        // In the second case, it is better to show NO marker than to squeeze three characters into
+        // each other.
+        // The two numbers stay visible in all cases, also when they touch or overlap.
+        // This is relevant only if BOTH sides have a label.
+        // With only one label there are no two numbers that can collide.
         const overflow = hasLeft && hasRight && (leftW + rightW + GAP + 2 * PAD) > segW;
         const showMarker = overflow && (leftW + rightW + MARKER_W) <= segW;
         return { d, x0, x1, labels, hasLeft, hasRight, showMarker };
@@ -269,8 +276,9 @@
       eg.selectAll('text.seg-edge-overflow').data(edgeData.filter(e => e.showMarker)).join('text')
         .attr('class', 'seg-edge-overflow')
         .attr('x', e => (e.x0 + e.x1) / 2).attr('y', height / 2).attr('dy', '0.32em')
-        .text('·'); // Mittelpunkt (U+00B7) statt "⋯" (U+22EF) - Letzteres fehlt in gängigen
-        // Monospace-Schriften (leeres Glyph, siehe var(--mono)) und blieb unsichtbar.
+        .text('·'); // Middle dot (U+00B7) and not "⋯" (U+22EF).
+        // The second one is missing in common monospace fonts (empty glyph, see var(--mono)). It
+        // stayed invisible.
     }
 
     if (segLabelFor) {
@@ -284,11 +292,11 @@
         .text(d => segLabelFor(d) || '');
     }
 
-    // onSegClick (allgemein, JEDES Segment) und onGreenClick (nur GRUEN, mit
-    // "anpinnen"-Randmarkierung für die manuelle Messung) teilen sich denselben
-    // D3-'click'-Handler statt sich mit zwei .on('click', ...)-Aufrufen
-    // gegenseitig zu überschreiben (D3 kennt pro Ereignistyp+Selektion nur
-    // EINEN Handler ohne Namensraum).
+    // onSegClick (general, EVERY segment) and onGreenClick (only GRUEN, with the "pin" edge marker
+    // for the manual measurement)
+    // share the same D3 'click' handler.
+    // They do not overwrite each other with two .on('click', ...) calls.
+    // D3 keeps only ONE handler for each event type and selection, without a namespace.
     if (onGreenClick || onSegClick) {
       segSel.on('click', function (event, d) {
         if (onGreenClick && d.cat === 'GRUEN') {
@@ -312,10 +320,10 @@
       .style('stroke', 'var(--req-marker)').style('stroke-dasharray', '3,2').style('stroke-width', 1)
       .append('title').text(d => `Signalprogrammwechsel ${fmtTimeShort(d.t)}: SPL ${esc(d.from)} → ${esc(d.to)}`);
 
-    // endMarks: durchgezogene (nicht gestrichelte, zur Unterscheidung von
-    // cycle-/spl-marks) Markierungslinie(n) für einen fest definierten
-    // Zeitpunkt (z.B. das Ende eines Phasenübergangs im PÜ-Werkzeug) - siehe
-    // Kopfkommentar zu opts oben.
+    // endMarks: solid marker lines (not dashed, to tell them from cycle marks and SPL marks) for a
+    // fixed point in time
+    // (for example the end of a phase transition in the PÜ tool).
+    // See the header comment about opts above.
     svg.append('g').attr('class', 'end-marks').selectAll('line')
       .data(endMarks.filter(m => m.t >= wMin && m.t <= wMax)).join('line')
       .attr('x1', d => x(d.t)).attr('x2', d => x(d.t)).attr('y1', 0).attr('y2', height)
@@ -339,11 +347,12 @@
         ? `Anforderungsbeginn: ${fmtTimeShort(d.t)} – bis Datenende unaufgelöst (kein Grün erhalten)`
         : `Anforderungsbeginn (erste Detektorbelegung): ${fmtTimeShort(d.t)}`);
 
-    // Formel-Hervorhebung ZULETZT (über allem anderen), damit die Einfärbung
-    // auch auf vollflächigen Segmenten (z.B. GRUEN) sichtbar bleibt. Eine
-    // Randlinie nur zeichnen, wenn die Zeile den echten Intervallrand enthält
-    // (start/end >= wMin/<= wMax) - sonst entstünde am Zeilenrand eine falsche
-    // Grenze, obwohl das Intervall dort in Wirklichkeit weiterläuft.
+    // Draw the formula highlight LAST (above everything else),
+    // so that the coloring stays visible also on fully filled segments (for example GRUEN).
+    // Draw a border line only if the row contains the real interval edge (start/end >= wMin / <=
+    // wMax).
+    // Otherwise a false border appears at the row edge, although the interval really continues
+    // there.
     const hlVis = highlights.filter(h => h.end > wMin && h.start < wMax);
     if (hlVis.length) {
       const hlG = svg.append('g').attr('class', 'formula-highlights');
@@ -366,16 +375,17 @@
     return true;
   }
 
-  // Zeitachse als eigene kleine D3-Achse (x-Skala identisch zu den Spuren).
-  // stepMs (optional): feste Tick-Schrittweite (z.B. 5000 = alle 5s), Ticks
-  // als reine Sekundenzahl relativ zu wMin/wMax=0 statt als Uhrzeit - für
-  // kurze, lokale Zeitfenster (z.B. PÜ-Werkzeug), in denen fmtTimeShort()
-  // (Uhrzeitformat) keinen Sinn ergäbe. Ohne stepMs unverändert die
-  // bisherige, auf den sichtbaren Bereich skalierte 6-Teilung mit Uhrzeiten
-  // (Signalzeitendiagramm u.a.). markMs (optional, nur mit stepMs sinnvoll):
-  // dieselbe Markierungslinie wie renderLane()'s endMarks, hier auf der
-  // Achsen-Zeile selbst, damit die Ende-Markierung im PÜ-Werkzeug auch ohne
-  // eine sichtbare Zeile (z.B. bei "Keine Daten") erkennbar bleibt.
+  // The time axis is its own small D3 axis (the x scale is the same as for the tracks).
+  // stepMs (optional): a fixed tick step (for example 5000 = every 5 s).
+  //   The ticks are a plain number of seconds relative to wMin/wMax=0, not a time of day.
+  //   This is for short, local time windows (for example the PÜ tool),
+  //   where fmtTimeShort() (time-of-day format) makes no sense.
+  //   Without stepMs, the axis stays as before:
+  //   a 6-part division of the visible range with times of day (signal time chart and others).
+  // markMs (optional, useful only with stepMs): the same marker line as endMarks of renderLane(),
+  // here on the axis row itself.
+  //   So the end marker in the PÜ tool stays visible also with no visible row (for example with
+  //   "Keine Daten").
   function renderTimeAxis(svgEl, wMin, wMax, stepMs, markMs) {
     const width = svgEl.clientWidth, height = svgEl.clientHeight;
     if (!width || !height) return false;

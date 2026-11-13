@@ -1,7 +1,8 @@
-/* GZ.charts.oepnvRawPointsChart — Rohpunkte-Ansicht für den ÖPNV-Tab: zwei
-   schmale Spuren (Anmeldung/Abmeldung) mit je einem Tick pro erkannter
-   Detektorflanke auf gemeinsamer Zeitachse - unabhängig von der Anmeldung-
-   /Abmeldung-Paarungslogik, zum schnellen Sichtprüfen der Rohdaten. */
+/* GZ.charts.oepnvRawPointsChart is the raw points view for the public transport tab.
+   It has two narrow tracks: registration ("Anmeldung") and deregistration ("Abmeldung").
+   Each track has one tick for each detected detector edge. Both tracks share one time axis.
+   The view does not depend on the pairing logic of registration and deregistration.
+   It is for a quick visual check of the raw data. */
 (function (GZ) {
   'use strict';
   const { fmtTimeShort } = GZ.format;

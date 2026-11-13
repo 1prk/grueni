@@ -1,33 +1,36 @@
-/* GZ.views.umlaufpruefung — Tab "Umlaufprüfung": eine Zeile je Umlauf (TX=0-
-   Grenze) im Erscheinungsbild des Signalzeitendiagramms, aber jede Zeile auf
-   ihren eigenen Umlauf skaliert (nicht auf ein gemeinsames Zeitfenster).
-   Signalgruppen/Detektoren/APW-ÖPNV-Werte/synthetische Formel-Spalten
-   (Formel-Builder, siehe formulaBuilder.js) werden über EINE vereinheitlichte,
-   durchsuchbare Objekt-Liste ausgewählt (siehe allObjects()/#upObjList) - per
-   Ziehen am Griff links frei sortierbar (objectOrder/wireObjDrag()), diese
-   Reihenfolge bestimmt direkt die Spuren-Reihenfolge im Umlauf-Output unten
-   (Signalgruppen bleiben dabei optisch Hauptzeilen mit An/Ab/TF-Werten, alle
-   anderen schmalere Nebenspuren - beides kann aber frei miteinander
-   verschachtelt werden). Die Filterung, WELCHE Umläufe angezeigt werden, ist
-   bewusst eine separate Liste mit eigenen, typabhängigen Bedingungen
-   (Zustand-Gleichheit bzw. Zahlenvergleich, siehe filterRows/
-   computeMatchingCycles()) - unabhängig von der Objekt-Auswahl/Reihenfolge.
-   Jede Spur unterstützt eine manuelle Strg+Klick-Zeitmessung (siehe unten)
-   sowie ein Hover-Fadenkreuz über alle Spuren eines Umlaufs (TX in Sekunden).
+/* GZ.views.umlaufpruefung is the tab "Umlaufprüfung".
+   It shows one row for each cycle (TX=0 limit).
+   The look is the same as the signal time diagram.
+   But each row is scaled to its own cycle and not to a common time window.
+   The user selects signal groups, detectors, APW/ÖPNV values and synthetic formula columns
+   (formula builder, see formulaBuilder.js).
+   The selection uses ONE unified, searchable object list (see allObjects() and #upObjList).
+   The user can sort the list freely with the handle on the left (objectOrder and wireObjDrag()).
+   This order directly sets the track order in the cycle output below.
+   Signal groups stay main rows with An/Ab/TF values.
+   All other objects are narrower side tracks.
+   The user can nest both kinds freely.
+   The filter that decides WHICH cycles the tab shows is a separate list on purpose.
+   It has its own conditions that depend on the type (state equality or number comparison, see
+   filterRows and computeMatchingCycles()).
+   It does not depend on the object selection or order.
+   Each track supports a manual Ctrl+click time measurement (see below).
+   A hover crosshair goes over all tracks of a cycle (TX in seconds).
 
-   Performance bei großen Aufzeichnungen (viele Umläufe/Messzeilen):
-   - Alle Nachschlagevorgänge je Umlauf (Grünsegment, Signal-/Detektor-
-     segmente, APW-Rohwerte) laufen über einen fortlaufenden Sweep
-     (GZ.segments.makeIntervalSweep/-IndexSweep bzw. ein lokaler Zeilen-
-     zeiger) statt über einen Vollscan pro Umlauf - amortisiert O(n) über
-     die gesamte Aufzeichnung statt O(n²)/O(Umläufe × Messzeilen).
-   - Die Breite/Höhe der Spuren-SVGs wird einmal je Render-Durchlauf
-     gemessen (nicht je Zeile) und an renderLane durchgereicht, um
-     Layout-Thrashing (abwechselnd DOM-Schreiben/erzwungenes Neu-Layout)
-     bei vielen Zeilen zu vermeiden.
-   - Ein Umlauf-Fenster (wie im Signalzeitendiagramm) begrenzt die Anzahl
-     gleichzeitig gerenderter DOM-/SVG-Knoten, damit auch sehr lange
-     Aufzeichnungen (tausende Umläufe) flüssig bleiben. */
+   Performance with large recordings (many cycles or measurement rows):
+   - All lookups for each cycle run over a continuous sweep.
+     The lookups are the green segment, the signal and detector segments and the APW raw values.
+     The sweep is GZ.segments.makeIntervalSweep, makeIndexSweep or a local row pointer.
+     This avoids a full scan for each cycle.
+     The cost is amortized O(n) over the whole recording and not O(n²) or O(cycles × measurement
+     rows).
+   - The code measures the width and height of the track SVGs once for each render pass (not for
+     each row).
+     It passes them to renderLane.
+     This avoids layout thrashing (DOM writes and forced layout in turns) with many rows.
+   - A cycle window (as in the signal time diagram) limits the number of DOM and SVG nodes that
+     the code renders at the same time.
+     So the view stays smooth also for very long recordings (thousands of cycles). */
 (function (GZ) {
   'use strict';
   const { esc, fmtTs, fmtTimeShort } = GZ.format;
@@ -41,54 +44,62 @@
 
   let els = null;
   let windowCount = 20, windowStartIdx = 0, showAll = false;
-  // Irregular cycles (much longer than the median cycle time, for example a
-  // dark period without TX) are shown shortened. These are the ones the user
-  // expanded to full length.
+  // Irregular cycles are much longer than the median cycle time (for example a dark period without
+  // TX).
+  // The view shows them shortened.
+  // This set holds the cycles that the user expanded to full length.
   let expandedCycles = new Set();
-  // Set by jumpTo(); handled in the next render().
+  // jumpTo() sets it. The next render() handles it.
   let pendingJump = null;
-  // Cycles whose log ribbon shows all entries (otherwise the first few).
+  // Cycles whose log ribbon shows all entries (otherwise it shows the first few).
   let expandedLogs = new Set();
   const RIBBON_LINES = 4;
   const CROP_FACTOR = 1.5; // shortened cycles show the first 1.5 x median cycle time
-  let lastEffectiveCount = 0; // Anzahl Umläufe nach aktuellem Filter (für Fenster-Navigation)
+  let lastEffectiveCount = 0; // number of cycles after the current filter (for the window navigation)
 
-  // Vereinheitlichte Objekt-Liste (SG/DET/APW/ÖPNV/FORMEL in EINER Liste,
-  // siehe allObjects()): objectOrder ist die Anzeige-/Ausgabe-Reihenfolge
-  // ALLER bekannten Objekte (angehakt oder nicht) als Array von Schlüsseln
-  // ("<Kürzel>|<Index>", siehe objKey()) - per Ziehen am Griff links neu
-  // anordenbar (wireObjDrag()), ausgewählt = im DOM angehakt (keine
-  // separate JS-Selektionsmenge, dieselbe Konvention wie die bisherigen
-  // Checklisten). Bleibt über Render-Durchläufe hinweg bestehen, wird nur
-  // bei neuem Datenimport zurückgesetzt (populateControls()) bzw. bei neuen
-  // Formel-Spalten/Konfigurations-Import abgeglichen (reconcileObjectOrder()).
+  // Unified object list (SG, DET, APW, ÖPNV and FORMEL in ONE list, see allObjects()).
+  // objectOrder is the display and output order of ALL known objects (checked or not).
+  // It is an array of keys ("<short name>|<index>", see objKey()).
+  // The user can change the order with the handle on the left (wireObjDrag()).
+  // Selected means checked in the DOM.
+  // There is no separate JS selection set.
+  // This is the same convention as the earlier checklists.
+  // The array stays over render passes.
+  // The code resets it only at a new data import (populateControls()).
+  // The code reconciles it for new formula columns or a configuration import
+  // (reconcileObjectOrder()).
   let objectOrder = [];
-  // Mehrfachauswahl in der Objekt-Liste (Strg-Klick) - rein zum GEMEINSAMEN
-  // Ziehen mehrerer Zeilen auf einmal (siehe wireObjDrag()), unabhängig vom
-  // Anhak-Status (checked = im Umlauf-Output, dieses Set = "zusammen
-  // verschieben"). Bleibt über Render-Durchläufe hinweg bestehen (wie
-  // objectOrder), wird gegen bekannte Objekte abgeglichen (renderObjList()).
+  // Multiple selection in the object list (Ctrl+click).
+  // It is only to drag several rows TOGETHER at the same time (see wireObjDrag()).
+  // It does not depend on the checked state.
+  // Checked means "in the cycle output". This set means "move together".
+  // The set stays over render passes (as objectOrder does).
+  // The code compares it with the known objects (renderObjList()).
   let multiSelectKeys = new Set();
-  // Filterbedingungen (separat von der Objekt-Auswahl/Reihenfolge oben) -
-  // jede Zeile UND-verknüpft: {id, key, op, value} - op/value-Bedeutung
-  // hängt vom Objekttyp ab (Zustand-Gleichheit für SG/DET/FORMEL,
-  // Vergleichsoperator+Zahl für APW/ÖPNV), siehe defaultCondFor()/
-  // computeMatchingCycles().
+  // Filter conditions (separate from the object selection and order above).
+  // Each row is combined with AND: {id, key, op, value}.
+  // The meaning of op and value depends on the object type.
+  // For SG, DET and FORMEL, it is state equality.
+  // For APW and ÖPNV, it is a comparison operator and a number.
+  // See defaultCondFor() and computeMatchingCycles().
   let filterRows = [];
   let nextFilterId = 1;
 
-  // Manuelle Zeitmessung (Strg+Klick): Zustand pro (Umlauf, Spur) über
-  // Render-Durchläufe hinweg - siehe wireMeasure()/measureClickHandler().
-  // Schlüssel: "<Umlaufindex>|<Spurart>|<Bezeichner>", Wert: {a, b} in ms
-  // (Unix-Zeit), b ist null solange nur eine Marke gesetzt ist.
+  // Manual time measurement (Ctrl+click).
+  // The state is for each (cycle, track) and stays over render passes.
+  // See wireMeasure() and measureClickHandler().
+  // Key: "<cycle index>|<track kind>|<identifier>".
+  // Value: {a, b} in ms (Unix time).
+  // b is null as long as only one mark exists.
   let measurements = new Map();
 
-  // PÜ-Detailwerkzeug (siehe togglePueDetail()/renderPueDetailPanel() unten):
-  // höchstens EIN geöffnetes Detail-Panel gleichzeitig, an ein bestimmtes
-  // Umlauf+Phasenübergang-Vorkommen gebunden (cycleIdx = Index in
-  // cycleStarts, NICHT Position im aktuell sichtbaren Fenster - bleibt so
-  // beim Blättern/Filtern gültig, auch wenn die Zeile gerade nicht sichtbar
-  // ist). null = geschlossen.
+  // PÜ detail tool (see togglePueDetail() and renderPueDetailPanel() below).
+  // At most ONE detail panel is open at the same time.
+  // It is tied to a specific occurrence of a cycle and a phase transition.
+  // cycleIdx is the index in cycleStarts.
+  // It is NOT the position in the window that is visible now.
+  // So it stays valid when the user pages or filters, also if the row is not visible at this time.
+  // null means closed.
   let openPueDetail = null; // {cycleIdx, fromPhaseId, toPhaseId} | null
 
   function init(root) {
@@ -120,7 +131,7 @@
     els.logFilter.addEventListener('change', render);
     els.logFilterLevel.addEventListener('change', render);
 
-    // Buttons inside the cycle list: expand / shorten an irregular cycle, close a jump note.
+    // Buttons inside the cycle list: expand or shorten an irregular cycle, and close a jump note.
     els.rows.addEventListener('click', e => {
       const close = e.target.closest('button.up-jump-close');
       if (close) { close.closest('.up-jump-note').remove(); return; }
@@ -180,27 +191,28 @@
     });
   }
 
-  // Formel-Builder-Ergebnisse (siehe formulaBuilder.js): read-only Zugriff,
-  // NICHT die geteilte Analyse mutieren (gleiches Muster wie
-  // GZ.views.oepnvQa.getRowsForSg). Leer, solange keine Formeln berechnet
-  // wurden oder das Modul (noch) nicht geladen ist.
+  // Results of the formula builder (see formulaBuilder.js).
+  // This is read-only access.
+  // The code does NOT change the shared analysis (the same pattern as
+  // GZ.views.oepnvQa.getRowsForSg).
+  // The result is empty as long as no formulas are calculated or the module is not loaded (yet).
   function formulaCols() {
     return GZ.views.formulaBuilder ? GZ.views.formulaBuilder.getSyntheticColumns() : [];
   }
 
-  // Umlaufstatistiken-Kennzahlen (siehe umlaufstatistiken.js): read-only
-  // Zugriff wie formulaCols() oben, gleiches Muster. Anders als FORMEL sind
-  // Kennzahlen NICHT zwangsläufig WAHR/FALSCH (Zahl/Text möglich) und schon
-  // umlaufweise statt zeilenweise vorberechnet (kein rawSeries je Zeile,
-  // sondern valuesByCycleIdx - ein Wert je Umlaufindex).
+  // Key figures of Umlaufstatistiken (see umlaufstatistiken.js).
+  // This is read-only access, as for formulaCols() above. The pattern is the same.
+  // Unlike FORMEL, key figures are NOT always TRUE or FALSE (a number or text is possible).
+  // The code already precalculates them for each cycle and not for each row.
+  // They have no rawSeries for each row.
+  // They have valuesByCycleIdx, which is one value for each cycle index.
   function kennzahlCols() {
     return GZ.views.umlaufstatistiken ? GZ.views.umlaufstatistiken.getSyntheticColumns() : [];
   }
 
-  // Anzeige eines Kennzahl-Werts auf der Spur (Balken-Label/Tooltip) und in
-  // der Legende - dieselben Ergebnistypen wie GZ.exprEngine.compileValue()
-  // (Zahl/Wahr-Falsch/Text), NaN bedeutet "in diesem Umlauf kein Wert"
-  // (siehe cycleMetrics-Konvention in exprEngine.js).
+  // Display of a key figure value on the track (bar label and tooltip) and in the legend.
+  // The result types are the same as in GZ.exprEngine.compileValue() (number, true or false, text).
+  // NaN means "no value in this cycle" (see the cycleMetrics convention in exprEngine.js).
   function formatKennzahlValue(v) {
     if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '–';
     if (typeof v === 'boolean') return v ? 'Wahr' : 'Falsch';
@@ -208,29 +220,32 @@
     return String(v);
   }
 
-  // Phasenspur (Stammdaten LSA/Phasenauswertung, siehe GZ.phases): anders als
-  // FORMEL/KENNZAHL keine Liste (Phasen sind per Definition nie gleichzeitig
-  // aktiv, siehe phases.js Kopfkommentar) - EIN einziges Pseudo-Objekt für
-  // die kombinierte Zeitleiste aller Phasen, nur vorhanden, wenn mindestens
-  // eine Phase definiert ist. index bleibt konstant 0 (nur ein Eintrag).
+  // Phase track (Stammdaten LSA and Phasenauswertung, see GZ.phases).
+  // Unlike FORMEL and KENNZAHL, it is not a list.
+  // By definition, phases are never active at the same time (see the header comment of phases.js).
+  // It is ONE single pseudo object for the combined timeline of all phases.
+  // It exists only if at least one phase is defined.
+  // index stays 0 (only one entry).
   function phaseCols() {
     const phases = GZ.state.data.currentAnalysis ? GZ.state.data.phases : [];
     if (!phases || !phases.length) return [];
     return [{ kuerzel: 'PHASE', index: 0, name: 'Phasen', beschreibung: 'Kombinierte Phasenspur (Stammdaten LSA) mit inferierten Phasenübergängen' }];
   }
 
-  // Kombinierte Phasenspur (siehe GZ.phases, gleiche Grundlage wie
-  // js/views/phasenauswertung.js): eine Liste je Phase, wann sie
-  // vollständig angezeigt wurde (alle Mitglieds-Signalgruppen gleichzeitig
-  // Grün), zu EINER lückenlosen, annotierten Segmentreihe zusammengeführt
-  // (GZ.phases.buildAnnotatedSegments - Lücken tragen dort bereits
-  // pueLabel/pueFromPhaseId/pueToPhaseId, siehe dortiger Kopfkommentar).
-  // Einmal je render()-Durchlauf gebaut (wie sgData), nicht je Zeile - die
-  // zugrundeliegenden Vorkommen sind ohnehin unabhängig vom sichtbaren
-  // Umlauf-Fenster. Das PÜ-WERKZEUG SELBST (Bearbeiten der Korrekturtabelle)
-  // lebt seit der Verlagerung im Tab „Stammdaten LSA“ (siehe dort
-  // renderPueSection()) - hier nur noch Lese-/Anzeigezugriff über
-  // GZ.phases.resolvePueRows(), siehe renderPueDetailPanel() unten.
+  // Combined phase track (see GZ.phases).
+  // The basis is the same as in js/views/phasenauswertung.js.
+  // There is one list for each phase that shows when the phase was fully shown (all member signal
+  // groups green at the same time).
+  // The code merges the lists into ONE gapless, annotated segment series
+  // (GZ.phases.buildAnnotatedSegments).
+  // The gaps already have pueLabel, pueFromPhaseId and pueToPhaseId there (see the header comment
+  // there).
+  // The code builds it once for each render() pass (as it does for sgData) and not for each row.
+  // The underlying occurrences do not depend on the visible cycle window.
+  // The PÜ TOOL ITSELF (editing the correction table) is now in the tab "Stammdaten LSA" (see
+  // renderPueSection() there).
+  // Here there is only read and display access through GZ.phases.resolvePueRows() (see
+  // renderPueDetailPanel() below).
   function buildPhaseTrack(a) {
     const phases = GZ.state.data.phases;
     if (!phases || !phases.length) return null;
@@ -241,8 +256,9 @@
     return { segs, phaseById, colorByPhaseId };
   }
 
-  // Öffnet/schließt das PÜ-Detailpanel für EIN Vorkommen (erneuter Klick auf
-  // denselben Übergang schließt es wieder) - höchstens eines gleichzeitig.
+  // Opens or closes the PÜ detail panel for ONE occurrence.
+  // A second click on the same transition closes it.
+  // At most one panel is open at the same time.
   function togglePueDetail(cycleIdx, fromPhaseId, toPhaseId) {
     const same = openPueDetail && openPueDetail.cycleIdx === cycleIdx
       && openPueDetail.fromPhaseId === fromPhaseId && openPueDetail.toPhaseId === toPhaseId;
@@ -252,16 +268,18 @@
 
   function formatPueNum(v) { return v != null ? v : '–'; }
 
-  // PÜ-Detailpanel: wird NACH dem regulären zweistufigen Render (Vorlage +
-  // SVG) separat an genau EINE Umlauf-Gruppe angehängt, statt Teil des
-  // generischen Spuren-Systems zu sein - es kann ohnehin nie mehr als eines
-  // gleichzeitig offen sein, ein eigener, unabhängiger Pfad ist hier
-  // einfacher als das bestehende objektbezogene Zeilensystem um einen
-  // "aufklappbaren" Sonderfall zu erweitern.
+  // PÜ detail panel.
+  // The code adds it to exactly ONE cycle group AFTER the regular two-step render (template and
+  // SVG).
+  // It is not part of the generic track system.
+  // At most one panel can be open at the same time.
+  // A separate, independent path is simpler here.
+  // The other option is to add an "expandable" special case to the existing object-related row
+  // system.
   function renderPueDetailPanel(rowData, groupEls, a, TU_MED) {
     if (!openPueDetail) return;
     const rowPos = rowData.findIndex(r => r.i === openPueDetail.cycleIdx);
-    if (rowPos === -1) return; // Vorkommen aktuell nicht sichtbar (Fenster/Filter) - Zustand bleibt erhalten
+    if (rowPos === -1) return; // The occurrence is not visible at this time (window or filter). The state stays.
     const { cycleIdx, fromPhaseId, toPhaseId } = openPueDetail;
     const fromPhase = GZ.state.data.phases.find(p => p.id === fromPhaseId);
     const toPhase = GZ.state.data.phases.find(p => p.id === toPhaseId);
@@ -278,16 +296,16 @@
 
     const panel = document.createElement('div');
     panel.className = 'up-pue-panel';
-    // TF steht NICHT mehr hier fest, sondern wird erst unten aus dem
-    // tatsächlich gerenderten (ggf. überschriebenen) Segment abgelesen
-    // ("TF relativ zum Diagramm, nie aus den Rohdaten hergeleitet" - siehe
-    // stammdatenLsa.js renderTransitionBlockHtml()).
+    // TF is NO LONGER fixed here.
+    // The code reads it below from the segment that is really rendered (it can be overwritten).
+    // See "TF relative to the diagram, never derived from the raw data" in
+    // renderTransitionBlockHtml() in stammdatenLsa.js.
     const rowsHtml = resolved.rows.map(row => {
       const sgEntry = GZ.phases.findSgEntryByColIndex(row.sgIndex, a);
       const sgName = sgEntry ? sgEntry.col.name : '?';
-      // An/Ab-Zahlen stehen NICHT mehr separat als Text daneben, sondern
-      // direkt auf dem Grün-Balken selbst (edgeLabelsFor unten) - gleiches
-      // Muster wie die Hauptspuren in Umlaufprüfung.
+      // The An and Ab numbers are NO LONGER separate text next to the bar.
+      // They are directly on the green bar itself (edgeLabelsFor below).
+      // The pattern is the same as the main tracks in Umlaufprüfung.
       return `
         <div class="up-pue-row">
           <span class="up-pue-sg-label">${esc(sgName)}${row.always ? ' <span class="up-pue-always-tag">immer an</span>' : ''}</span>
@@ -297,8 +315,9 @@
     }).join('');
 
     const startEndText = `Start ${esc(formatPueNum(resolved.startSec))}s · Ende ${esc(formatPueNum(resolved.endSec))}s`;
-    // Gemeinsame Achsen-Zeile (5s-Ticks) - gleiches Grid-Spaltenraster wie
-    // .up-pue-row (siehe CSS), damit die Ticks exakt über den Balken stehen.
+    // Common axis row (5 s ticks).
+    // It has the same grid column layout as .up-pue-row (see the CSS).
+    // So the ticks are exactly over the bars.
     const axisRowHtml = resolved.rows.length ? `
         <div class="up-pue-axis-row">
           <span></span><span></span>
@@ -317,18 +336,20 @@
 
     groupEls[rowPos].appendChild(panel);
 
-    // Fensterbreite wie in Stammdaten LSA fest an den Übergang gekoppelt
-    // (-3s vor Start/+2s nach Ende), nicht an eine pauschale Polsterung um
-    // die Zeilenwerte - siehe dortiger Kopfkommentar zur selben Stelle
-    // (inkl. Math.max-Klemmung gegen ein invertiertes Fenster).
+    // As in Stammdaten LSA, the window width is tied to the transition.
+    // It is -3 s before the start and +2 s after the end.
+    // It is not a general padding around the row values.
+    // See the header comment at the same place there (it includes the Math.max clamp against an
+    // inverted window).
     const startSec = resolved.startSec != null ? resolved.startSec : 0;
     const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
-    // cm je Zeile einmal vorab bestimmen - siehe stammdatenLsa.js.
+    // Find cm for each row once in advance. See stammdatenLsa.js.
     const cmByRow = resolved.rows.map(row => row.always ? null : GZ.phases.cmForRow(row, referenceAbsMs, a));
-    // Fenster deckt zusätzlich den tatsächlichen Grün-Endpunkt jeder Zeile
-    // ab (An + reale Rotgelb-Dauer bzw. Ab + reale Gelb-Dauer), nicht nur
-    // das logische Ende - siehe stammdatenLsa.js.
-    // Beide Seiten unabhängig einrechnen - siehe stammdatenLsa.js.
+    // The window also covers the real green end point of each row (An + real red-amber duration, or
+    // Ab + real amber duration).
+    // It does not cover only the logical end.
+    // See stammdatenLsa.js.
+    // Include both sides independently. See stammdatenLsa.js.
     const rowMaxSec = resolved.rows.reduce((m, r, i) => {
       const cm = cmByRow[i];
       const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
@@ -358,18 +379,18 @@
       }
 
       const cm = cmByRow[i];
-      // Balken wird DIREKT aus den Zeilenwerten synthetisiert
-      // (buildRowDisplaySegs) - siehe stammdatenLsa.js für die ausführliche
-      // Begründung (nie ein anderer Zustand als Grün, wo die
-      // Phasendefinition zwingend Grün verlangt).
+      // The code synthesizes the bar DIRECTLY from the row values (buildRowDisplaySegs).
+      // See stammdatenLsa.js for the detailed reason.
+      // The bar never shows a state other than green where the phase definition requires green.
       const rowSegs = GZ.phases.buildRowDisplaySegs(row, cm, localWMin, localWMax);
       renderLane(svg, {
         wMin: localWMin, wMax: localWMax, segs: rowSegs,
         baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
         gridStepMs: 5000, laneStyle: currentLaneStyle(), endMarks,
-        // "An" markiert den Rot→Gelb-Wechsel (ROTGELB-Segment, sofern
-        // vorhanden - sonst Rückfall auf den GRUEN-Beginn), "Ab" bleibt das
-        // Ende des GRUEN-Segments (Beginn GELB) - siehe stammdatenLsa.js.
+        // "An" marks the red-to-amber change (ROTGELB segment, if it exists).
+        // Otherwise it falls back to the start of GRUEN.
+        // "Ab" stays the end of the GRUEN segment (start of GELB).
+        // See stammdatenLsa.js.
         edgeLabelsFor: d => {
           const nearAn = row.an != null && (d.cat === 'ROTGELB' || d.cat === 'GRUEN') && Math.abs(d.start - row.an * 1000) < 500;
           const nearAb = row.ab != null && d.cat === 'GRUEN' && Math.abs(d.end - row.ab * 1000) < 500;
@@ -377,7 +398,7 @@
           return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
         }
       });
-      // TF relativ zum Übergang - siehe stammdatenLsa.js/GZ.phases.computeRowTf().
+      // TF is relative to the transition. See stammdatenLsa.js and GZ.phases.computeRowTf().
       const tf = GZ.phases.computeRowTf(row, cm, startSec, endSec);
       tfEl.textContent = 'TF ' + formatPueNum(tf);
     });
@@ -389,23 +410,23 @@
     });
   }
 
-  // Eindeutiger, stabiler (innerhalb einer Sitzung) Schlüssel für ein
-  // Objekt - SG-Spalten haben von Haus aus kein "kuerzel"-Feld, daher wie
-  // schon beim bisherigen Filter synthetisch mit 'SG' getaggt; ihr "index"
-  // ist die Position in allStats (nicht der rohe Spaltenindex), für DET/
-  // APW/OEPNV/FORMEL ist es der echte (bei FORMEL: SYNTH_INDEX_BASE+id,
-  // siehe formulaBuilder.js berechnen() - stabil über Neuberechnungen
-  // hinweg, solange die Formel-Zeile nicht gelöscht/neu angelegt wird)
-  // Spaltenindex.
+  // Unique key for an object. The key is stable inside one session.
+  // SG columns have no "kuerzel" field.
+  // So, as in the earlier filter, the code tags them synthetically with 'SG'.
+  // Their "index" is the position in allStats (not the raw column index).
+  // For DET, APW, OEPNV and FORMEL, it is the real column index.
+  // For FORMEL, it is SYNTH_INDEX_BASE+id (see berechnen() in formulaBuilder.js).
+  // It stays stable over recalculations, as long as the user does not delete the formula row or
+  // create it again.
   function objKey(c) { return c.kuerzel + '|' + c.index; }
 
-  // Alle aktuell bekannten, in der vereinheitlichten Objekt-Liste wähl-
-  // baren Objekte (Signalgruppen, Detektoren, APW/ÖPNV-Werte, synthetische
-  // Formel-Spalten) - EINE gemeinsame Liste statt dreier getrennter
-  // (ersetzt die früheren separaten SG-/DET-/APW-Checklisten). Reihenfolge
-  // hier ist nur die "natürliche" Grundreihenfolge (Datenspalten, Formeln
-  // am Ende) - die tatsächliche Anzeige-/Ausgabe-Reihenfolge liefert
-  // objectOrder (siehe reconcileObjectOrder()).
+  // All objects that are known at this time and that the user can select in the unified object
+  // list.
+  // They are signal groups, detectors, APW and ÖPNV values, and synthetic formula columns.
+  // This is ONE common list and not three separate lists.
+  // It replaces the earlier separate SG, DET and APW checklists.
+  // The order here is only the "natural" base order (data columns first, formulas at the end).
+  // objectOrder gives the real display and output order (see reconcileObjectOrder()).
   function allObjects() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return [];
@@ -416,8 +437,8 @@
   }
 
   function isNumericKuerzel(kuerzel) { return kuerzel === 'APW' || kuerzel === 'OEPNV'; }
-  // DET und FORMEL teilen sich dieselbe WAHR/FALSCH-artige Belegungslogik
-  // (categorizeDetRaw) und damit dieselben Zustände (BELEGT/FREI).
+  // DET and FORMEL share the same occupancy logic (categorizeDetRaw), which is like TRUE or FALSE.
+  // So they have the same states (BELEGT and FREI).
   function stateOptionsFor(kuerzel) {
     const want = kuerzel === 'SG' ? 'KAT_SG' : 'KAT_DET';
     return Object.keys(GZ.exprEngine.KAT_TOKENS).filter(k => GZ.exprEngine.KAT_TOKENS[k] === want);
@@ -426,12 +447,14 @@
     return isNumericKuerzel(kuerzel) ? { op: '>', value: 0 } : { op: '==', value: stateOptionsFor(kuerzel)[0] };
   }
 
-  // Gleicht objectOrder gegen die aktuell bekannten Objekte ab: bestehende
-  // Reihenfolge bleibt erhalten (auch für nicht angehakte Objekte), neue
-  // Objekte (z.B. gerade berechnete Formeln, oder aus einer geladenen
-  // Konfiguration übrig gebliebene) werden ans Ende angehängt, nicht mehr
-  // vorhandene (gelöschte Formel, neuer Datenimport mit anderen Spalten)
-  // entfernt. Idempotent - darf beliebig oft aufgerufen werden.
+  // Reconciles objectOrder with the objects that are known at this time.
+  // The existing order stays, also for objects that are not checked.
+  // The code adds new objects at the end.
+  // Examples are formulas that the code just calculated and objects that remain from a loaded
+  // configuration.
+  // The code removes objects that no longer exist.
+  // Examples are a deleted formula and a new data import with different columns.
+  // The function is idempotent. The code can call it any number of times.
   function reconcileObjectOrder(objs) {
     const known = new Set(objs.map(objKey));
     const kept = objectOrder.filter(k => known.has(k));
@@ -439,24 +462,25 @@
     objs.forEach(o => {
       const k = objKey(o);
       if (keptSet.has(k)) return;
-      // Phasenspur soll beim erstmaligen Erscheinen (egal ob beim ersten
-      // Rendern nach Datenimport oder weil erst später in Stammdaten LSA
-      // eine Phase angelegt wurde) OBEN stehen, nicht hinten angehängt wie
-      // neu berechnete Formeln/Kennzahlen - danach frei per Ziehen
-      // umsortierbar wie jedes andere Objekt auch.
+      // The phase track must be at the TOP when it appears for the first time.
+      // It does not matter if this is at the first render after a data import or because the user
+      // created a phase later in Stammdaten LSA.
+      // The code does not add it at the end, as it does for newly calculated formulas and key
+      // figures.
+      // After that, the user can sort it freely by dragging, as any other object.
       if (o.kuerzel === 'PHASE') kept.unshift(k); else kept.push(k);
     });
     objectOrder = kept;
     return objectOrder;
   }
 
-  // Baut die vereinheitlichte Objekt-Liste (#upObjList) aus objectOrder neu
-  // auf. explicitSelected (Set von Schlüsseln) überschreibt bei Bedarf den
-  // Auswahl-Zustand komplett (nur von applyConfig() beim Laden einer
-  // Konfiguration genutzt) - normalerweise wird der bisherige DOM-Zustand
-  // (angehakte Checkboxen) erhalten, wie schon bei den früheren
-  // Checklisten. Ohne jede Vorgeschichte (erstes Rendern nach Datenimport)
-  // ist nur die erste Signalgruppe vorausgewählt.
+  // Builds the unified object list (#upObjList) again from objectOrder.
+  // explicitSelected (a set of keys) can overwrite the selection state completely.
+  // Only applyConfig() uses it, when it loads a configuration.
+  // Normally the code keeps the earlier DOM state (checked checkboxes), as in the earlier
+  // checklists.
+  // With no history at all (first render after a data import), only the first signal group is
+  // preselected.
   function renderObjList(explicitSelected) {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
@@ -490,9 +514,9 @@
     applyObjSearch();
   }
 
-  // Reine Sichtbarkeits-Filterung der Liste nach Name/Kürzel - beeinflusst
-  // NICHT Auswahl oder Reihenfolge (siehe Nutzeranforderung: Suche dient
-  // nur dem schnelleren Finden eines Objekts in der Liste).
+  // Pure visibility filter of the list by name or short name.
+  // It does NOT change the selection or the order.
+  // (See the user requirement: the search only helps to find an object in the list faster.)
   function applyObjSearch() {
     if (!els || !els.objSearch) return;
     const q = els.objSearch.value.trim().toLowerCase();
@@ -502,42 +526,45 @@
     });
   }
 
-  // Aktualisiert nur die .obj-row-selected-Klasse anhand von multiSelectKeys
-  // (leichtgewichtig - KEIN render(), Mehrfachauswahl betrifft nur, welche
-  // Zeilen später gemeinsam gezogen werden, nicht den Umlauf-Output).
+  // Updates only the .obj-row-selected class from multiSelectKeys.
+  // This is lightweight. The code does NOT call render().
+  // The multiple selection only decides which rows the user drags together later.
+  // It does not change the cycle output.
   function updateObjSelectionHighlight() {
     els.objList.querySelectorAll('.obj-row').forEach(row => {
       row.classList.toggle('obj-row-selected', multiSelectKeys.has(row.dataset.key));
     });
   }
 
-  // Ziehen-zum-Sortieren per natives HTML5 Drag&Drop, nur vom Griff (.obj-
-  // drag) auslösbar: die Zeile selbst ist standardmäßig NICHT draggable
-  // (sonst würde ein Klick auf die Checkbox/den Namen versehentlich einen
-  // Drag statt eines Checkbox-Toggles/einer Textselektion auslösen) - erst
-  // ein mousedown auf dem Griff schaltet draggable für diese eine Zeile
-  // scharf, dragend schaltet es wieder aus. Während des Ziehens wird die
-  // gezogene (Anker-)Zeile LIVE an die Zielposition verschoben (einfaches,
-  // robustes Muster ohne zusätzliche Bibliothek); beim Ablegen wird die
-  // jetzt im DOM sichtbare Reihenfolge in objectOrder übernommen und die
-  // Umlauf-Ausgabe neu gerendert.
+  // Drag to sort with native HTML5 drag and drop.
+  // Only the handle (.obj-drag) can start it.
+  // By default, the row itself is NOT draggable.
+  // Otherwise a click on the checkbox or the name can start a drag by mistake.
+  // It must toggle the checkbox or select text.
+  // Only a mousedown on the handle makes this one row draggable. dragend turns it off again.
+  // During the drag, the code moves the dragged (anchor) row LIVE to the target position.
+  // This is a simple, robust pattern with no additional library.
+  // At the drop, the code takes the order that is now visible in the DOM into objectOrder.
+  // Then it renders the cycle output again.
   //
-  // Mehrfachauswahl (Strg-Klick, siehe multiSelectKeys): ist die gezogene
-  // Zeile Teil einer Mehrfachauswahl mit >1 Elementen, werden die ANDEREN
-  // ausgewählten Zeilen während des Ziehens nur optisch abgedunkelt
-  // (.dragging-group) statt live mitverschoben (kein vollwertiges Multi-
-  // Element-Drag nötig) - beim Ablegen (dragend) werden dann ALLE
-  // ausgewählten Schlüssel (in ihrer bisherigen relativen Reihenfolge
-  // zueinander, siehe objectOrder.filter()) gemeinsam an die Position der
-  // Anker-Zeile eingefügt. Wird eine Zeile gezogen, die NICHT Teil der
-  // aktuellen Mehrfachauswahl ist, ersetzt sie die Auswahl (zieht allein) -
-  // wie in üblichen Datei-Manager-Listen.
+  // Multiple selection (Ctrl+click, see multiSelectKeys):
+  // If the dragged row is part of a multiple selection with more than one element, the code only
+  // darkens the OTHER selected rows during the drag (.dragging-group).
+  // It does not move them live.
+  // A full multi-element drag is not necessary.
+  // At the drop (dragend), the code inserts ALL selected keys together at the position of the
+  // anchor row.
+  // They keep their earlier relative order (see objectOrder.filter()).
+  // If the user drags a row that is NOT part of the current multiple selection, it replaces the
+  // selection (it drags alone).
+  // This is the same as in usual file manager lists.
   //
-  // Zeilen- und Listen-Level-Handler sind getrennt: Zeilen werden bei jedem
-  // renderObjList() neu erzeugt (mousedown/click müssen daher jedes Mal neu
-  // verdrahtet werden), der Listen-Container selbst bleibt bestehen (drag-/
-  // dragover/dragend nur EINMAL verdrahtet, per Event-Delegation über
-  // e.target.closest()).
+  // The row handlers and the list handlers are separate.
+  // The code creates the rows again at each renderObjList().
+  // So the code must wire mousedown and click again each time.
+  // The list container itself stays.
+  // The code wires drag, dragover and dragend only ONCE, with event delegation through
+  // e.target.closest().
   let dragAnchorKey = null;
   function wireObjDrag() {
     els.objList.querySelectorAll('.obj-drag').forEach(handle => {
@@ -546,8 +573,8 @@
     els.objList.querySelectorAll('.obj-row').forEach(row => {
       row.onclick = e => {
         if (!(e.ctrlKey || e.metaKey)) { if (multiSelectKeys.size) { multiSelectKeys.clear(); updateObjSelectionHighlight(); } return; }
-        if (e.target.closest('.obj-drag')) return; // Griff hat eigene Semantik (startet Drag)
-        e.preventDefault(); // verhindert, dass der Klick zusätzlich die Checkbox umschaltet
+        if (e.target.closest('.obj-drag')) return; // The handle has its own meaning (it starts the drag)
+        e.preventDefault(); // prevents the click from also toggling the checkbox
         const key = row.dataset.key;
         if (multiSelectKeys.has(key)) multiSelectKeys.delete(key); else multiSelectKeys.add(key);
         updateObjSelectionHighlight();
@@ -567,7 +594,7 @@
         });
       }
       e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', dragAnchorKey); } catch (err) { /* Firefox braucht Daten, Chrome ist tolerant */ }
+      try { e.dataTransfer.setData('text/plain', dragAnchorKey); } catch (err) { /* Firefox needs data. Chrome accepts a drag with no data. */ }
     });
     els.objList.addEventListener('dragover', e => {
       const draggingRow = els.objList.querySelector('.obj-row.dragging');
@@ -580,19 +607,21 @@
       overRow.parentNode.insertBefore(draggingRow, before ? overRow : overRow.nextSibling);
     });
     els.objList.addEventListener('dragend', () => {
-      // Nur die Anker-Zeile wurde während dragover live im DOM verschoben
-      // (siehe Kopfkommentar) - die übrigen Gruppenmitglieder stehen dort
-      // noch an ihrer ALTEN Position. Reihenfolge daher NICHT direkt aus dem
-      // DOM übernehmen (wie beim Einzel-Drag), sondern rechnerisch bilden:
-      // alle Gruppenschlüssel aus der DOM-Reihenfolge herauslösen und
-      // gemeinsam an der (auf die verbleibenden Zeilen umgerechneten)
-      // Ankerposition wieder einfügen - anschließend #upObjList komplett aus
-      // dem neuen objectOrder neu aufbauen (renderObjList()), damit DOM und
-      // objectOrder wieder übereinstimmen, BEVOR render() die Checkbox-
-      // Reihenfolge aus dem DOM ausliest.
+      // During dragover, the code moved only the anchor row live in the DOM (see the header
+      // comment).
+      // The other group members are still at their OLD position there.
+      // So the code does NOT take the order directly from the DOM (as it does for a single drag).
+      // It calculates the order.
+      // It removes all group keys from the DOM order.
+      // Then it inserts them together again at the anchor position.
+      // The anchor position is converted to the remaining rows.
+      // After that, the code builds #upObjList completely again from the new objectOrder
+      // (renderObjList()).
+      // So the DOM and objectOrder match again.
+      // This must happen BEFORE render() reads the checkbox order from the DOM.
       const domOrder = [...els.objList.querySelectorAll('.obj-row')].map(r => r.dataset.key);
       const groupKeys = multiSelectKeys.size > 1 && multiSelectKeys.has(dragAnchorKey)
-        ? objectOrder.filter(k => multiSelectKeys.has(k)) // bisherige relative Reihenfolge untereinander erhalten
+        ? objectOrder.filter(k => multiSelectKeys.has(k)) // keep the earlier relative order of the keys
         : [dragAnchorKey];
       const anchorDomIdx = domOrder.indexOf(dragAnchorKey);
       let insertAt = 0;
@@ -606,18 +635,21 @@
     });
   }
 
-  // Baut die Filterbedingungs-Zeilen (#upFilterRows) neu auf - separat von
-  // der Objekt-Liste oben (eigene Objekt-Auswahl je Zeile per <select>,
-  // unbeeinflusst von deren Sortierung/Suche). Je Zeile eine typabhängige
-  // Bedingung: Zustand-Gleichheit (SG/DET/FORMEL) oder Operator+Zahl (APW/
-  // ÖPNV) - siehe filterCondHtml()/computeMatchingCycles().
+  // Builds the filter condition rows (#upFilterRows) again.
+  // This is separate from the object list above.
+  // Each row has its own object selection with a <select>.
+  // The sort order and the search of the list do not affect it.
+  // Each row has a condition that depends on the type.
+  // It is state equality (SG, DET, FORMEL) or an operator and a number (APW, ÖPNV).
+  // See filterCondHtml() and computeMatchingCycles().
   function renderFilterRows() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
     const objs = allObjects();
     const objsByKey = new Map(objs.map(o => [objKey(o), o]));
-    // Verwaiste Zeilen (Objekt existiert nicht mehr, z.B. gelöschte Formel
-    // oder neuer Datenimport) still entfernen statt kaputt anzuzeigen.
+    // Remove orphan rows silently (the object does not exist anymore, for example after a deleted
+    // formula or a new data import).
+    // Do not show them in a broken state.
     filterRows = filterRows.filter(fr => objsByKey.has(fr.key));
 
     const groups = [
@@ -645,10 +677,9 @@
       rowEl.querySelector('.up-filter-obj').onchange = e => {
         const newC = objsByKey.get(e.target.value);
         fr.key = e.target.value;
-        // Bedingungstyp kann beim Objektwechsel wechseln (Zustand <-> Zahl)
-        // - Operator/Wert auf einen für den NEUEN Typ sinnvollen Default
-        // zurücksetzen, statt einen jetzt bedeutungslosen alten Wert
-        // stehenzulassen.
+        // The condition type can change when the object changes (state or number).
+        // Reset the operator and the value to a default that is useful for the NEW type.
+        // Do not keep an old value that has no meaning now.
         Object.assign(fr, defaultCondFor(newC.kuerzel));
         renderFilterRows();
         windowStartIdx = 0; render();
@@ -678,12 +709,12 @@
       <select class="up-filter-val-state">${opts.map(o => `<option value="${esc(o)}" ${o === fr.value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   }
 
-  // Nach "Berechnen" im Formel-Builder ODER nach einer Änderung an den
-  // Umlaufstatistiken-Kennzahlen aufgerufen: Objekt-Liste + Filterzeilen
-  // (die jetzt ggf. neue/geänderte synthetische Spalten enthalten/
-  // referenzieren) neu aufbauen und neu rendern - bewusst OHNE Fenster-
-  // position/Messungen zurückzusetzen (anders als populateControls() bei
-  // einem komplett neuen Datenimport).
+  // Called after "Berechnen" in the formula builder OR after a change to the key figures of
+  // Umlaufstatistiken.
+  // It builds the object list and the filter rows again and renders again.
+  // The synthetic columns that they contain or reference can be new or changed.
+  // It does NOT reset the window position or the measurements on purpose.
+  // (populateControls() does reset them at a completely new data import.)
   function refreshSyntheticColumns() {
     if (!els) return;
     renderObjList();
@@ -692,14 +723,15 @@
   }
 
   /* ---------------- Konfiguration speichern/laden (JSON) ----------------
-     Spaltenverweise (Kürzel+Name statt Rohindex, siehe GZ.configIO) statt
-     Rohdaten - eine gespeicherte Konfiguration bleibt so über neue Exports
-     derselben Anlage hinweg anwendbar, auch wenn sich Spaltenindizes/
-     Zeilenzahl ändern. Enthält NICHT die CSV selbst (bis zu 100k Zeilen). */
-  // objects: EIN Array (statt dreier getrennter Listen) in objectOrder-
-  // Reihenfolge - jeder Eintrag trägt "selected" (angehakt?) mit, deckt
-  // also sowohl Auswahl als auch Reihenfolge ab. filters: eine Zeile je
-  // Filterbedingung (Objekt + Operator + Wert).
+     The configuration has column references (short name and name, not the raw index, see
+     GZ.configIO) and not raw data.
+     So a saved configuration stays usable for new exports of the same intersection.
+     This is also true if the column indices or the number of rows change.
+     It does NOT include the CSV itself (up to 100k rows). */
+  // objects: ONE array (not three separate lists) in objectOrder order.
+  // Each entry has "selected" (checked or not).
+  // So it covers both the selection and the order.
+  // filters: one row for each filter condition (object, operator and value).
   function getConfig() {
     const a = GZ.state.data.currentAnalysis;
     if (!a) return null;
@@ -722,16 +754,17 @@
     };
   }
 
-  // Reihenfolge wichtig: wird von loadConfigFile() erst NACH
-  // GZ.views.formulaBuilder.applyConfig() aufgerufen, damit ggf. gespeicherte
-  // FORMEL-Auswahlen bereits existierende, neu berechnete Spalten vorfinden.
-  // Spaltenverweise werden wie zuvor über Kürzel+Name aufgelöst (nicht den
-  // rohen Index, der sich zwischen Aufzeichnungen ändern kann) - Objekte in
-  // der gespeicherten Konfiguration, die im aktuellen Datensatz nicht
-  // (mehr) existieren, landen in "skipped"; Objekte im aktuellen Datensatz,
-  // die die gespeicherte Konfiguration nicht kennt (z.B. seither neu
-  // berechnete Formel), werden von renderObjList()/reconcileObjectOrder()
-  // automatisch ans Ende angehängt.
+  // The order is important.
+  // loadConfigFile() calls this only AFTER GZ.views.formulaBuilder.applyConfig().
+  // So saved FORMEL selections find the columns that already exist and that the code calculated
+  // again.
+  // The code resolves column references as before with short name and name.
+  // It does not use the raw index, which can change between recordings.
+  // Objects in the saved configuration that do not (or no longer) exist in the current data set go
+  // to "skipped".
+  // The current data set can have objects that the saved configuration does not know (for example a
+  // formula that the code calculated since then).
+  // renderObjList() and reconcileObjectOrder() add them automatically at the end.
   function applyConfig(cfg) {
     if (!cfg) return { skipped: [] };
     const a = GZ.state.data.currentAnalysis;
@@ -802,9 +835,9 @@
         : 'Spaltenstruktur weicht von der gespeicherten Konfiguration ab – ggf. nicht alle Einstellungen übernommen.');
     }
 
-    // Formeln ZUERST anwenden + berechnen, damit applyConfig() unten
-    // gespeicherte FORMEL-Auswahlen in der bereits aktualisierten
-    // Detektor-/Filterliste wiederfinden kann.
+    // Apply and calculate the formulas FIRST.
+    // So applyConfig() below can find the saved FORMEL selections in the detector list and filter
+    // list that the code already updated.
     const formulaSkipped = GZ.views.formulaBuilder ? GZ.views.formulaBuilder.applyConfig(cfg.formulaBuilder).skipped : [];
     const upSkipped = applyConfig(cfg.umlaufpruefung).skipped;
 
@@ -824,10 +857,9 @@
     const a = GZ.state.data.currentAnalysis;
     if (!a) return;
     measurements = new Map();
-    // Kompletter Neustart der Objekt-Reihenfolge/Auswahl und Filter bei
-    // einem neuen Datenimport (reconcileObjectOrder() würde ohnehin nicht
-    // mehr existierende Schlüssel verwerfen, aber ein expliziter Reset ist
-    // klarer als sich darauf zu verlassen).
+    // Complete restart of the object order, the selection and the filters at a new data import.
+    // reconcileObjectOrder() would discard keys that do not exist anymore.
+    // But an explicit reset is clearer than a dependence on this behavior.
     objectOrder = [];
     filterRows = [];
 
@@ -859,9 +891,9 @@
   }
 
   /* ---------------- Manuelle Zeitmessung (Strg+Klick) ---------------- */
-  // 3-Klick-Zyklus je Spur: leer -> erste Marke -> zweite Marke (Differenz
-  // wird angezeigt) -> nächster Strg+Klick verwirft beide und beginnt an der
-  // geklickten Stelle neu. Zeiten werden auf die volle Sekunde gerundet.
+  // 3-click cycle for each track: empty -> first mark -> second mark (the view shows the
+  // difference) -> the next Ctrl+click discards both and starts again at the clicked position.
+  // The code rounds the times to the full second.
   function measureClickHandler(svgEl, wMin, wMax, key) {
     return function (event) {
       if (!(event.ctrlKey || event.metaKey)) return;
@@ -916,10 +948,10 @@
       .append('title').text(`${fmtTimeShort(t0)}–${fmtTimeShort(t1)} (${secs}s)`);
   }
 
-  // Nach jedem renderLane()-Aufruf: Klick-Handler (neu) verdrahten und den
-  // gespeicherten Messwert dieser Spur (falls vorhanden) neu einzeichnen -
-  // renderLane() leert das SVG bei jedem Aufruf, daher muss die Übermalung
-  // danach passieren, nicht davor.
+  // After each renderLane() call: wire the click handler again and draw the saved measurement of
+  // this track again (if it exists).
+  // renderLane() clears the SVG at each call.
+  // So the overlay must happen after it and not before it.
   function wireMeasure(svgEl, wMin, wMax, key) {
     if (svgEl.__measureClickHandler) svgEl.removeEventListener('click', svgEl.__measureClickHandler, true);
     const handler = measureClickHandler(svgEl, wMin, wMax, key);
@@ -929,12 +961,13 @@
   }
 
   /* ---------------- Sekunden-Fadenkreuz (Hover, alle Spuren eines Umlaufs) --------------
-     Läuft je Umlauf-Gruppe (nicht je Spur) - eine senkrechte Linie in ALLEN
-     Spuren-SVGs dieser Gruppe an derselben (auf volle Sekunde gerundeten,
-     NICHT interpolierten) x-Position, plus ein Label darunter mit der
-     seit Umlaufbeginn vergangenen Zeit (TX in Sekunden). Rein visuell/
-     ephemer (kein persistenter Zustand über Render-Durchläufe hinweg nötig,
-     anders als die Strg+Klick-Messung oben). */
+     This runs for each cycle group and not for each track.
+     It shows a vertical line in ALL track SVGs of this group.
+     The line is at the same x position.
+     The x position is rounded to the full second and NOT interpolated.
+     A label below shows the time since the cycle start (TX in seconds).
+     This is purely visual and temporary.
+     It needs no persistent state over render passes (unlike the Ctrl+click measurement above). */
   function wireCrosshair(groupEl, wMin, wMax) {
     if (groupEl.__crosshairMove) groupEl.removeEventListener('mousemove', groupEl.__crosshairMove);
     if (groupEl.__crosshairLeave) groupEl.removeEventListener('mouseleave', groupEl.__crosshairLeave);
@@ -987,10 +1020,10 @@
   }
 
   /* ---------------- ÖV-Fahrzeiten je Signalgruppe ---------------- */
-  // Übernimmt die im Tab "ÖPNV" für die gegebene Signalgruppe konfigurierten
-  // Zeilen und berechnet die Anmeldung/Abmeldung-Ereignisse einmal über die
-  // gesamte Aufzeichnung (wie die Detektor-Segmente), für den Sweep je
-  // Umlauf-Fenster. Siehe computeOepnvEvents (GZ.oepnvLogic) für die Logik.
+  // Takes the rows that the user configured in the tab "ÖPNV" for the given signal group.
+  // It calculates the Anmeldung and Abmeldung events once over the whole recording (as for the
+  // detector segments), for the sweep of each cycle window.
+  // See computeOepnvEvents (GZ.oepnvLogic) for the logic.
   function buildFzRowsForSg(sgIdx, times, seriesByCol, splValues) {
     const oepnvRows = GZ.views.oepnvQa ? GZ.views.oepnvQa.getRowsForSg(sgIdx) : [];
     return oepnvRows.map(orow => {
@@ -1018,21 +1051,22 @@
     });
   }
 
-  // Filtern: liefert die Indizes aller Umläufe, die JEDE Filterbedingung
-  // erfüllen (UND-Verknüpfung, siehe filterRows/renderFilterRows()). Zwei
-  // Prüfarten je nach Objekttyp:
-  // - Zustand (SG/DET/FORMEL): Segmente nach der gewählten Kategorie
-  //   filtern, dann existenziell prüfen ("war das Objekt irgendwann im
-  //   Umlauf in diesem Zustand?", per makeIntervalSweep) - für SG reicht
-  //   ein Filter der bereits vorhandenen allStats[i].segs (ALLE Zustände,
-  //   nicht nur die vorberechneten Grünphasen), für DET/FORMEL wie zuvor
-  //   ein frischer Segment-Aufbau über categorizeDetRaw.
-  // - Zahl (APW/ÖPNV): linearer Rohwert-Scan über die Zeilen des Umlaufs
-  //   gegen den gewählten Vergleichsoperator - Lücken/nicht-numerische
-  //   Rohwerte erfüllen nie eine Bedingung (Number('') ist NaN, jeder
-  //   Vergleich damit liefert false).
-  // Ein einmaliger Vollscan über die Aufzeichnung (wie die Detektor-/APW-
-  // Sweeps oben) statt pro Umlauf neu zu scannen.
+  // Filter: returns the indices of all cycles that meet EACH filter condition (AND, see filterRows
+  // and renderFilterRows()).
+  // There are two check types, by object type:
+  // - State (SG, DET, FORMEL):
+  //   Filter the segments by the selected category.
+  //   Then check for existence: "was the object in this state at any time in the cycle?" (with
+  //   makeIntervalSweep).
+  //   For SG, it is enough to filter the existing allStats[i].segs (ALL states, not only the
+  //   precalculated green phases).
+  //   For DET and FORMEL, the code builds the segments again, as before, with categorizeDetRaw.
+  // - Number (APW, ÖPNV):
+  //   A linear raw value scan over the rows of the cycle against the selected comparison operator.
+  //   Gaps and non-numeric raw values never meet a condition.
+  //   (Number('') is NaN, and each comparison with NaN gives false.)
+  // The code does one full scan over the recording (as for the detector and APW sweeps above).
+  // It does not scan again for each cycle.
   function computeMatchingCycles(conditions, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) {
     const n = cycleStarts.length;
     const numCmp = { '=': (a, b) => a === b, '!=': (a, b) => a !== b, '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b };
@@ -1075,12 +1109,13 @@
     return matches;
   }
 
-  // Spur-Stil der SIGNALGRUPPEN-Hauptzeilen (rein optisch, siehe renderLane
-  // laneStyle in timelineLane.js) - "minimal" ahmt die Darstellung eines
-  // gedruckten Signalzeitenplans nach und ist die Voreinstellung. Gilt
-  // bewusst NUR für die Signalgruppen-Zeilen: die Detektor-/APW-/Formel-
-  // sowie die ÖV-Fahrzeit-Zusatzspuren behalten ihre gewohnte Darstellung,
-  // da sie kein Bestandteil eines Signalzeitenplans sind.
+  // Track style of the SIGNAL GROUP main rows (purely visual, see laneStyle of renderLane in
+  // timelineLane.js).
+  // "minimal" looks like a printed signal time plan. It is the default.
+  // It applies ONLY to the signal group rows on purpose.
+  // The detector, APW and formula tracks and the ÖV travel time side tracks keep their usual
+  // display.
+  // They are not part of a signal time plan.
   function currentLaneStyle() {
     return (els && els.laneStyle && els.laneStyle.value === 'default') ? 'default' : 'minimal';
   }
@@ -1095,7 +1130,7 @@
     }
     return sum / 1000;
   }
-  // Index of the last cycle that starts at or before t (-1 if none).
+  // Index of the last cycle that starts at or before t (-1 if there is none).
   function cycleIndexAt(cycleStarts, t) {
     let lo = 0, hi = cycleStarts.length - 1, found = -1;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (cycleStarts[mid] <= t) { found = mid; lo = mid + 1; } else hi = mid - 1; }
@@ -1107,9 +1142,10 @@
     if (!a) return;
     const { allStats, cycleStarts, tMax, times, splValues, seriesByCol: seriesByColReal, otherColumns: otherColumnsReal } = a;
 
-    // Synthetische Formel-Spalten NICHT in die geteilte Analyse mutieren -
-    // stattdessen hier lokal einmischen (seriesByCol bleibt bei leerer
-    // formulaCols()-Liste dieselbe Map-Referenz, keine unnötige Kopie).
+    // Do NOT change the shared analysis with synthetic formula columns.
+    // Mix them in locally here.
+    // If the formulaCols() list is empty, seriesByCol stays the same Map reference. There is no
+    // unnecessary copy.
     const fCols = formulaCols();
     const otherColumns = fCols.length ? otherColumnsReal.concat(fCols) : otherColumnsReal;
     const seriesByCol = fCols.length ? new Map(seriesByColReal) : seriesByColReal;
@@ -1122,13 +1158,13 @@
       return;
     }
 
-    // Eine gemeinsame, geordnete Liste angehakter Objekte (SG UND DET/APW/
-    // OEPNV/FORMEL gemischt) statt dreier getrennter Checklisten - die
-    // Reihenfolge ergibt sich direkt aus der DOM-Reihenfolge der
-    // angehakten Checkboxen in #upObjList (per Ziehen am Griff sortierbar,
-    // siehe wireObjDrag()), sgRefs/traceRefs sind reine .filter()-
-    // Teilmengen davon und behalten daher dieselbe relative Reihenfolge -
-    // das treibt weiter unten die verschachtelte Zeilen-Reihenfolge.
+    // ONE common, ordered list of checked objects (SG AND DET, APW, OEPNV and FORMEL mixed).
+    // It replaces three separate checklists.
+    // The order comes directly from the DOM order of the checked checkboxes in #upObjList.
+    // The user can sort them by dragging the handle (see wireObjDrag()).
+    // sgRefs and traceRefs are pure .filter() subsets of it.
+    // So they keep the same relative order.
+    // This drives the nested row order further below.
     const objsNow = allObjects();
     const objsByKey = new Map(objsNow.map(o => [objKey(o), o]));
     const objRefs = [...els.objList.querySelectorAll('input:checked')]
@@ -1137,12 +1173,12 @@
     const sgRefs = objRefs.filter(r => r.kuerzel === 'SG');
     const traceRefs = objRefs.filter(r => r.kuerzel !== 'SG');
 
-    // Formel-Hervorhebungen (siehe formulaBuilder.js getFormulaHighlights()):
-    // je Zielspalte die WAHR-Intervalle aller Formeln, die dorthin zeigen -
-    // Zuordnung ÜBER KÜRZEL+NAME, nicht Rohindex (formulaBuilder.js verwendet
-    // für Signalgruppen den rohen CSV-Spaltenindex, hier zählt objKey()
-    // Signalgruppen dagegen über ihre Position im allStats-Array - beide
-    // Zählweisen sind nur zufällig identisch, siehe dortiger Kommentar).
+    // Formula highlights (see getFormulaHighlights() in formulaBuilder.js).
+    // For each target column, they are the TRUE intervals of all formulas that point to it.
+    // The assignment is BY SHORT NAME AND NAME and not by raw index.
+    // formulaBuilder.js uses the raw CSV column index for signal groups.
+    // Here objKey() counts signal groups by their position in the allStats array.
+    // The two counts are the same only by chance (see the comment there).
     const highlightsByObjKey = new Map();
     const formulaHighlights = (GZ.views.formulaBuilder && GZ.views.formulaBuilder.getFormulaHighlights)
       ? GZ.views.formulaBuilder.getFormulaHighlights() : [];
@@ -1170,9 +1206,9 @@
     const anomalyCtx = GZ.state.anomalyCtx();
     const fzEnabled = !!(els.fzToggle && els.fzToggle.checked);
     const laneStyle = currentLaneStyle();
-    // Container-Klasse für die stilabhängige Beschriftungsfarbe (siehe
-    // .lane-minimal in charts.css) - die Segmente selbst bekommen ihre
-    // Klassen direkt von renderLane().
+    // Container class for the label color that depends on the style (see .lane-minimal in
+    // charts.css).
+    // The segments themselves get their classes directly from renderLane().
     if (els.rows) els.rows.classList.toggle('lane-minimal', laneStyle === 'minimal');
 
     const sgData = sgRefs.map(r => {
@@ -1196,10 +1232,10 @@
 
     const phaseTrack = buildPhaseTrack(a);
 
-    // Nicht-SG-Spuren (DET/FORMEL/APW/OEPNV/PHASE) - bis auf die
-    // Segmentierungs-Funktion (kind bestimmt außerdem die Darstellung beim
-    // SVG-Rendern weiter unten) identisch behandelt, damit sie sich frei mit
-    // den Signalgruppen verschachteln lassen.
+    // Non-SG tracks (DET, FORMEL, APW, OEPNV, PHASE).
+    // The code handles them in the same way, except for the segmentation function.
+    // (kind also decides the display when the SVG renders further below.)
+    // So the user can nest them freely with the signal groups.
     const traceMeta = new Map();
     traceRefs.forEach(r => {
       if (r.kuerzel === 'KENNZAHL') {
@@ -1210,10 +1246,10 @@
         return;
       }
       if (r.kuerzel === 'PHASE') {
-        // phaseTrack kann bei leerer Phasenliste null sein, obwohl der
-        // Objekt-Eintrag noch angehakt in objectOrder steht (z.B. gerade
-        // die letzte Phase in Stammdaten LSA gelöscht) - dann einfach eine
-        // leere Spur statt eines Absturzes.
+        // phaseTrack can be null if the phase list is empty.
+        // The object entry can still be checked in objectOrder.
+        // An example: the user just deleted the last phase in Stammdaten LSA.
+        // In this case, use an empty track and do not crash.
         traceMeta.set(objKey(r), { col: r, kind: 'phase', sweep: makeIntervalSweep(phaseTrack ? phaseTrack.segs : []), phaseById: phaseTrack ? phaseTrack.phaseById : new Map(), colorByPhaseId: phaseTrack ? phaseTrack.colorByPhaseId : new Map() });
         return;
       }
@@ -1227,8 +1263,9 @@
     const n = cycleStarts.length;
     let matchingCycles = filterRows.length ? computeMatchingCycles(filterRows, objsByKey, allStats, cycleStarts, tMax, times, seriesByCol) : null;
 
-    // Log filter: only cycles that contain at least one log entry (respecting the log bar filters
-    // and the level chosen here). The controls are disabled while no log is loaded.
+    // Log filter: only cycles that contain at least one log entry (the log bar filters and the
+    // level that the user chose here apply).
+    // The controls are disabled while no log is loaded.
     const hasLog = GZ.logs.hasEntries();
     els.logFilter.disabled = !hasLog;
     els.logFilterLevel.disabled = !hasLog;
@@ -1244,9 +1281,10 @@
       const base = matchingCycles || Array.from({ length: n }, (_, i) => i);
       matchingCycles = base.filter(i => withLog.has(i));
     }
-    // A jump (from the log list, for example) shows the cycle that contains the time.
-    // It does not change the selection, the filter or "Alle anzeigen". With a window,
-    // the window moves to the cycle. A cycle hidden by the filter is shown anyway ("pinned").
+    // A jump (for example from the log list) shows the cycle that contains the time.
+    // It does not change the selection, the filter or "Alle anzeigen".
+    // With a window, the window moves to the cycle.
+    // A cycle that the filter hides is shown anyway ("pinned").
     let jump = null;
     if (pendingJump) {
       const ci = Math.max(0, cycleIndexAt(cycleStarts, pendingJump.t));
@@ -1264,7 +1302,8 @@
     const { from, to } = windowRange(effectiveCount);
     const cycleIdxList = matchingCycles ? matchingCycles.slice(from, to) : Array.from({ length: to - from }, (_, k) => from + k);
     if (jump && !cycleIdxList.includes(jump.cycle)) {
-      // hidden by the filter, or outside the window while "Alle anzeigen" is off: show it as well
+      // The filter hides it, or it is outside the window while "Alle anzeigen" is off: show it as
+      // well
       cycleIdxList.push(jump.cycle);
       cycleIdxList.sort((p, q) => p - q);
       jump.pinned = true;
@@ -1279,18 +1318,18 @@
     els.btnWinNext.disabled = showAll || to >= effectiveCount;
     els.winSize.disabled = showAll;
 
-    // Grünsegmente, die über eine Umlaufgrenze hinausreichen (Grün beginnt
-    // in Umlauf A, endet erst in Umlauf B): stats.greens/greenSweep
-    // (makeIndexSweep, startpunkt-basiert) ordnet ein solches Segment
-    // AUSSCHLIESSLICH Umlauf A zu (dort beginnt es) - Umlauf B bekäme ohne
-    // dieses Tracking gar keinen Bezug zu diesem Segment, obwohl sein Balken
-    // dort (dank überlappungs-basiertem segSweep) durchaus weiter grün
-    // gezeichnet wird. carrySegs merkt sich je Signalgruppe das zuletzt in
-    // EINEM Umlauf begonnene, aber über dessen Ende hinausreichende Segment
-    // (+ dessen bereits berechneten Ab-Wert) und reicht es an den jeweils
-    // NÄCHSTEN, zeitlich unmittelbar anschließenden Umlauf weiter (geprüft
-    // über echte Zeit-Überlappung, nicht Listenindex - überspringt eine
-    // gefilterte/nicht angezeigte Zwischenzeile daher korrekt ersatzlos).
+    // Green segments that go past a cycle limit (the green starts in cycle A and ends only in cycle
+    // B).
+    // stats.greens and greenSweep (makeIndexSweep, based on the start point) assign such a segment
+    // ONLY to cycle A (where it starts).
+    // Without this tracking, cycle B has no relation to this segment.
+    // But its bar still draws green there, because segSweep is based on overlap.
+    // carrySegs keeps, for each signal group, the segment that started in ONE cycle but goes past
+    // its end.
+    // It also keeps the Ab value that the code already calculated for it.
+    // carrySegs passes it on to the NEXT cycle that follows directly in time.
+    // The code checks this with a real time overlap and not with the list index.
+    // So it correctly skips a row that the filter or the window hides, with no replacement.
     const carrySegs = sgData.map(() => null);
 
     const rowData = [];
@@ -1312,23 +1351,23 @@
         if (prevCarry && prevCarry.seg.end > start && prevCarry.seg.end <= end) {
           carryGreenSeg = prevCarry.seg;
           carryAb = prevCarry.ab;
-          carrySegs[sgIdx] = null; // in diesem Umlauf endend - für weitere Zeilen erledigt
+          carrySegs[sgIdx] = null; // ends in this cycle - done for the other rows
         } else if (prevCarry && prevCarry.seg.end <= start) {
-          carrySegs[sgIdx] = null; // bereits vorher geendet (z.B. Zeile übersprungen) - nicht mehr gültig
+          carrySegs[sgIdx] = null; // ended earlier (for example the code skipped the row) - not valid anymore
         }
 
         if (gIdx !== -1) {
-          // Dieselbe Objekt-Referenz wie in visSegs (stats.greens ist per
-          // .filter() aus denselben Segment-Objekten wie segs abgeleitet,
-          // siehe computeCycleStats()) - erlaubt es edgeLabelsFor() unten,
-          // GENAU dieses Grün-Segment zu identifizieren (statt An/Ab jedem
-          // GRUEN-Segment der Zeile zuzuschreiben, falls es je Umlauf
-          // mehrere gäbe).
+          // This is the same object reference as in visSegs.
+          // stats.greens comes from the same segment objects as segs through .filter() (see
+          // computeCycleStats()).
+          // So edgeLabelsFor() below can identify EXACTLY this green segment.
+          // Otherwise it would assign An and Ab to each GRUEN segment of the row, if there are
+          // several in each cycle.
           greenSeg = sd.stats.greens[gIdx];
           const seg = TU ? computeSegmentAnAbTf(greenSeg, cycleStarts, TU) : null;
           if (seg) { an = seg.an; ab = seg.ab; tf = seg.tf; }
           if (sd.flags[gIdx]) anomClass = 'up-anom';
-          if (greenSeg.end > end) carrySegs[sgIdx] = { seg: greenSeg, ab }; // reicht über diese Zeile hinaus
+          if (greenSeg.end > end) carrySegs[sgIdx] = { seg: greenSeg, ab }; // goes past this row
         }
         return {
           sgEntry: sd.sgEntry, an, ab, tf, anomClass, greenSeg, carryGreenSeg, carryAb,
@@ -1365,17 +1404,18 @@
       return;
     }
 
-    // Zeilen-HTML je Umlauf-Gruppe: läuft EINMAL über objRefs (= die vom
-    // Nutzer festgelegte Anzeige-Reihenfolge) und zieht dabei abwechselnd
-    // aus sgRows/traceRows - deren relative Reihenfolge stimmt exakt mit
-    // sgRefs/traceRefs überein, da beide per .filter() aus derselben
-    // objRefs-Liste abgeleitet wurden. So lassen sich Signalgruppen und
-    // Detektor-/APW-/Formel-Spuren frei miteinander verschachteln statt in
-    // drei starren Blöcken zu erscheinen. Die ÖV-Fahrzeiten-Unterzeilen
-    // (tFZ/ZwL) bleiben dagegen fest an ihre Signalgruppe gebunden (kein
-    // eigener Eintrag in der Objekt-Liste) - daher weiterhin mit "↳"
-    // markiert; DET/APW/FORMEL sind jetzt gleichrangige Spuren, nicht mehr
-    // "unter" einer bestimmten Signalgruppe, daher ohne Pfeil-Präfix.
+    // Row HTML for each cycle group.
+    // It runs ONCE over objRefs (the display order that the user set).
+    // It takes from sgRows and traceRows in turns.
+    // Their relative order is exactly the same as sgRefs and traceRefs.
+    // The reason is that the code derives both with .filter() from the same objRefs list.
+    // So the user can nest signal groups and detector, APW and formula tracks freely.
+    // They do not appear in three fixed blocks.
+    // The ÖV travel time sub rows (tFZ and ZwL) stay tied to their signal group.
+    // They have no own entry in the object list.
+    // So they still have the "↳" mark.
+    // DET, APW and FORMEL are now equal tracks and no longer "under" a specific signal group.
+    // So they have no arrow prefix.
     const laneRowsHtml = r => {
       let sgCursor = 0, traceCursor = 0;
       return objRefs.map(ref => {
@@ -1411,9 +1451,9 @@
       }).join('');
     };
 
-    // Log markers: a thin row at the top of every cycle that has log entries.
-    // The row has no "up-sub-row" class, because the code below finds the lane
-    // rows of a group by that class (in DOM order).
+    // Log markers: a thin row at the top of each cycle that has log entries.
+    // The row has no "up-sub-row" class.
+    // The code below finds the lane rows of a group with that class (in DOM order).
     const logRowHtml = r => {
       const all = GZ.logs.hasEntries() ? GZ.logs.visible(r.start, r.fullEnd) : [];
       r.logs = all;
@@ -1427,9 +1467,12 @@
           <div class="lane-track up-sub-track"><svg></svg></div>
         </div>`;
     };
-    // Ribbon with the log entries of the cycle: time, level, text, seconds after the cycle start.
-    // The colour follows the most severe entry. Only the first lines are shown, unless the
-    // cycle is expanded or an entry that was opened from the log list is among the hidden ones.
+    // Ribbon with the log entries of the cycle: time, level, text and seconds after the cycle
+    // start.
+    // The color follows the most severe entry.
+    // The ribbon shows only the first lines.
+    // The exception is when the cycle is expanded or when an entry that the user opened from the
+    // log list is among the hidden ones.
     const jumpedEntry = jump ? jump.entry : null;
     const logRibbonHtml = r => {
       const rank = GZ.logs.RANK;
@@ -1445,7 +1488,8 @@
       return `<div class="up-log-ribbon sev-${esc(worst)}"><div class="up-log-label">${r.logs.length === 1 ? 'Log-Eintrag' : `Log-Einträge (${r.logs.length})`}</div><div class="up-log-lines">${lines}${more}</div></div>`;
     };
 
-    // Caption of an irregular cycle: explains the length and offers full length / shortened view.
+    // Caption of an irregular cycle: it explains the length and offers a full length view or a
+    // shortened view.
     const irregularHtml = r => {
       if (!r.irregular) return '';
       const dark = r.darkShare > 0.05 ? ` · davon ${Math.round(r.darkShare * 100)} % Dunkel` : '';
@@ -1461,8 +1505,8 @@
         ${laneRowsHtml(r)}
       </div>`).join('');
 
-    // Größe je EINMAL messen (erzwingt Reflow) statt je Zeile - sonst
-    // Layout-Thrashing bei vielen Umläufen (Schreiben+Messen im Wechsel).
+    // Measure the size ONCE (this forces a reflow) and not for each row.
+    // Otherwise there is layout thrashing with many cycles (write and measure in turns).
     const groupEls = els.rows.querySelectorAll('.up-group');
     const firstMainTrack = els.rows.querySelector('.up-main-row .lane-track');
     const mainSize = firstMainTrack ? { width: firstMainTrack.clientWidth, height: firstMainTrack.clientHeight } : { width: 0, height: 0 };
@@ -1475,9 +1519,9 @@
       const subRows = group.querySelectorAll('.up-sub-row');
       let sgCursor = 0, subCursor = 0, traceCursor = 0;
 
-      // Dieselbe objRefs-Reihenfolge wie beim Template oben - Zeilen-DOM
-      // (per Klassenselektor in Dokumentreihenfolge) und Datenzugriff
-      // (sgRows/traceRows-Cursor) laufen synchron mit.
+      // Use the same objRefs order as in the template above.
+      // The row DOM (by class selector in document order) and the data access (sgRows and traceRows
+      // cursors) run in step.
       objRefs.forEach(ref => {
         if (ref.kuerzel === 'SG') {
           const sr = r.sgRows[sgCursor];
@@ -1487,14 +1531,13 @@
             wMin: r.start, wMax: r.end, segs: sr.visSegs, baselineCat: 'ROT', baselineColor: 'var(--sig-red)',
             width: mainSize.width, height: mainSize.height, gridStepMs: 5000, laneStyle,
             highlights: highlightsByObjKey.get(objKey(ref)) || [],
-            // Ein Grünsegment, das über die Umlaufgrenze hinausreicht, wird
-            // in ZWEI Zeilen sichtbar (Balken-Füllung via segSweep in
-            // beiden, siehe carrySegs oben) - hier aber je Zeile nur die
-            // Beschriftung(en) zeigen, die TATSÄCHLICH zu deren sichtbarem
-            // Rand gehören: An (links) nur, wenn das Segment auch hier
-            // beginnt UND endet (sonst reicht es weiter, kein rechter Rand
-            // hier); Ab (rechts) separat für die Fortsetzungszeile, in der
-            // es tatsächlich endet (carryGreenSeg/carryAb).
+            // A green segment that goes past the cycle limit is visible in TWO rows.
+            // The bar fill is in both rows (through segSweep, see carrySegs above).
+            // But in each row, show only the label(s) that REALLY belong to its visible edge.
+            // An (left) only if the segment also starts AND ends here.
+            // Otherwise the segment goes on and there is no right edge here.
+            // Ab (right) is separate, for the continuation row in which the segment really ends
+            // (carryGreenSeg and carryAb).
             edgeLabelsFor: d => {
               if (sr.greenSeg && d === sr.greenSeg) return { left: sr.an, right: sr.greenSeg.end <= r.end ? sr.ab : null };
               if (sr.carryGreenSeg && d === sr.carryGreenSeg) return { right: sr.carryAb };
@@ -1550,23 +1593,25 @@
           });
           wireMeasure(subSvg, r.start, r.end, `${r.i}|apw|${c.index}`);
         } else if (tr.kind === 'kennzahl') {
-          // Kennzahl (siehe umlaufstatistiken.js): kein Rohreihen-Sweep,
-          // sondern EIN vorberechneter Wert für den ganzen Umlauf. Objekt-
-          // bezogene Formeln (Versatz/Ueberschneidung/TF/RG/GE - siehe
-          // tr.span, aus exprEngine.js' compileValue().spanRun) haben eine
-          // EINDEUTIGE Zeitspanne INNERHALB des Umlaufs (z.B. Versatz(K1,K2):
-          // von Abwurf K1 bis Anwurf K2) - der Balken wird dann exakt über
-          // diese Spanne gezeichnet statt über die ganze Zeile, damit sich
-          // die Kennzahl optisch an den Signalgruppen-Spuren darüber
-          // verorten lässt. tr.span.endSec < startSec bedeutet: die Spanne
-          // reicht über das Umlaufende hinaus (siehe Versatz-Kopfkommentar in
-          // exprEngine.js) - dann (wie bei jeder Formel ohne erkennbare
-          // Spanne, z.B. TU oder eine von Hand geschriebene MOD(...)-Formel)
-          // Rückfall auf die volle Zeilenbreite statt einer geometrisch
-          // falschen (rückwärtslaufenden) Markierung. Bei WAHR/FALSCH-
-          // Kennzahlen (kind: 'bool') wie eine Formel-Spur behandelt: nur
-          // FALSCH bleibt Grundlinie, WAHR wird eingefärbt, ohne zusätzliches
-          // Text-Label (deckt sich sonst mit der Balkenfarbe).
+          // Key figure (see umlaufstatistiken.js).
+          // The code does not use a raw series sweep.
+          // It uses ONE precalculated value for the whole cycle.
+          // Object-related formulas (Versatz, Ueberschneidung, TF, RG, GE) have a UNIQUE time span
+          // INSIDE the cycle.
+          // (See tr.span, from compileValue().spanRun in exprEngine.js.)
+          // An example is Versatz(K1,K2): from the stop of K1 to the start of K2.
+          // Then the code draws the bar exactly over this span and not over the whole row.
+          // So the user can place the key figure visually against the signal group tracks above it.
+          // tr.span.endSec < startSec means that the span goes past the end of the cycle (see the
+          // Versatz header comment in exprEngine.js).
+          // In this case, use the full row width.
+          // A geometrically wrong (backward) mark is not acceptable.
+          // The same applies to each formula with no visible span (for example TU or a MOD(...)
+          // formula that the user wrote by hand).
+          // The code handles TRUE or FALSE key figures (kind: 'bool') like a formula track.
+          // Only FALSE stays the baseline.
+          // TRUE gets a color.
+          // There is no extra text label, because it has the same color as the bar.
           const v = tr.value;
           const isBool = tr.valueKind === 'bool';
           const on = isBool ? v === true : !(v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v)));
@@ -1585,12 +1630,12 @@
           });
           wireMeasure(subSvg, r.start, r.end, `${r.i}|kennzahl|${c.index}`);
         } else if (tr.kind === 'phase') {
-          // Phasenspur (siehe buildPhaseTrack() oben): reale Phasen-Segmente
-          // (cat = Phasen-ID) in ihrer Kategorienfarbe wie in
-          // Phasenauswertung, inferierte Übergänge (cat 'NONE', siehe dort
-          // seg.pueLabel) mit demselben Schraffur-Muster wie Datenlücken
-          // (url(#gz-pat-gap)) - "das ist kein definierter Zustand, sondern
-          // abgeleitet" statt einer weiteren Vollfarbe.
+          // Phase track (see buildPhaseTrack() above).
+          // Real phase segments (cat = phase ID) have their category color, as in Phasenauswertung.
+          // Inferred transitions (cat 'NONE', see seg.pueLabel there) have the same hatch pattern
+          // as data gaps (url(#gz-pat-gap)).
+          // It means "this is not a defined state, it is derived".
+          // It is not another solid color.
           const m = traceMeta.get(objKey(c));
           renderLane(subSvg, {
             wMin: r.start, wMax: r.end, segs: tr.visSegs,
@@ -1609,9 +1654,9 @@
               const label = ph ? (ph.name && ph.name !== ph.kuerzel ? `${ph.kuerzel} – ${ph.name}` : ph.kuerzel) : d.cat;
               return `${label}: ${fmtTimeShort(d.start)}–${fmtTimeShort(d.end)} (${durS}s)`;
             },
-            // Nur benannte Übergänge (echte Nachbarn auf beiden Seiten, siehe
-            // buildPhaseTrack()) sind klickbar - ein Rand-Segment ohne
-            // pueFromPhaseId/-ToPhaseId hätte nichts zum Öffnen.
+            // Only named transitions are clickable (real neighbors on both sides, see
+            // buildPhaseTrack()).
+            // An edge segment with no pueFromPhaseId or pueToPhaseId has nothing to open.
             segCursor: d => (d.cat === 'NONE' && d.pueFromPhaseId && d.pueToPhaseId) ? 'pointer' : 'default',
             onSegClick: d => { if (d.cat === 'NONE' && d.pueFromPhaseId && d.pueToPhaseId) togglePueDetail(r.i, d.pueFromPhaseId, d.pueToPhaseId); }
           });
@@ -1647,9 +1692,10 @@
   }
 
   /* ---------------- Jump from a log entry (or any time) ---------------- */
-  // Highlights the target cycle. When a log entry was opened, its line in the ribbon is marked
-  // and gets the extra hints (why the cycle is shown, entry behind the drawn part). A jump to a
-  // time without log entry gets a note under the caption instead.
+  // Highlights the target cycle.
+  // If the user opened a log entry, the code marks its line in the ribbon.
+  // The line then gets the extra hints (why the cycle is shown, entry behind the drawn part).
+  // A jump to a time with no log entry gets a note under the caption.
   function showJumpTarget(jump, rowData) {
     const group = els.rows.querySelector(`.up-group[data-cycle="${jump.cycle}"]`);
     if (!group) return;
@@ -1672,7 +1718,8 @@
     group.scrollIntoView({ block: 'center' });
   }
 
-  // Opens the cycle that contains time t. Selects all signal groups only when none is selected.
+  // Opens the cycle that contains the time t.
+  // It selects all signal groups only when none is selected.
   function jumpTo(t, entry) {
     const a = GZ.state.data.currentAnalysis;
     if (!a || !a.cycleStarts || a.cycleStarts.length < 2) return;

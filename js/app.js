@@ -1,7 +1,7 @@
-/* GZ.app — Bootstrap: Dateneingabe (Beispiel/Datei), Tabs, Analyse-
-   Orchestrierung über die drei Fachansichten. Läuft vollständig lokal im
-   Browser - es werden keinerlei Daten versendet (kein fetch/XHR im Code,
-   keine externen Ressourcen im Dokument). */
+/* GZ.app is the bootstrap. It handles data input (sample or file) and the tabs.
+   It also controls the analysis across the three technical views.
+   It runs fully local in the browser. The application sends no data.
+   The code has no fetch or XHR. The document has no external resources. */
 (function (GZ) {
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
@@ -24,13 +24,14 @@
     activeTab = name;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
-    // The topology editor (tab "sd") works without a recording. All other tabs need one.
+    // The topology editor (tab "sd") works without a recording. All other tabs need a recording.
     const hasData = !!GZ.state.data.currentAnalysis;
     els.contentArea.classList.toggle('show', hasData || name === 'sd');
     if ((hasData || name === 'sd') && TAB_REFRESH[name]) TAB_REFRESH[name]();
   }
 
-  // A time outside the recording has no cycle. A jump to it is refused with a message.
+  // A time outside the recording has no cycle. The application refuses a jump to it and shows a
+  // message.
   function inRecording(t) {
     const a = GZ.state.data.currentAnalysis;
     return !!a && t >= a.tMin && t <= a.tMax;
@@ -57,12 +58,12 @@
     GZ.views.umlaufpruefung.jumpTo(t, null);
   }
 
-  // Redraws the active tab (after a log change, for example).
+  // Redraws the active tab, for example after a log change.
   function refreshActiveTab() {
     if (GZ.state.data.currentAnalysis && TAB_REFRESH[activeTab]) TAB_REFRESH[activeTab]();
   }
 
-  // Loads a log file. A file without any usable entry does not replace a log that is already loaded.
+  // Loads a log file. A file without a usable entry does not replace a log that is already loaded.
   function loadLogText(text, fileName) {
     const parsed = GZ.logs.parse(text);
     if (!parsed.entries.length) return parsed;
@@ -90,7 +91,8 @@
     analyzeParsed(parsed);
   }
 
-  // `parsed` comes from GZ.csvImport (same shape as GZ.parser.parseOcitText, plus `table`).
+  // `parsed` comes from GZ.csvImport. It has the same shape as the result of
+  // GZ.parser.parseOcitText, plus `table`.
   function analyzeParsed(parsed) {
     const { columns, otherColumns, times, seriesByCol, totalRows, skippedRows, knotenName, knotenNr, cycleStarts } = parsed;
     const tMin = times[0], tMax = times[times.length - 1] + GZ.parser.estimateStep(times);
@@ -122,14 +124,15 @@
     els.dataPanelSummary.innerHTML = `<span class="ok">OK</span> · ${columns.length} Signalgruppe(n) · ${fmtTimeShort(tMin)}–${fmtTimeShort(tMax)}`;
     els.dataPanel.classList.remove('open');
 
-    // #contentArea muss sichtbar sein (display != none), BEVOR die Diagramme
-    // gerendert werden - die D3-Charts messen die Pixelgröße ihrer Container,
-    // die bei display:none immer 0 wäre.
+    // #contentArea must be visible (display is not none) BEFORE the charts render.
+    // The D3 charts measure the pixel size of their containers.
+    // With display:none this size is always 0.
     els.contentArea.classList.add('show');
 
-    // Phasen zuerst zurücksetzen, damit die Grünzeitanalyse (Phasen-Overlay-
-    // Sichtbarkeit) beim eigenen onAnalyzeComplete() bereits den korrekten,
-    // leeren Phasenstand der neuen Analyse sieht statt der alten Phasenliste.
+    // Reset the phases first.
+    // Then the green time analysis (visibility of the phase overlay) sees the correct, empty phase
+    // state
+    // of the new analysis in its own onAnalyzeComplete(). It does not see the old phase list.
     GZ.views.stammdatenLsa.onAnalyzeComplete();
     GZ.views.stammdatenTopologie.onAnalyzeComplete();
     GZ.views.gruenzeitanalyse.onAnalyzeComplete();
@@ -182,8 +185,8 @@
       reader.readAsText(file, 'utf-8');
       e.target.value = '';
     });
-    // A file goes straight to the importer. It does not pass through the text box,
-    // so a big recording is not held a second time in the page.
+    // A file goes straight to the importer. It does not pass through the text box.
+    // So the page does not keep a big recording twice.
     document.getElementById('fileInput').addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;

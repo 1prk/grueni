@@ -1,12 +1,14 @@
-/* GZ.charts.phaseDurationChart — "Phasendauer pro Umlauf": gruppiertes
-   Balkendiagramm, ein Balken je Phase und Umlauf, um die Dauer der Phasen
-   umlaufweise zu vergleichen (statt eines Zeitverlauf-Streudiagramms - bei
-   Phasen ist der Bezug zum Umlauf aussagekräftiger als der reine Zeitpunkt). */
+/* GZ.charts.phaseDurationChart shows the "Phasendauer pro Umlauf" (phase duration for each
+   cycle).
+   It is a grouped bar chart with one bar for each phase and cycle.
+   It compares the phase durations cycle by cycle.
+   A time-series scatter chart is not used. For phases, the link to the cycle is more useful than
+   the point in time. */
 (function (GZ) {
   'use strict';
 
   // opts: {umlaufNumbers:number[], phases:[{id,label,color}],
-  //   durationsByPhase: Map(phaseId -> number[] parallel zu umlaufNumbers),
+  //   durationsByPhase: Map(phaseId -> number[] parallel to umlaufNumbers),
   //   onBarClick(phaseId, umlaufIdxInWindow)}
   function render(chartBoxEl, axisEl, opts) {
     const svgEl = chartBoxEl.querySelector('svg');
@@ -68,8 +70,7 @@
     const svg = d3.select(svgEl).attr('viewBox', `0 0 ${width} ${height}`).attr('preserveAspectRatio', 'none');
     svg.selectAll('*').remove();
     const g = svg.append('g').attr('class', 'd3-axis-x');
-    // Bei vielen Umläufen im Fenster nicht jede Beschriftung zeichnen, sonst
-    // überlappen sich die Labels.
+    // If the window has many cycles, do not draw each label. The labels overlap.
     const maxLabels = Math.max(4, Math.floor(width / 42));
     const step = Math.max(1, Math.ceil(umlaufNumbers.length / maxLabels));
     umlaufNumbers.forEach((num, i) => {

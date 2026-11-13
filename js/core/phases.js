@@ -1,19 +1,20 @@
-/* GZ.phases — Phaseneinteilung einer Lichtsignalanlage (RiLSA): eine Phase
-   fasst die Signalgruppen zusammen, die GLEICHZEITIG Grün (Freigabe) zeigen
-   und damit keinen Verkehrskonflikt miteinander haben. Ein Signalprogramm
-   durchläuft je Umlauf eine feste Phasenfolge, getrennt durch Zwischenzeiten
-   - zwei Phasen sind daher per Definition nie gleichzeitig aktiv. Diese
-   Datei leitet aus den bereits vorhandenen Grünsegmenten (stats.greens je
-   Mitglieds-Signalgruppe) ab, WANN eine definierte Phase in der Aufzeichnung
-   tatsächlich vollständig angezeigt wurde - reine Auswertungslogik,
-   unabhängig vom DOM. */
+/* GZ.phases is the phase division of a traffic signal (RiLSA).
+   A phase groups the signal groups that show green (release) AT THE SAME TIME.
+   These signal groups have no traffic conflict with each other.
+   In each cycle, a signal program runs through a fixed sequence of phases.
+   Intergreen times separate the phases.
+   So, by definition, two phases are never active at the same time.
+   This file uses the existing green segments (stats.greens of each member signal group).
+   It finds WHEN a defined phase was fully shown in the recording.
+   This is pure evaluation logic and does not depend on the DOM. */
 (function (GZ) {
   'use strict';
 
-  // Kategoriale Farbpalette je Phase (Reihenfolge = Definitionsreihenfolge in
-  // GZ.state.data.phases) - bewusst von den Signalfarben (--sig-*) abgesetzt,
-  // damit auf den ersten Blick klar ist: das sind Phasen-Identitäten, keine
-  // Ampel-Zustände.
+  // Categorical color palette for each phase.
+  // The order is the definition order in GZ.state.data.phases.
+  // The palette is different from the signal colors (--sig-*) on purpose.
+  // So it is clear at first sight that these colors identify phases and are not traffic signal
+  // states.
   const PHASE_COLORS = [
     '#3b7dc4', '#e08a2f', '#6c4fb0', '#2fa393',
     '#c2517a', '#8a9a2f', '#b8464a', '#4f7942',
@@ -21,10 +22,11 @@
   ];
   function colorForIndex(i) { return PHASE_COLORS[i % PHASE_COLORS.length]; }
 
-  // Schnittmenge mehrerer sortierter, disjunkter Intervall-Listen (z. B.
-  // stats.greens je Mitglieds-Signalgruppe): liefert die Zeitbereiche, in
-  // denen ALLE Listen gleichzeitig ein Intervall abdecken - Sweep-Line über
-  // Start(+1)/Ende(-1)-Ereignisse, O(m log m) bei m = Summe aller Intervalle.
+  // Intersection of several sorted, disjoint interval lists (for example stats.greens of each
+  // member signal group).
+  // It returns the time ranges in which ALL lists cover an interval at the same time.
+  // The method is a sweep line over start (+1) and end (-1) events.
+  // The cost is O(m log m), where m is the total number of intervals.
   function intersectIntervals(intervalLists) {
     const n = intervalLists.length;
     if (n === 0) return [];
@@ -36,8 +38,8 @@
       }
     }
     if (events.length === 0) return [];
-    // Bei gleichem Zeitpunkt zuerst Enden (-1), dann Beginne (+1) verarbeiten,
-    // damit exakt aneinandergrenzende Intervalle nicht als Überlappung zählen.
+    // If events have the same time, first process the ends (-1) and then the starts (+1).
+    // Then intervals that touch exactly do not count as an overlap.
     events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     let count = 0, activeStart = null;
     const result = [];
@@ -53,12 +55,12 @@
     return result;
   }
 
-  // Vereinigung mehrerer sortierter, disjunkter Intervall-Listen: liefert die
-  // Zeitbereiche, in denen MINDESTENS EINE Liste ein Intervall abdeckt -
-  // gleiches Sweep-Line-Prinzip wie intersectIntervals oben, nur mit
-  // "count > 0" statt "count === n" als Aktiv-Bedingung. Wird gebraucht, um
-  // GENAU jene Zeiten zu ermitteln, in denen irgendeine NICHT zur Phase
-  // gehörende Signalgruppe grün ist (siehe computePhaseOccurrences unten).
+  // Union of several sorted, disjoint interval lists.
+  // It returns the time ranges in which AT LEAST ONE list covers an interval.
+  // The sweep-line principle is the same as in intersectIntervals above.
+  // The active condition is "count > 0" and not "count === n".
+  // The code needs this union to find EXACTLY the times in which a signal group that is not in the
+  // phase is green (see computePhaseOccurrences below).
   function unionIntervals(intervalLists) {
     const events = [];
     for (const list of intervalLists) {
@@ -80,15 +82,14 @@
     return result;
   }
 
-  // Entfernt aus einer sortierten, disjunkten Intervall-Liste (base) alle
-  // Zeitbereiche, die in einer zweiten sortierten, disjunkten Liste (remove)
-  // liegen - Zwei-Zeiger-Verfahren, O(base + remove). Wird von
-  // computePhaseOccurrences genutzt, um aus dem "Mitglieder alle grün"-
-  // Zeitraum jene Abschnitte herauszuschneiden, in denen gleichzeitig eine
-  // NICHT zur Phase gehörende Signalgruppe ebenfalls grün ist (eine Phase
-  // gilt nur dann als angezeigt, wenn wirklich NUR ihre Mitglieder grün
-  // sind - sonst wäre eine Phase, deren Mitgliederliste eine Teilmenge einer
-  // anderen Phase ist, immer auch während dieser anderen Phase "aktiv").
+  // Removes all time ranges of a second sorted, disjoint list (remove) from a sorted, disjoint
+  // interval list (base).
+  // The method uses two pointers. The cost is O(base + remove).
+  // computePhaseOccurrences uses it to cut out sections from the "all members green" time.
+  // In these sections, a signal group that is not in the phase is also green.
+  // A phase counts as shown only if ONLY its members are green.
+  // Without this rule, a phase whose member list is a subset of another phase is always "active"
+  // during that other phase.
   function subtractIntervals(base, remove) {
     if (!remove.length) return base;
     const result = [];
@@ -120,26 +121,26 @@
     return { id: 'ph' + (phaseIdSeq++), name, kuerzel, members: new Set() };
   }
 
-  // Wie createPhase(), aber mit vorgegebenem Kürzel/Name/Mitgliedern (aus
-  // einer geladenen Konfigurationsdatei, siehe stammdatenLsa.js
-  // loadConfigFile()) statt automatisch vergebenen Standardwerten - nutzt
-  // denselben phaseIdSeq-Zähler, damit die neu erzeugten IDs garantiert
-  // nicht mit während dieser Sitzung bereits vorhandenen Phasen kollidieren.
+  // Like createPhase(), but with a given short name, name and members.
+  // The values come from a loaded configuration file (see loadConfigFile() in stammdatenLsa.js).
+  // createPhase() uses default values that it assigns automatically.
+  // This function uses the same phaseIdSeq counter.
+  // So the new IDs can never collide with phases that already exist in this session.
   function createPhaseFromConfig(kuerzel, name, members) {
     return { id: 'ph' + (phaseIdSeq++), name, kuerzel, members: members instanceof Set ? members : new Set(members) };
   }
 
-  // Zeitbereiche, in denen eine Phase tatsächlich vollständig angezeigt
-  // wurde: alle Mitglieder gleichzeitig Grün UND KEINE nicht zur Phase
-  // gehörende Signalgruppe gleichzeitig Grün. Der zweite Teil ist nötig,
-  // sonst wäre jede Phase, deren Mitgliederliste eine Teilmenge einer
-  // anderen Phase ist (z. B. Phase A = {K1,K2,K3,F1,F2}, Phase B =
-  // {K1,K3,F1,F2}), automatisch auch während jener anderen Phase "aktiv" -
-  // die Bedingung von B wäre ja immer schon erfüllt, wenn A erfüllt ist,
-  // ohne dass B das je von A unterscheiden könnte (K2 wird von B schlicht
-  // nicht betrachtet). Beide Phasen würden sich dann in der kombinierten
-  // Phasenspur überlappen, obwohl Phasen per Definition nie gleichzeitig
-  // aktiv sein können (siehe Kopfkommentar dieser Datei).
+  // Time ranges in which a phase was fully shown.
+  // All members are green at the same time AND NO signal group that is not in the phase is green at
+  // the same time.
+  // The second condition is necessary.
+  // Without it, a phase whose member list is a subset of another phase is automatically "active"
+  // during that other phase.
+  // An example: phase A = {K1,K2,K3,F1,F2} and phase B = {K1,K3,F1,F2}.
+  // The condition of B is always true when the condition of A is true.
+  // B cannot tell the two cases apart, because B does not look at K2.
+  // Then both phases overlap in the combined phase track.
+  // By definition, phases are never active at the same time (see the header comment of this file).
   function computePhaseOccurrences(phase, allStats) {
     const memberGreens = [], nonMemberGreens = [];
     allStats.forEach(entry => {
@@ -150,25 +151,26 @@
     return { phase, intervals };
   }
 
-  // Verwirft je Phase anomal KURZE Vorkommen (statistischer Ausreißer nach
-  // unten gegenüber den ÜBRIGEN Vorkommen DERSELBEN Phase in der
-  // Aufzeichnung - Median-Absolute-Deviation-basiert, siehe
-  // GZ.stats.detectAnomalies, dasselbe Verfahren wie bei den Grünzeit-
-  // Auffälligkeiten in der Grünzeitanalyse). Eine Signalanlage kann eine
-  // Phase "anfahren" und dabei kurz deren strenge Bedingung erfüllen (alle
-  // Mitglieder grün, alle Nicht-Mitglieder rot), dann aber sofort einen
-  // WEITEREN Übergang einleiten, ohne die Phase je wirklich laufen zu
-  // lassen - am Ende eines Übergangs kann die Steuerung ebenso gut einen
-  // nächsten Übergang statt der Phase selbst starten. Ein solches Vorkommen
-  // zählt NICHT als echte Phase, sondern bleibt Teil der umgebenden
-  // Zwischenzeit (fällt aus den zurückgegebenen Intervallen heraus -
-  // buildCombinedSegments() unten füllt die entstehende Lücke automatisch
-  // als 'NONE'/Übergang). Nur KURZE Ausreißer fallen weg (Richtung geprüft,
-  // nicht nur Betrag) - ein ungewöhnlich LANGES Vorkommen ist keine
-  // abgebrochene Phase, sondern schlicht eine echte, verlängerte Freigabe
-  // (z.B. durch Bedarf). Weniger als 4 Vorkommen (Untergrenze von
-  // detectAnomalies) -> keine statistische Aussage möglich, alle bleiben
-  // unangetastet.
+  // Discards abnormally SHORT occurrences of each phase.
+  // An occurrence is abnormal if it is a statistical outlier on the low side.
+  // The reference is the OTHER occurrences of THE SAME phase in the recording.
+  // The method is based on the median absolute deviation (see GZ.stats.detectAnomalies).
+  // It is the same method as for the green time anomalies in the green time analysis.
+  // A controller can "start" a phase and, for a short time, meet its strict condition (all members
+  // green, all non-members red).
+  // Then the controller immediately starts ANOTHER transition and never lets the phase run.
+  // At the end of a transition, the controller can also start the next transition and not the phase
+  // itself.
+  // Such an occurrence does NOT count as a real phase.
+  // It stays part of the surrounding intergreen time.
+  // The returned intervals do not include it.
+  // buildCombinedSegments() below fills the gap automatically as 'NONE' (transition).
+  // Only SHORT outliers are discarded. The code checks the direction and not only the size.
+  // An unusually LONG occurrence is not an aborted phase.
+  // It is a real, extended release (for example because of demand).
+  // If there are fewer than 4 occurrences (the lower limit of detectAnomalies), no statistical
+  // statement is possible.
+  // Then all occurrences stay unchanged.
   function filterAbortedOccurrences(intervals) {
     if (intervals.length < 4) return intervals;
     const durations = intervals.map(iv => iv.end - iv.start);
@@ -177,22 +179,25 @@
     return intervals.filter((iv, i) => !(flagged[i] && durations[i] < med));
   }
 
-  // Baut aus mehreren Phasen-Vorkommenslisten EINE gemeinsame, lückenlose
-  // Segment-Reihe für die kombinierte Zeitleiste (eine Spur für alle
-  // Phasen): da Phasen per Definition nie gleichzeitig aktiv sind, genügt
-  // Zusammenführen + Sortieren; Lücken (kein Phasen-Vorkommen, z. B.
-  // Zwischenzeiten, nicht abgedeckte Zustände oder verworfene abgebrochene
-  // Vorkommen, siehe filterAbortedOccurrences oben) werden als eigene
-  // Kategorie 'NONE' aufgefüllt. cat trägt die Phasen-ID (oder 'NONE').
-  // Ein Wechsel von einer Phase DIREKT in eine ANDERE ohne jeden zeitlichen
-  // Abstand dazwischen ist per Definition unmöglich (Zwischenzeit/Räum- und
-  // Einschaltverzug sind real immer > 0) - kommt er trotzdem vor (z.B. weil
-  // gerundete Rohdaten zweier Signalgruppen exakt auf denselben Zeitpunkt
-  // fallen), wird er NICHT stillschweigend als nahtloser Phase-zu-Phase-
-  // Übergang durchgereicht (der dann im PÜ-Werkzeug gar nicht erst
-  // auftauchen würde), sondern trotzdem als (nulldauer) Übergang
-  // registriert. Zwei Vorkommen DERSELBEN Phase, die sich berühren, bleiben
-  // davon unberührt (kein Übergang nötig).
+  // Builds ONE common, gapless segment series from several phase occurrence lists.
+  // The combined timeline uses it (one track for all phases).
+  // By definition, phases are never active at the same time.
+  // So it is enough to merge and sort the lists.
+  // The function fills gaps with the separate category 'NONE'.
+  // A gap is a time with no phase occurrence.
+  // Examples are intergreen times, states that no phase covers, and discarded aborted occurrences
+  // (see filterAbortedOccurrences above).
+  // cat holds the phase ID (or 'NONE').
+  // A change from one phase DIRECTLY to ANOTHER phase with no time gap is impossible by definition.
+  // In real data, the intergreen time and the clearance and activation delays are always greater
+  // than 0.
+  // If such a change still occurs, the function does NOT pass it on silently as a seamless
+  // phase-to-phase transition.
+  // (The PÜ tool would not show such a transition at all.)
+  // The function registers it as a transition with zero duration.
+  // An example of the cause: the rounded raw data of two signal groups fall on exactly the same
+  // time.
+  // Two occurrences of THE SAME phase that touch are not changed. They need no transition.
   function buildCombinedSegments(occurrenceEntries, tMin, tMax) {
     const all = [];
     occurrenceEntries.forEach(({ phase, intervals }) => {
@@ -217,29 +222,34 @@
   }
 
   /* ---------------- Phasenübergänge (PÜ) ----------------
-     Diese Sektion gehört sowohl der Phasenspur in Umlaufprüfung (Anzeige)
-     als auch dem PÜ-Werkzeug in Stammdaten LSA (Bearbeitung) - deshalb hier
-     als gemeinsame, view-unabhängige Grundlage statt in einer der beiden
-     Ansichten. Reine Auswertungs-/Datenlogik: nimmt GZ.state.data.
-     pueOverrides (falls benötigt) immer als expliziten Parameter entgegen,
-     statt selbst auf den globalen Zustand zuzugreifen. */
+     This section belongs to two views.
+     One is the phase track in Umlaufprüfung (display).
+     The other is the PÜ tool in Stammdaten LSA (editing).
+     For this reason, it is a common basis that does not depend on a view.
+     It is not part of only one of the two views.
+     This is pure evaluation and data logic.
+     It always gets GZ.state.data.pueOverrides (if it needs them) as an explicit parameter.
+     It does not read the global state itself. */
 
-  // Name für eine inferierte Phasenübergang-Lücke aus den Kürzeln der beiden
-  // angrenzenden Phasen: enden beide auf eine Zahl (Standard-Kürzel "PhN"),
-  // kurz als "PÜ<n1>.<n2>" (z.B. "PÜ1.2"); sonst robust als "PÜ k1→k2", damit
-  // frei benannte Kürzel nicht zu einem unsinnigen Text zusammengequetscht
-  // werden.
+  // Name for an inferred phase transition gap.
+  // The name comes from the short names of the two adjacent phases.
+  // If both short names end with a number (the standard short name "PhN"), the name is
+  // "PÜ<n1>.<n2>" (for example "PÜ1.2").
+  // Otherwise the name is "PÜ k1→k2".
+  // This avoids a meaningless text when the user gives free names to the short names.
   function pueLabelFor(k1, k2) {
     const m1 = /(\d+)\s*$/.exec(k1), m2 = /(\d+)\s*$/.exec(k2);
     return (m1 && m2) ? `PÜ${m1[1]}.${m2[1]}` : `PÜ ${k1}→${k2}`;
   }
 
-  // Wie buildCombinedSegments(), aber Lücken (cat 'NONE') zusätzlich mit den
-  // beiden unmittelbar angrenzenden ECHTEN Phasen annotiert (seg.pueLabel,
-  // seg.pueFromPhaseId/-ToPhaseId) statt anonym zu bleiben - Grundlage für
-  // die Phasenspur (Balken + Klick zum Aufklappen) in Umlaufprüfung. Ohne
-  // Nachbar auf einer Seite (Aufzeichnungsrand, nie erkannte Phase) bleiben
-  // alle drei Felder null.
+  // Like buildCombinedSegments().
+  // But the function also annotates the gaps (cat 'NONE') with the two directly adjacent REAL
+  // phases.
+  // The fields are seg.pueLabel, seg.pueFromPhaseId and seg.pueToPhaseId.
+  // The gaps do not stay anonymous.
+  // This is the basis of the phase track (bar and click to expand) in Umlaufprüfung.
+  // If a gap has no neighbor on one side, all three fields are null.
+  // This happens at the edge of the recording or when the code never detected a phase.
   function buildAnnotatedSegments(occurrenceEntries, tMin, tMax) {
     const phaseById = new Map(occurrenceEntries.map(e => [e.phase.id, e.phase]));
     const segs = buildCombinedSegments(occurrenceEntries, tMin, tMax);
@@ -254,27 +264,30 @@
     return segs;
   }
 
-  // Alle TATSÄCHLICH in der Aufzeichnung vorkommenden Übergangstypen (je
-  // Phasen-ID-Paar genau einmal) - Grundlage für die Liste im PÜ-Werkzeug
-  // (Stammdaten LSA): nur Übergänge anbieten, die es in den Rohdaten auch
-  // wirklich gibt, nicht jede denkbare Kombination aus der Phasenliste. Je
-  // Übergangstyp wird bewusst das Vorkommen NAHE DER MITTE der Aufzeichnung
-  // gemerkt (kleinster Abstand zu (tMin+tMax)/2), NICHT das buchstäblich
-  // erste - eine Aufzeichnung beginnt in der Praxis oft während einer
-  // Anlauf-/Dunkelphase (Signalgeber aus, Anlage noch nicht im Regelbetrieb),
-  // und genau dort läge das allererste Vorkommen jedes Übergangstyps, mit
-  // entsprechend untypischen/unbrauchbaren An/Ab-Werten im PÜ-Werkzeug.
+  // All transition types that really occur in the recording.
+  // Each pair of phase IDs gives exactly one entry.
+  // This is the basis of the list in the PÜ tool (Stammdaten LSA).
+  // The tool offers only transitions that exist in the raw data.
+  // It does not offer each possible combination from the phase list.
+  // For each transition type, the function keeps on purpose the occurrence NEAR THE MIDDLE of the
+  // recording.
+  // It uses the smallest distance to (tMin+tMax)/2.
+  // It does NOT keep the literal first occurrence.
+  // In practice, a recording often starts during a start-up or dark phase.
+  // In this state, the signal heads are off and the controller is not yet in normal operation.
+  // The very first occurrence of each transition type is in this state.
+  // It has unusual or unusable On/Off values in the PÜ tool.
   function listDistinctTransitions(occurrenceEntries, tMin, tMax) {
     const segs = buildAnnotatedSegments(occurrenceEntries, tMin, tMax);
     const mid = (tMin + tMax) / 2;
     const seen = new Map();
     segs.forEach(seg => {
       if (seg.cat !== 'NONE' || !seg.pueFromPhaseId || !seg.pueToPhaseId) return;
-      // Ein "Übergang" von einer Phase in sich selbst (z.B. eine kurze
-      // Unterbrechung/ein Flackern eines Mitglieds, das die Phasen-
-      // Vorkommensintervalle künstlich in zwei Teile schneidet - siehe
-      // computePhaseOccurrences) ist kein echter Phasenübergang und würde
-      // im PÜ-Werkzeug nur unmöglich aussehende Zeilen erzeugen (z.B.
+      // A "transition" from a phase into itself is not a real phase transition.
+      // An example is a short interruption or flicker of a member.
+      // It cuts the phase occurrence intervals artificially into two parts (see
+      // computePhaseOccurrences).
+      // Such a transition would only give rows in the PÜ tool that look impossible (for example
       // "PÜ1.1").
       if (seg.pueFromPhaseId === seg.pueToPhaseId) return;
       const key = seg.pueFromPhaseId + '→' + seg.pueToPhaseId;
@@ -287,10 +300,11 @@
     return [...seen.values()].map(({ dist, ...rest }) => rest);
   }
 
-  // Umlaufindex, in dem der Zeitpunkt t liegt (letzter cycleStarts-Eintrag
-  // <= t) - wandelt eine absolute Zeit (z.B. listDistinctTransitions()'
-  // sampleOccurrence.start) in den cycleIdx um, den autoDetectPueRows()/
-  // realCycleMetricsForSg() erwarten. -1, wenn t vor dem ersten Umlauf liegt.
+  // Cycle index that contains the time t (the last cycleStarts entry <= t).
+  // It converts an absolute time to the cycleIdx.
+  // An example of an absolute time is sampleOccurrence.start from listDistinctTransitions().
+  // autoDetectPueRows() and realCycleMetricsForSg() expect this cycleIdx.
+  // The result is -1 if t is before the first cycle.
   function cycleIdxAtTime(t, cycleStarts) {
     if (!cycleStarts || !cycleStarts.length) return -1;
     let idx = -1;
@@ -300,38 +314,40 @@
     return idx;
   }
 
-  // sgIndex ist hier IMMER der rohe CSV-Spaltenindex (col.index, wie in
-  // phase.members - siehe stammdatenLsa.js data-member="${col.index}"),
-  // NICHT die Position in allStats (die zählt SG-Spalten separat durch -
-  // dieselbe Unterscheidung wie schon in computePhaseOccurrences() oben).
+  // Here sgIndex is ALWAYS the raw CSV column index (col.index, as in phase.members).
+  // See data-member="${col.index}" in stammdatenLsa.js.
+  // It is NOT the position in allStats.
+  // allStats counts the SG columns separately.
+  // This is the same distinction as in computePhaseOccurrences() above.
   function findSgEntryByColIndex(sgIndex, a) { return a.allStats.find(s => s.col.index === sgIndex); }
 
-  // Reale An/Ab/TF/Rotgelb/Gelb-Werte EINER Signalgruppe für EINEN Umlauf -
-  // dieselbe Grundlage wie die umlaufweisen exprEngine-Primitiven/Kennzahlen
-  // (GZ.segments.computeCycleSgMetrics), hier aber für eine beliebige, ggf.
-  // gerade nicht angehakte Signalgruppe auf Abruf berechnet (Phasenmitglieder
-  // sind unabhängig von jeder Objekt-Auswahl in einer Ansicht).
+  // Real On/Off/TF/red-amber/amber values of ONE signal group for ONE cycle.
+  // The basis is the same as for the per-cycle exprEngine primitives and key figures
+  // (GZ.segments.computeCycleSgMetrics).
+  // Here the function calculates them on demand for any signal group.
+  // The signal group can be one that the user did not select at this time.
+  // The phase members do not depend on the object selection in a view.
   function realCycleMetricsForSg(sgIndex, cycleIdx, a, TU_MED) {
     const entry = findSgEntryByColIndex(sgIndex, a);
     if (!entry) return null;
     const metrics = GZ.segments.computeCycleSgMetrics(entry.segs, entry.stats.greens, a.cycleStarts, a.tMax, TU_MED);
-    // computeCycleSgMetrics liefert seit der Mehrfach-Vorkommen-Erkennung ein
-    // ARRAY von Vorkommen je Umlauf (siehe dortigen Kopfkommentar) - das
-    // PÜ-Werkzeug kennt (wie bisher) nur EIN Vorkommen je Umlauf und nimmt
-    // bewusst das chronologisch erste.
+    // computeCycleSgMetrics now returns an ARRAY of occurrences for each cycle.
+    // This is a result of the multiple-occurrence detection (see the header comment there).
+    // The PÜ tool knows only ONE occurrence for each cycle, as before.
+    // It uses the chronologically first occurrence on purpose.
     const occs = metrics[cycleIdx];
     return (occs && occs[0]) || null;
   }
 
-  // Spätestes Intervallende einer Phase (computePhaseOccurrences), das noch
-  // in [cycleStart, cycleEnd] liegt - die tatsächliche, "wie von der
-  // Phasendefinition selbst bestimmte" Grenze, an der ein Phasen-Vorkommen
-  // endet (siehe dortigen Kopfkommentar: alle Mitglieder grün UND alle
-  // Nicht-Mitglieder rot). Grundlage der PÜ-Referenz unten - bewusst NICHT
-  // separat aus den Ab-Werten einzelner Signalgruppen neu hergeleitet (siehe
-  // dort), da das Vorkommen genauso gut durch eine anwerfende Signalgruppe
-  // beendet werden kann, die vorzeitig nicht mehr rot ist (Rotgelb), nicht
-  // nur durch eine abwerfende, die grün verlässt.
+  // Latest interval end of a phase (computePhaseOccurrences) that is still in [cycleStart,
+  // cycleEnd].
+  // This is the real limit, as the phase definition itself determines it.
+  // At this limit, a phase occurrence ends (see the header comment there: all members green AND all
+  // non-members red).
+  // It is the basis of the PÜ reference below.
+  // The code does NOT derive it again from the Off values of single signal groups (see there).
+  // An occurrence can end because a starting signal group is no longer red (red-amber) too early.
+  // It does not end only because a stopping signal group leaves green.
   function phaseOccurrenceEndInCycle(phase, allStats, cycleStart, cycleEnd) {
     const { intervals } = computePhaseOccurrences(phase, allStats);
     let best = null;
@@ -339,30 +355,31 @@
     return best;
   }
 
-  // "An" bezeichnet im PÜ-Werkzeug bewusst NICHT den Beginn des eigentlichen
-  // Grüns (cm.an - das erste sichtbare Signal wäre dann schon vorbei),
-  // sondern den Rot→Gelb-Wechsel (Beginn Rotgelb) davor - das ist der
-  // Moment, an dem sich für die anwerfende Signalgruppe überhaupt etwas
-  // ändert. Ohne erkanntes Rotgelb (cm.rotgelb=0, z.B. Datenlücke) fällt das
-  // mit cm.an zusammen.
+  // In the PÜ tool, "An" (On) is NOT the start of the real green (cm.an).
+  // At that time, the first visible signal is already past.
+  // "An" is the red-to-amber change (start of red-amber) before the green.
+  // At this moment, something changes for the starting signal group.
+  // If the code detects no red-amber (cm.rotgelb=0, for example because of a data gap), "An" is the
+  // same as cm.an.
   function rotgelbStartSec(cm) { return cm.an - (cm.rotgelb || 0); }
 
-  // Sucht in den ROHEN Segmenten EINER Signalgruppe das für einen
-  // bestimmten Übergangs-Anker (referenceAbsMs, die TX=0-Referenz DIESES
-  // Übergangs) tatsächlich relevante GRUEN-Segment - bewusst NICHT über ein
-  // Umlauf-Fenster (cycleIdx, wie GZ.segments.computeCycleSgMetrics),
-  // sondern direkt über den Anker selbst: eine Signalgruppe kann innerhalb
-  // EINES Umlaufs mehrfach grün sein (z.B. verkehrsabhängige/mehrstufige
-  // Freigaben), ein Umlauf-Fenster träfe dann leicht das FALSCHE Vorkommen
-  // (führte zu unsinnigen negativen An/Ab-Werten und falschen Nachbar-
-  // segmenten im Balken). role='outgoing': das Segment, das den Anker
-  // enthält (diese Signalgruppe MUSS laut Phasendefinition zu diesem
-  // Zeitpunkt noch grün sein, siehe computePhaseOccurrences) - ohne
-  // Treffer ersatzweise das zuletzt VOR dem Anker endende. role='incoming':
-  // das mit dem frühesten Start AB dem Anker (diese Signalgruppe MUSS laut
-  // Phasendefinition bis dahin rot gewesen sein, siehe dort "alle
-  // Nicht-Mitglieder rot"). null, wenn keine passende Signalgruppe/kein
-  // passendes Segment existiert.
+  // Searches the RAW segments of ONE signal group.
+  // It finds the GREEN segment that is relevant for a given transition anchor.
+  // The anchor (referenceAbsMs) is the TX=0 reference OF THIS transition.
+  // The function does NOT use a cycle window (cycleIdx, as GZ.segments.computeCycleSgMetrics does).
+  // It uses the anchor itself.
+  // A signal group can be green more than once in ONE cycle.
+  // Examples are traffic-actuated or multi-stage releases.
+  // A cycle window then easily finds the WRONG occurrence.
+  // This gives meaningless negative On/Off values and wrong neighbor segments in the bar.
+  // role='outgoing': the segment that contains the anchor.
+  // By the phase definition, this signal group MUST be green at this time (see
+  // computePhaseOccurrences).
+  // If there is no match, the function uses the last segment that ends BEFORE the anchor.
+  // role='incoming': the segment with the earliest start AT or AFTER the anchor.
+  // By the phase definition, this signal group MUST be red until then (see there "all non-members
+  // red").
+  // The result is null if no matching signal group or segment exists.
   function findAnchoredGreenSegIdx(entry, anchorAbsMs, role) {
     const segs = entry.segs;
     if (role === 'outgoing') {
@@ -379,12 +396,13 @@
     return bestIdx;
   }
 
-  // Kennzahlen (an/ab in echten Sekunden relativ zu referenceAbsMs statt
-  // relativ zum Umlaufbeginn, dazu tf/rotgelb/gelb/segIdx/segStart/segEnd)
-  // für EIN per findAnchoredGreenSegIdx() gefundenes GRUEN-Segment -
-  // dieselben Felder wie GZ.segments.computeCycleSgMetrics, aber ohne
-  // dessen Umlauf-Fenster-Bindung und ohne die dortige TU-Modulo-Rundung
-  // (hier unnötig, da direkt an absoluten Rohzeiten gerechnet wird).
+  // Key figures for ONE GREEN segment that findAnchoredGreenSegIdx() found.
+  // The fields are an/ab (in real seconds relative to referenceAbsMs and not to the cycle start),
+  // tf, rotgelb, gelb, segIdx, segStart and segEnd.
+  // They are the same fields as GZ.segments.computeCycleSgMetrics gives.
+  // But there is no cycle window binding.
+  // There is also no TU modulo rounding.
+  // The rounding is not necessary here, because the calculation uses absolute raw times directly.
   function metricsForAnchoredSeg(entry, role, anchorAbsMs, referenceAbsMs) {
     const segIdx = findAnchoredGreenSegIdx(entry, anchorAbsMs, role);
     if (segIdx == null) return null;
@@ -397,17 +415,20 @@
     };
   }
 
-  // Wie metricsForAnchoredSeg(), aber die role (outgoing/incoming) wird aus
-  // der Zeile selbst abgeleitet (ab gesetzt -> outgoing, an gesetzt ->
-  // incoming) statt separat übergeben zu werden müssen - für die
-  // Balken-Darstellung in Stammdaten LSA/Umlaufprüfung (siehe dort
-  // buildLocalRowSegs/applyRowOverrideToLocalSegs), wo nur die Zeile
-  // bekannt ist. anchorAbsMs bleibt bewusst IMMER referenceAbsMs (die feste
-  // TX=0-Referenz DIESES Übergangs, unabhängig von einer eventuellen
-  // manuellen Korrektur der Zeilenwerte) - das reale Segment bleibt so am
-  // tatsächlichen Übergang verankert, auch wenn die angezeigte Zahl
-  // überschrieben wurde. null ohne eindeutige Rolle (z.B. eine frei
-  // hinzugefügte Zeile ohne Wert oder eine "immer an"-Zeile).
+  // Like metricsForAnchoredSeg().
+  // But the function derives the role (outgoing or incoming) from the row itself.
+  // If ab is set, the role is outgoing. If an is set, the role is incoming.
+  // The caller does not need to pass the role separately.
+  // It is for the bar display in Stammdaten LSA and Umlaufprüfung (see buildLocalRowSegs and
+  // applyRowOverrideToLocalSegs there).
+  // In these places, only the row is known.
+  // anchorAbsMs is ALWAYS referenceAbsMs on purpose.
+  // This is the fixed TX=0 reference of THIS transition.
+  // It does not depend on a manual correction of the row values.
+  // So the real segment stays tied to the real transition, also if the user overwrote the displayed
+  // number.
+  // The result is null if there is no clear role.
+  // Examples are a freely added row with no value and an "always on" row.
   function cmForRow(row, referenceAbsMs, a) {
     const entry = findSgEntryByColIndex(row.sgIndex, a);
     if (!entry) return null;
@@ -416,29 +437,32 @@
     return metricsForAnchoredSeg(entry, role, referenceAbsMs, referenceAbsMs);
   }
 
-  // TF (Freigabezeit) RELATIV ZUM ÜBERGANG selbst: wie viel echte Grünzeit
-  // dieser Zeile innerhalb des definierten Übergangsfensters [startSec,
-  // endSec] liegt - NICHT die volle reale Dauer der zugrundeliegenden
-  // Freigabe (die erstreckt sich für eine abwerfende/anwerfende Zeile
-  // typischerweise weit VOR bzw. NACH diesem Übergang und gehört nicht zu
-  // ihm - z.B. die gesamte Grünzeit der vorherigen/nächsten Phase). Eine
-  // abwerfende Zeile (nur Ab gesetzt) "beginnt" ihr Grün unbekannt weit vor
-  // dem Fenster (auf startSec geklemmt); eine anwerfende Zeile (nur An
-  // gesetzt) "endet" ihr Grün unbekannt weit nach dem Fenster (auf endSec
-  // geklemmt) - deren realer Grünbeginn liegt bei An + Rotgelb-Dauer
-  // (cm.rotgelb), nicht bei An selbst (siehe rotgelbStartSec). Beispiel:
-  // An=5, Rotgelb=1s, Ende=8 -> Grünbeginn=6, TF=8-6=2. Ohne jeden Wert
-  // (weder An noch Ab, z.B. eine frisch hinzugefügte, noch leere Zeile) ist
-  // TF nicht definiert (null).
-  // Sind BEIDE gesetzt, gibt es zwei mögliche Fälle (siehe
-  // buildRowDisplaySegs() für dieselbe Fallunterscheidung an den Balken-
-  // Segmenten): An < Ab beschreibt EIN zusammenhängendes Grün-Fenster
-  // vollständig innerhalb des Übergangs (TF = dessen Dauer). Ab <= An
-  // beschreibt eine Signalgruppe, die VOR dem Übergang grün war (bis Ab),
-  // dann echt nicht-grün, und NACH dem Übergang erneut grün wird (ab An) -
-  // z.B. ein Mitglied beider Phasen, das entgegen der sonst üblichen
-  // Annahme NICHT durchgehend grün bleibt, sondern zwischenzeitlich
-  // tatsächlich aussetzt (TF = Summe beider getrennter Grün-Anteile).
+  // TF (release time) RELATIVE TO THE TRANSITION itself.
+  // It is the amount of real green time of this row inside the defined transition window [startSec,
+  // endSec].
+  // It is NOT the full real duration of the underlying release.
+  // For a stopping or starting row, the release is typically long.
+  // It extends far BEFORE or AFTER this transition and does not belong to it.
+  // An example is the whole green time of the previous or next phase.
+  // A stopping row (only Ab set) "starts" its green an unknown time before the window.
+  // The code clamps this start to startSec.
+  // A starting row (only An set) "ends" its green an unknown time after the window.
+  // The code clamps this end to endSec.
+  // The real start of the green of the starting row is An + red-amber duration (cm.rotgelb).
+  // It is not An itself (see rotgelbStartSec).
+  // Example: An=5, red-amber=1 s, end=8 -> green start=6, TF=8-6=2.
+  // If there is no value at all (neither An nor Ab, for example a new empty row), TF is not defined
+  // (null).
+  // If BOTH are set, there are two possible cases.
+  // buildRowDisplaySegs() has the same case distinction for the bar segments.
+  // An < Ab describes ONE continuous green window that is fully inside the transition (TF = its
+  // duration).
+  // Ab <= An describes a signal group that was green BEFORE the transition (until Ab).
+  // Then it is really not green.
+  // AFTER the transition, it becomes green again (from An).
+  // An example is a member of both phases that does NOT stay green without a break, against the
+  // usual assumption.
+  // It really stops for some time (TF = sum of the two separate green parts).
   function computeRowTf(row, cm, startSec, endSec) {
     const hasAn = row.an != null, hasAb = row.ab != null;
     if (!hasAn && !hasAb) return null;
@@ -455,12 +479,14 @@
     return Math.round(tf);
   }
 
-  // Kanonische Sortierreihenfolge für Signalgruppennamen: K vor R vor F vor
-  // S, innerhalb einer Gruppe numerisch aufsteigend (K1, K2, ..., Kn) - für
-  // die PÜ-Zeilenreihenfolge (siehe autoDetectPueRows unten) und die
-  // SG-Auswahllisten in Stammdaten LSA. Andere/unbekannte Präfixe (z.B.
-  // Sonderbezeichnungen wie "DF1") fallen alphabetisch ans Ende, statt die
-  // Sortierung zu erraten.
+  // Standard sort order for signal group names.
+  // The order is K, then R, then F, then S.
+  // Inside a group, the order is numerically ascending (K1, K2, ..., Kn).
+  // It is for the PÜ row order (see autoDetectPueRows below) and for the SG selection lists in
+  // Stammdaten LSA.
+  // Other or unknown prefixes (for example special names such as "DF1") go to the end in
+  // alphabetical order.
+  // The code does not guess the sort order for them.
   const SG_PREFIX_ORDER = { K: 0, R: 1, F: 2, S: 3 };
   function compareSgNames(nameA, nameB) {
     const parse = n => { const m = /^([A-Za-z]+)(\d+)$/.exec(n || ''); return m ? [m[1].toUpperCase(), Number(m[2])] : null; };
@@ -472,39 +498,38 @@
     return (nameA || '').localeCompare(nameB || '');
   }
 
-  // Automatisch erkannte PÜ-Zeilen für EIN Vorkommen (fromPhase/toPhase in
-  // GENAU diesem Umlauf) - EINE ZEILE JE SIGNALGRUPPE DER GESAMTEN
-  // AUFZEICHNUNG (nicht nur den Mitgliedern der beiden Phasen): der Nutzer
-  // soll die vollständige Liste sehen und bei Bedarf selbst kürzen
-  // (Entfernen-Button) statt raten zu müssen, welche Signalgruppe fehlt.
-  // Je Signalgruppe:
-  //  - NUR Mitglied der abwerfenden Phase -> abwerfende Zeile (nur Ab
-  //    gesetzt), relativ zu dem Zeitpunkt, an dem das Vorkommen der
-  //    abwerfenden Phase selbst endet (= die "TX=0"-Referenz dieses
-  //    Übergangs, siehe phaseOccurrenceEndInCycle oben) - das ist per
-  //    Definition "die Signalgruppe, die als erste (innerhalb der
-  //    abwerfenden Phase) endet", denn genau das lässt das Vorkommen enden.
-  //  - NUR Mitglied der anwerfenden Phase -> anwerfende Zeile (nur An
-  //    gesetzt, siehe rotgelbStartSec oben).
-  //  - Mitglied BEIDER Phasen (bleibt über den Übergang hinweg durchgehend
-  //    grün) -> "immer an"-Zeile (weder An noch Ab, siehe
-  //    setPueOverrideRowAlways) statt komplett zu fehlen.
-  //  - Mitglied KEINER der beiden Phasen -> leere Zeile (weder An noch Ab)
-  //    als reiner Platzhalter - der Nutzer entscheidet, ob/was dafür gilt.
-  // Fehlt für eine ab-/anwerfende Signalgruppe ein reales Segment am Anker
-  // (z.B. Datenlücke), bleibt ihre Zeile ebenfalls leer statt ganz zu
-  // fehlen. null (keine Zeilen überhaupt), wenn in diesem Umlauf kein
-  // Vorkommen der abwerfenden Phase endet - dann gibt es keine Referenz,
-  // auf die sich irgendeine Zeile beziehen könnte.
+  // Automatically detected PÜ rows for ONE occurrence (fromPhase/toPhase in EXACTLY this cycle).
+  // There is ONE ROW FOR EACH SIGNAL GROUP OF THE WHOLE RECORDING.
+  // It is not only for the members of the two phases.
+  // The user must see the full list.
+  // If necessary, the user can make it shorter (Remove button).
+  // The user does not need to guess which signal group is missing.
+  // For each signal group:
+  //  - Member of ONLY the stopping phase -> stopping row (only Ab set).
+  //    It is relative to the time at which the occurrence of the stopping phase itself ends.
+  //    That time is the "TX=0" reference of this transition (see phaseOccurrenceEndInCycle above).
+  //    By definition, this is "the signal group that ends first (inside the stopping phase)".
+  //    This is what makes the occurrence end.
+  //  - Member of ONLY the starting phase -> starting row (only An set, see rotgelbStartSec above).
+  //  - Member of BOTH phases (it stays green without a break over the transition) -> "always on"
+  //    row (neither An nor Ab, see setPueOverrideRowAlways).
+  //    The row does not disappear.
+  //  - Member of NEITHER phase -> empty row (neither An nor Ab) as a placeholder only.
+  //    The user decides if and what applies to it.
+  // If a stopping or starting signal group has no real segment at the anchor (for example a data
+  // gap), its row also stays empty.
+  // The row does not disappear.
+  // The result is null (no rows at all) if no occurrence of the stopping phase ends in this cycle.
+  // Then there is no reference to which a row can refer.
   function autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED) {
     const cycleStart = a.cycleStarts[cycleIdx];
     const cycleEnd = cycleIdx + 1 < a.cycleStarts.length ? a.cycleStarts[cycleIdx + 1] : a.tMax;
     const gapStartAbsMs = phaseOccurrenceEndInCycle(fromPhase, a.allStats, cycleStart, cycleEnd);
     if (gapStartAbsMs == null) return null;
     const referenceSec = (gapStartAbsMs - cycleStart) / 1000;
-    // K vor R vor F vor S, je Gruppe numerisch (siehe compareSgNames oben) -
-    // permanent in dieser Reihenfolge erzeugt, unabhängig von der
-    // CSV-Spaltenreihenfolge.
+    // The order is K, R, F, S, and numerically ascending in each group (see compareSgNames above).
+    // The code always creates the rows in this order.
+    // The CSV column order does not change it.
     const sortedEntries = [...a.allStats].sort((x, y) => compareSgNames(x.col.name, y.col.name));
     const rows = [];
     const greenArrivalSecs = [];
@@ -528,38 +553,39 @@
         rows.push({ sgIndex: idx, an: null, ab: null, always: false });
       }
     });
-    // Übergangsende = die zuletzt (spätest) ins ECHTE GRÜN kommende
-    // Signalgruppe der anwerfenden Phase (cm.an, NICHT deren früherer
-    // Rotgelb-Start - siehe rotgelbStartSec/"An" oben) - per Definition das
-    // Gegenstück zum Start (frühestes Ende der abwerfenden Phase). Bewusst
-    // unabhängig von den Zeilenwerten gehalten (nicht aus rows[].an
-    // hergeleitet), da "An" jetzt den früheren Rotgelb-Start zeigt.
+    // End of the transition = the signal group of the starting phase that is the last (latest) to
+    // come into REAL GREEN.
+    // The value is cm.an.
+    // It is NOT the earlier red-amber start (see rotgelbStartSec and "An" above).
+    // By definition, it is the counterpart of the start (earliest end of the stopping phase).
+    // The code keeps it independent of the row values on purpose.
+    // It does not derive it from rows[].an, because "An" now shows the earlier red-amber start.
     const endSec = greenArrivalSecs.length ? Math.round(Math.max(...greenArrivalSecs)) : null;
     return { referenceSec, rows, endSec };
   }
 
   function pueOverrideKey(fromPhaseId, toPhaseId) { return fromPhaseId + '→' + toPhaseId; }
 
-  // Aufgelöste Zeilenliste für das PÜ-Werkzeug: eine manuelle Korrektur
-  // (siehe pueOverrides, je PHASENÜBERGANGSTYP - Bearbeitung in Stammdaten
-  // LSA) hat Vorrang vor der automatischen Erkennung, gilt dann aber für
-  // JEDES Vorkommen dieses Übergangs identisch (dieselben Zahlen,
-  // unabhängig vom Umlauf) - die Referenzzeit für eine Balken-Darstellung
-  // bleibt trotzdem live je Umlauf berechnet (siehe Aufrufer), damit ein
-  // Balken immer die ECHTEN Rohdaten des jeweils gezeigten Umlaufs nutzt,
-  // auch wenn die Tabellenwerte manuell überschrieben sind (so lässt sich
-  // eine Korrektur visuell gegen die Realität prüfen statt blind zu
-  // vertrauen).
-  // startSec/endSec begrenzen den Übergang selbst (siehe Kopfkommentar
-  // autoDetectPueRows): startSec ist FEST 0 (== referenceSec, der früheste
-  // Ab-Wechsel auf Gelb der abwerfenden Phase - per Definition, nie
-  // überschreibbar). endSec ist das späteste ECHTE Grün der anwerfenden
-  // Phase (auto.endSec, siehe dort) - bewusst NICHT aus rows[].an
-  // hergeleitet (das zeigt seit der Rotgelb-Umstellung einen FRÜHEREN
-  // Zeitpunkt, siehe rotgelbStartSec), sondern immer frisch aus den echten
-  // Rohdaten dieses Umlaufs berechnet, sofern pueOverrides.endSec es nicht
-  // explizit fest vorgibt (siehe setPueOverrideEndSec unten) - z.B. um den
-  // Übergang bewusst weiter zu fassen, als es die Rohdaten hergeben.
+  // Resolved row list for the PÜ tool.
+  // A manual correction has priority over the automatic detection.
+  // (See pueOverrides, one for each PHASE TRANSITION TYPE. The user edits it in Stammdaten LSA.)
+  // Such a correction applies to EACH occurrence of this transition in the same way.
+  // It gives the same numbers for each cycle.
+  // The reference time for a bar display is still calculated live for each cycle (see the caller).
+  // So a bar always uses the REAL raw data of the cycle that it shows.
+  // This is also true if the user overwrote the table values manually.
+  // In this way, the user can check a correction visually against the real data.
+  // The user does not need to trust it blindly.
+  // startSec and endSec limit the transition itself (see the header comment of autoDetectPueRows).
+  // startSec is FIXED at 0 (== referenceSec, the earliest Ab change to amber of the stopping
+  // phase).
+  // By definition, the user can never overwrite it.
+  // endSec is the latest REAL green of the starting phase (auto.endSec, see there).
+  // The code does NOT derive it from rows[].an.
+  // Since the red-amber change, rows[].an shows an EARLIER time (see rotgelbStartSec).
+  // The code always calculates endSec again from the real raw data of this cycle.
+  // The exception is when pueOverrides.endSec sets it explicitly (see setPueOverrideEndSec below).
+  // An example is when the user makes the transition wider on purpose than the raw data show.
   function resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, pueOverrides) {
     const auto = autoDetectPueRows(fromPhase, toPhase, cycleIdx, a, TU_MED);
     const override = pueOverrides ? pueOverrides[pueOverrideKey(fromPhase.id, toPhase.id)] : null;
@@ -573,15 +599,16 @@
     };
   }
 
-  // Mutations-Helfer für pueOverrides - nehmen das Objekt (GZ.state.data.
-  // pueOverrides) immer explizit entgegen und mutieren es in place, statt
-  // selbst auf GZ.state zuzugreifen (siehe Sektions-Kopfkommentar); der
-  // Aufrufer (Stammdaten LSA) ist für das Neu-Rendern nach der Mutation
-  // zuständig. ensurePueOverride() legt bei Bedarf eine Korrektur an - mit
-  // den aktuell ANGEZEIGTEN Zeilen (seedRows) als Startpunkt, damit ein
-  // einzelnes Feld-Edit nicht die übrigen, bislang nur automatisch
-  // erkannten Zeilen verliert - idempotent, ändert eine bereits vorhandene
-  // Korrektur nicht erneut.
+  // Mutation helpers for pueOverrides.
+  // They always take the object (GZ.state.data.pueOverrides) as an explicit parameter.
+  // They change it in place.
+  // They do not read GZ.state themselves (see the section header comment).
+  // The caller (Stammdaten LSA) must render again after the mutation.
+  // ensurePueOverride() creates a correction if necessary.
+  // It uses the currently DISPLAYED rows (seedRows) as the start point.
+  // So a single field edit does not lose the other rows that the code only detected automatically.
+  // The function is idempotent.
+  // It does not change an existing correction again.
   function ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows) {
     const key = pueOverrideKey(fromPhaseId, toPhaseId);
     if (!pueOverrides[key]) pueOverrides[key] = { rows: seedRows.map(r => ({ ...r })) };
@@ -592,19 +619,21 @@
     const row = ov.rows[rowIdx];
     if (!row) return;
     row[field] = value;
-    // Ein echter An-/Ab-Wert widerspricht "durchgehend an" (siehe
-    // setPueOverrideRowAlways) - ein Feld-Edit hebt die Markierung auf.
+    // A real An or Ab value contradicts "always on" (see setPueOverrideRowAlways).
+    // A field edit removes the mark.
     if ((field === 'an' || field === 'ab') && value != null) row.always = false;
   }
   function addPueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, sgIndex) {
     ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.push({ sgIndex, an: null, ab: null, always: false });
   }
-  // Markiert/entmarkiert eine Zeile als "durchgehend an" (weder An- noch
-  // Ab-Ereignis - z.B. eine Signalgruppe, die laut Anlage über diesen
-  // Übergang hinweg dauerhaft grün bleiben soll, aber (anders als ein
-  // automatisch erkanntes gemeinsames Mitglied, siehe autoDetectPueRows)
-  // hier explizit zu Dokumentationszwecken aufgeführt werden soll) - setzt
-  // an/ab dabei auf null, da diese Zeile keinen realen Wechsel abbildet.
+  // Sets or clears the "always on" mark of a row.
+  // "Always on" means that there is neither an An event nor an Ab event.
+  // An example is a signal group that, by the design of the signal system, must stay green over
+  // this transition.
+  // But the tool lists it explicitly for documentation.
+  // (An automatically detected common member, see autoDetectPueRows, does not need this.)
+  // The function sets an/ab to null.
+  // This row does not show a real change.
   function setPueOverrideRowAlways(pueOverrides, fromPhaseId, toPhaseId, rowIdx, always, seedRows) {
     const ov = ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows);
     if (ov.rows[rowIdx]) { ov.rows[rowIdx].always = always; ov.rows[rowIdx].an = null; ov.rows[rowIdx].ab = null; }
@@ -612,25 +641,25 @@
   function removePueOverrideRow(pueOverrides, fromPhaseId, toPhaseId, seedRows, rowIdx) {
     ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).rows.splice(rowIdx, 1);
   }
-  // Sortiert die Zeilen einer Korrektur PERMANENT in der kanonischen
-  // Reihenfolge (compareSgNames) - vom Aufrufer explizit angestoßen, direkt
-  // nach jeder Änderung, die die Zeilenreihenfolge beeinflussen könnte
-  // (neue Zeile, geänderte Signalgruppe einer Zeile, aus einer JSON-Datei
-  // geladene Konfiguration, deren gespeicherte Reihenfolge beliebig sein
-  // kann) - so bleibt rowIdx (der Index in ov.rows, den die übrigen
-  // Mutations-Helfer erwarten) stets deckungsgleich mit der angezeigten
-  // Reihenfolge.
+  // Sorts the rows of a correction PERMANENTLY in the standard order (compareSgNames).
+  // The caller starts it explicitly.
+  // It runs directly after each change that can affect the row order.
+  // Examples are a new row, a changed signal group of a row, and a configuration that the code
+  // loaded from a JSON file.
+  // The saved order of a loaded configuration can be random.
+  // So rowIdx (the index in ov.rows that the other mutation helpers expect) always matches the
+  // displayed order.
   function sortPueOverrideRows(pueOverrides, fromPhaseId, toPhaseId, a) {
     const ov = pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
     if (!ov) return;
     const nameOfSg = idx => { const e = findSgEntryByColIndex(idx, a); return e ? e.col.name : ''; };
     ov.rows.sort((x, y) => compareSgNames(nameOfSg(x.sgIndex), nameOfSg(y.sgIndex)));
   }
-  // value === null setzt zurück auf "automatisch" (siehe resolvePueRows) -
-  // legt bei Bedarf trotzdem eine Korrektur an (auch ein reines Ende-
-  // Override ohne Zeilenänderung zählt als "manuell angepasst"). Der Start
-  // ist bewusst NICHT überschreibbar (siehe resolvePueRows) - er ist per
-  // Definition immer 0.
+  // value === null resets the value to "automatic" (see resolvePueRows).
+  // If necessary, the function still creates a correction.
+  // Also a pure end override with no row change counts as "adjusted manually".
+  // The start can NOT be overwritten on purpose (see resolvePueRows).
+  // By definition, it is always 0.
   function setPueOverrideEndSec(pueOverrides, fromPhaseId, toPhaseId, seedRows, value) {
     ensurePueOverride(pueOverrides, fromPhaseId, toPhaseId, seedRows).endSec = value;
   }
@@ -638,34 +667,36 @@
     delete pueOverrides[pueOverrideKey(fromPhaseId, toPhaseId)];
   }
 
-  // Balken-Segmente EINER PÜ-Zeile - DIREKT aus ihren logischen Werten
-  // (An/Ab, plus reale Rotgelb-/Gelb-Dauer aus cm, falls bekannt)
-  // SYNTHETISIERT, nicht aus den Rohdaten gesucht und angepasst. Kern der
-  // Phasendefinition (siehe computePhaseOccurrences): eine anwerfende
-  // Signalgruppe ist ab ihrem Wechsel bis MINDESTENS Ende durchgehend grün
-  // (sie ist ja Mitglied der jetzt aktiven Phase, deren gesamtes Vorkommen
-  // mindestens bis Ende reicht), eine abwerfende war bis zu ihrem Wechsel
-  // bereits durchgehend grün (Mitglied der bis dahin aktiven Phase). Der
-  // Balken darf an diesen Stellen NIE einen anderen Zustand zeigen - auch
-  // nicht nach einer manuellen Korrektur, die von der ursprünglich
-  // gefundenen realen Freigabe abweicht, oder wenn gar kein passendes
-  // reales Segment existiert (dann rotgelb/gelb=0, aber die Grün-Spanne
-  // bleibt trotzdem korrekt). wMinMs/wMaxMs (das sichtbare Zeitfenster,
-  // nicht nur startSec/endSec) begrenzen, wie weit die Grün-Fläche über den
-  // eigentlichen Wechsel hinaus in den -3s/+2s-Rand hineingezeichnet wird -
-  // alles außerhalb bleibt implizit die rote Grundlinie (baselineCat/-Color
-  // in renderLane).
-  // Sind BEIDE An und Ab gesetzt, unterscheiden sich zwei Fälle (siehe
-  // computeRowTf() für dieselbe Fallunterscheidung bei der Kennzahl): An <
-  // Ab ist EIN zusammenhängendes Grün-Fenster vollständig innerhalb des
-  // Übergangs (z.B. eine frei hinzugefügte Zeile ohne eigenen Bezug zu
-  // einer der beiden Phasengrenzen). Ab <= An ist eine Signalgruppe, die
-  // VOR dem Übergang grün war (bis Ab) und NACH dem Übergang erneut grün
-  // wird (ab An), mit einer echten (nicht nur angenommenen) Nicht-Grün-
-  // Lücke dazwischen - z.B. ein Mitglied beider Phasen, das entgegen der
-  // sonst als "immer an" angenommenen Kontinuität tatsächlich aussetzt;
-  // beide Seiten werden dann UNABHÄNGIG voneinander gezeichnet, nicht als
-  // ein (fälschlich rückwärtslaufendes) gemeinsames Fenster.
+  // Bar segments of ONE PÜ row.
+  // The code SYNTHESIZES them DIRECTLY from the logical values of the row.
+  // The values are An/Ab, plus the real red-amber and amber duration from cm, if known.
+  // The code does not search the raw data and then adapt the result.
+  // This is the core of the phase definition (see computePhaseOccurrences).
+  // A starting signal group is continuously green from its change to AT LEAST the end.
+  // It is a member of the phase that is now active.
+  // The whole occurrence of that phase reaches at least to the end.
+  // A stopping signal group was already continuously green until its change.
+  // It was a member of the phase that was active until then.
+  // At these points, the bar must NEVER show a different state.
+  // This is also true after a manual correction that differs from the real release that the code
+  // found first.
+  // It is also true if no matching real segment exists.
+  // In this case, red-amber and amber are 0, but the green span is still correct.
+  // wMinMs and wMaxMs (the visible time window, not only startSec and endSec) limit how far the
+  // green area goes past the real change.
+  // The green area goes into the -3 s / +2 s margin.
+  // All outside areas stay the implicit red baseline (baselineCat and baselineColor in renderLane).
+  // If BOTH An and Ab are set, there are two different cases.
+  // (See computeRowTf() for the same case distinction for the key figure.)
+  // An < Ab is ONE continuous green window that is fully inside the transition.
+  // An example is a freely added row that has no own relation to one of the two phase limits.
+  // Ab <= An is a signal group that was green BEFORE the transition (until Ab).
+  // AFTER the transition, it becomes green again (from An).
+  // Between the two, there is a real gap that is not green (not only an assumed gap).
+  // An example is a member of both phases that really stops.
+  // The usual assumption for such a member is continuity ("always on").
+  // The code then draws both sides INDEPENDENTLY of each other.
+  // It does not draw one common window that wrongly runs backward.
   function buildRowDisplaySegs(row, cm, wMinMs, wMaxMs) {
     const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
     const gelb = cm && Number.isFinite(cm.gelb) ? cm.gelb : 0;
@@ -692,10 +723,10 @@
     return segs;
   }
 
-  // Summiert je Umlauf (cycleStarts[i]..cycleStarts[i+1)) die Vorkommensdauer
-  // einer Phase - amortisierter Sweep über die (sortierten) Vorkommen statt
-  // eines Vollscans je Umlauf, damit auch bei "Alle anzeigen" auf großen
-  // Aufzeichnungen performant.
+  // Sums the occurrence duration of a phase for each cycle (cycleStarts[i]..cycleStarts[i+1)).
+  // The code uses an amortized sweep over the (sorted) occurrences.
+  // It does not use a full scan for each cycle.
+  // So the function stays fast also for "Alle anzeigen" with large recordings.
   function durationPerCycle(intervals, cycleStarts, tMax, fromIdx, toIdx) {
     const sweep = GZ.segments.makeIntervalSweep(intervals);
     const out = [];

@@ -1,5 +1,5 @@
-/* App-Gerüst: nutzt die volle Fensterbreite, kein zentrierter Fixbreiten-
-   Container wie im Ursprungswerkzeug. */
+/* Application frame. It uses the full window width.
+   It does not use a centered container of fixed width as in the original tool. */
 .appshell{ min-height:100vh; display:flex; flex-direction:column; }
 
 /* ---------- Topbar ---------- */

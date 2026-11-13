@@ -1,8 +1,11 @@
-/* GZ.charts.oepnvScatterChart — ÖPNV-Anmeldungen im Zeitverlauf: Streudiagramm
-   der Verlustzeit (Ist-Fahrzeit An->Ab minus Sollfahrzeit) mit QSV-
-   Referenzlinien (A-F) und eigenem Symbol für Zwangslöschungen (keine
-   Abmeldung innerhalb der Zwangslöschzeit erhalten). Wird je Signalgruppe
-   einzeln aufgerufen (getrennte Diagramme statt einem kombinierten). */
+/* GZ.charts.oepnvScatterChart shows public transport registrations over time.
+   It is a scatter chart of the lost time:
+   the actual travel time from registration to deregistration, minus the planned travel time.
+   It has QSV reference lines (A to F).
+   It has its own symbol for forced clearances ("Zwangslöschung").
+   A forced clearance is a registration with no deregistration within the forced clearance time.
+   The caller calls the chart once for each signal group. The charts are separate. There is no
+   combined chart. */
 (function (GZ) {
   'use strict';
   const { fmtTimeShort, esc } = GZ.format;
@@ -14,7 +17,8 @@
   const EXCLUDED_COLOR = 'var(--text-faint)';
   const triangle = d3.symbol().type(d3.symbolTriangle).size(64);
 
-  // data: {tMin, tMax, abmeldungEvents, zwangsgeloeschtEvents, losBounds, splTransitions, cycleStarts, onPointClick(t)}
+  // data: {tMin, tMax, abmeldungEvents, zwangsgeloeschtEvents, losBounds, splTransitions,
+  // cycleStarts, onPointClick(t)}
   function render(chartBoxEl, axisEl, data) {
     const svgEl = chartBoxEl.querySelector('svg');
     const tooltipEl = chartBoxEl.querySelector('.chart-tooltip');

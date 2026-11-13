@@ -1,10 +1,10 @@
-/* GZ.views.wartezeit — tab "Wartezeit ab Anforderung".
+/* GZ.views.wartezeit is the tab "Wartezeit ab Anforderung".
    1  Which detector belongs to which signal group? (automatic by name rule,
-      checked against the data, manual override; see GZ.detectors)
+      checked against the data, manual override, see GZ.detectors)
    2  How long do requests wait for green? (all signal groups at once)
-   3  Wait times over time or as CDF (whole recording, per signal plan, per hour)
-   4  The longest waits (with log lines around them, when a log is loaded)
-   The calculation itself is GZ.wartezeitLogic.computeWartezeitEvents. */
+   3  Wait times over time or as CDF (whole recording, for each signal plan, for each hour)
+   4  The longest waits (with log lines around them, if a log is loaded)
+   GZ.wartezeitLogic.computeWartezeitEvents does the calculation. */
 (function (GZ) {
   'use strict';
   const { esc, fmtNum, fmtTs, fmtTimeShort } = GZ.format;
@@ -65,7 +65,8 @@
       els.modeGroup.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
       renderTrend();
     });
-    // Parameters. Limits only redraw. Gap tolerance, green blinking and excluded plans change the events.
+    // Parameters. A change of the limits only redraws.
+    // A change of the gap tolerance, green blinking or excluded plans changes the events.
     const bind = (id, apply, recomputeEvents) => root.querySelector(id).addEventListener('input', e => { apply(e.target); if (recomputeEvents) recompute(); renderAfterParams(); });
     const number = (el, min) => { const v = Number(el.value); return Number.isFinite(v) && v >= min ? v : null; };
     bind('#wzParamVehWarn', el => { params.vehWarn = el.value.trim() === '' ? null : number(el, 0); });
@@ -86,7 +87,7 @@
     return D.sgClass(entry.col) === 'veh' ? { warn: params.vehWarn, limit: params.vehLimit } : { warn: params.vulnWarn, limit: params.vulnLimit };
   }
 
-  // Events of every signal group that has detectors.
+  // Events of each signal group that has detectors.
   function recompute() {
     const a = analysis();
     if (!a) return;

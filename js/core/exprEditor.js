@@ -1,48 +1,51 @@
-/* GZ.exprEditor — wiederverwendbarer Ausdrucks-Editor: farblich nach
-   Token-Art eingefärbter Text in einem contenteditable-Feld, auf demselben
-   Lexer wie das tatsächliche Parsen (GZ.exprEngine). formulaBuilder.js
-   (Umlaufprüfung), oepnvQa.js (ÖPNV-Zeilenfilter) und umlaufstatistiken.js
-   nutzen dasselbe Modul mit jeweils eigenen Symbol-Listen/Modell-Feldern.
+/* GZ.exprEditor is a reusable expression editor.
+   It shows text in a contenteditable field. The color depends on the token kind.
+   It uses the same lexer as the real parsing (GZ.exprEngine).
+   formulaBuilder.js (Umlaufprüfung), oepnvQa.js (ÖPNV row filter) and umlaufstatistiken.js use
+   the same module.
+   Each one has its own symbol lists and model fields.
 
-   Bewusst KEINE Chips/Tabstop-Ketten/Symbol-Sidebar (frühere Version) mehr -
-   jedes Token ist reiner, eingefärbter Text, ein Kandidat aus Dropdown/
-   Palette ersetzt beim Einfügen einfach die aktuelle Selektion. Das macht
-   auch die frühere "Cursor berührt das Token noch"-Ausnahme überflüssig
-   (nur zum Schutz der Chip-Atomarität nötig) - jedes Zeichen bleibt normal
-   mit Backspace/Delete löschbar, auch mitten in einem eingefärbten Token.
+   An earlier version had chips, tab stop chains and a symbol sidebar. The editor has NONE of
+   them now.
+   Each token is plain, colored text.
+   A candidate from the dropdown or the palette simply replaces the current selection when the
+   user inserts it.
+   This also removes the earlier exception "the cursor still touches the token".
+   The exception was only necessary to protect the atomicity of the chips.
+   The user can delete each character normally with Backspace or Delete, also in the middle of a
+   colored token.
 
-   Modell: Quelle der Wahrheit bleibt der reine Ausdruckstext beim Aufrufer
-   (opts.getText()/setText()) - der Editor wird bei jeder Änderung aus
-   diesem Text neu gerendert (siehe refreshEditorContent()), nie umgekehrt.
-   Der native Undo-Stack des Browsers überlebt diesen Neuaufbau nicht (dafür
-   bräuchte es inkrementelles DOM-Patchen statt eines vollen Neuaufbaus je
-   Tastendruck) - daher die eigene, schlanke Undo/Redo-Historie unten.
+   Model: the source of truth stays the plain expression text in the caller (opts.getText() and
+   setText()).
+   The editor renders again from this text after each change (see refreshEditorContent()). It
+   never works the other way.
+   The native undo stack of the browser does not survive this rebuild.
+   It would need incremental DOM patching and not a full rebuild at each key press.
+   So the module has its own slim undo and redo history below.
 
-   setup(rowEl, opts) - opts:
-     getText()->string, setText(string)
-     knownNames()->Set<string> - Bezeichner, die (wenn identColorFor eine
-       Farbe liefert) eine individuelle Akzentfarbe statt der generischen
-       Variablen-Farbe bekommen (z.B. formulaBuilder.js: eine referenzierte
-       Formel trägt dieselbe Farbe wie ihre eigene Zeile).
-     getCandidates()->[{group,label,hint,desc,insertText,selStart,selEnd,
-       onAccept?()->string|void,kind}] - Autovervollständigung (nach
-       Bezeichner-Präfix gefiltert)/Funktions-Palette (ungefiltert, Button
-       .expr-palette-btn, falls vorhanden). onAccept ist ein optionaler Hook
-       für Kandidaten, deren Einfügen mehr als reinen Text braucht (z.B.
-       formulaBuilder.js: eine Spalte auswählen legt bei Bedarf automatisch
-       eine Variable an und fügt deren Alias ein) - der Rückgabewert ERSETZT
-       insertText/selStart/selEnd, wenn nicht null/undefined.
-     identColorFor(label)->string|null - optional: individuelle Akzentfarbe
-       für einen bloßen (in knownNames() enthaltenen) Bezeichner.
-     onRevalidate() - debounced (150ms) nach jeder inhaltlichen Änderung.
-   Hängt an rowEl.querySelector('.expr-input-wrap'):
-     wrap.__exprRefreshHighlight(errPos) - von außen (Validierung) genutzt,
-       um nachträglich eine Fehlerposition (rote Wellenlinie) einzuzeichnen. */
+   setup(rowEl, opts), with opts:
+     getText() -> string, setText(string)
+     knownNames() -> Set<string>: identifiers that get an individual accent color
+       instead of the generic variable color, if identColorFor gives a color.
+       An example is formulaBuilder.js: a referenced formula has the same color as its own row.
+     getCandidates() -> [{group,label,hint,desc,insertText,selStart,selEnd,
+       onAccept?() -> string|void,kind}]: autocomplete (filtered by identifier prefix)
+       and function palette (not filtered, button .expr-palette-btn, if it exists).
+       onAccept is an optional hook for candidates whose insertion needs more than plain text.
+       An example is formulaBuilder.js: the selection of a column creates a variable if needed
+       and inserts its alias.
+       If the return value is not null or undefined, it REPLACES insertText, selStart and selEnd.
+     identColorFor(label) -> string|null: optional. An individual accent color for a plain
+     identifier (in knownNames()).
+     onRevalidate(): debounced (150 ms) after each change of the content.
+   The module attaches to rowEl.querySelector('.expr-input-wrap'):
+     wrap.__exprRefreshHighlight(errPos): an outside caller (validation) uses it to add an error
+     position (red wavy line) later. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
 
-  // Debounce-Zeitgeber NUR für die eigene Nachvalidierung dieses Moduls.
+  // Debounce timer ONLY for the own revalidation of this module.
   const debounceTimers = new Map();
 
   function classifyToken(tok, nextTok) {
@@ -61,10 +64,9 @@
     }
   }
 
-  // Baut den Editor-Inhalt (reiner, eingefärbter Text) für den aktuellen
-  // Ausdruckstext neu - errPos markiert (rote Wellenlinie) das fehlerhafte
-  // Token, identColorFor färbt bekannte Bezeichner-Referenzen individuell
-  // (siehe Kopfkommentar).
+  // Builds the editor content (plain, colored text) again for the current expression text.
+  // errPos marks the faulty token (red wavy line).
+  // identColorFor colors known identifier references individually (see the header comment).
   function buildEditorDom(text, { errPos, knownNames, identColorFor } = {}) {
     const frag = document.createDocumentFragment();
     if (!text) return frag;
@@ -112,8 +114,8 @@
     return frag;
   }
 
-  // DOM -> Ausdruckstext. expr-tok-err-eof ist eine rein dekorative Endpunkt-
-  // Markierung (siehe buildEditorDom()), kein echter Inhalt.
+  // DOM -> expression text. expr-tok-err-eof is a purely decorative end mark (see
+  // buildEditorDom()). It is not real content.
   function serializeEditor(el) {
     let out = '';
     el.childNodes.forEach(node => {
@@ -127,9 +129,10 @@
     return node.textContent.length;
   }
 
-  // Wandelt eine native DOM-Position (Node + Kindknoten-/Zeichenindex, wie
-  // sie ein Range/Selection-Endpunkt liefert) in einen Zeichenindex im
-  // Ausdruckstext um - null, wenn container nicht innerhalb von el liegt.
+  // Converts a native DOM position (node plus child node or character index, as a Range or
+  // Selection end point gives it)
+  // into a character index in the expression text.
+  // Returns null if the container is not inside el.
   function containerOffsetToCharOffset(el, container, offset) {
     if (!el.contains(container)) return null;
     let topLevel = container;
@@ -201,12 +204,13 @@
       range.setEnd(focusNode, focusOffset);
       sel.removeAllRanges();
       sel.addRange(range);
-    } catch (e) { /* Selektion bleibt beim Ende - kein harter Fehler */ }
+    } catch (e) { /* The selection stays at the end. This is not a hard error. */ }
   }
 
-  // Baut den Editor-Inhalt neu aus `text`. Bleibt das Feld fokussiert UND
-  // preserveCaret ist true (Standard, für normales Tippen/Nachvalidieren),
-  // wird die Cursorposition erhalten.
+  // Builds the editor content again from `text`.
+  // If the field keeps the focus AND preserveCaret is true (default, for normal typing and
+  // revalidation),
+  // the code keeps the cursor position.
   function refreshEditorContent(el, text, { errPos = null, knownNames = null, preserveCaret = true, identColorFor = null } = {}) {
     const isFocused = document.activeElement === el;
     const selNow = (preserveCaret && isFocused) ? getCaretSelection(el) : null;
@@ -218,20 +222,20 @@
     }
   }
 
-  // Verdrahtet den Ausdrucks-Editor, Fehler-Markierung, Autovervollständigung
-  // (beim Tippen, gefiltert nach Bezeichner-Präfix) und die Funktions-Palette
-  // (Button "ƒ", ungefiltert) für EIN Ausdrucks-Feld - siehe Datei-
-  // Kopfkommentar für opts. Sollte pro Zeile bei jedem Neuaufbau des
-  // umgebenden innerHTML (und damit aller DOM-Knoten) erneut aufgerufen
-  // werden.
+  // Wires the expression editor, the error marking, the autocomplete
+  // (while typing, filtered by identifier prefix) and the function palette (button "ƒ", not
+  // filtered)
+  // for ONE expression field. For opts, see the file header comment.
+  // Call it again for each row each time the surrounding innerHTML is rebuilt (and so all DOM
+  // nodes).
   function setup(rowEl, opts) {
     const wrap = rowEl.querySelector('.expr-input-wrap');
     if (!wrap) return;
     const el = wrap.querySelector('.expr-editor');
     const dropdown = wrap.querySelector('.expr-autocomplete');
-    // rowEl statt wrap durchsucht (Superset) - lässt Aufrufer den ƒ-Button
-    // außerhalb von .expr-input-wrap platzieren (z.B. formulaBuilder.js: im
-    // Kartenkopf statt neben dem Editor selbst).
+    // It searches rowEl and not wrap (a superset).
+    // So the caller can put the ƒ button outside of .expr-input-wrap
+    // (for example in formulaBuilder.js: in the card head and not next to the editor).
     const paletteBtn = rowEl.querySelector('.expr-palette-btn');
     const { getText, setText, knownNames, getCandidates, onRevalidate, identColorFor } = opts;
 
@@ -249,10 +253,9 @@
       }
     };
 
-    // .expr-autocomplete ist bewusst position:fixed statt :absolute (siehe
-    // components.css) - das umgeht das overflow:hidden von .panel (für die
-    // abgerundeten Ecken), das ein absolut positioniertes Dropdown sonst am
-    // Panel-Rand hart abschneiden würde.
+    // .expr-autocomplete is position:fixed and not :absolute on purpose (see components.css).
+    // This avoids the overflow:hidden of .panel (for the rounded corners).
+    // That overflow would cut off an absolutely positioned dropdown hard at the panel edge.
     const positionDropdown = () => {
       const rect = wrap.getBoundingClientRect();
       dropdown.style.left = Math.round(rect.left) + 'px';
@@ -305,7 +308,7 @@
       }
     };
 
-    // Teilstring- statt reiner Präfixsuche (Treffer am Wortanfang zuerst).
+    // Substring search and not only a prefix search (matches at the start of a word come first).
     const matchCandidates = (items, text) => {
       const q = text.toUpperCase();
       const pre = [], sub = [];
@@ -358,14 +361,12 @@
       debounceTimers.set(el, setTimeout(onRevalidate, 150));
     };
 
-    // ---------- Rückgängig/Wiederholen (Ctrl+Z / Ctrl+Y bzw. Ctrl+Shift+Z)
-    // Der native Undo-Stack des Browsers ist hier unbrauchbar (siehe Datei-
-    // Kopfkommentar) - stattdessen eine eigene, schlanke Historie auf
-    // MODELLEBENE (Text + Cursorposition). Aufeinanderfolgendes Tippen wird
-    // zeitlich zusammengefasst (COALESCE_MS), damit ein Undo nicht Zeichen
-    // für Zeichen zurückgeht, sondern ganze Tippgruppen; explizite
-    // Einfügungen (Dropdown/Palette) bilden dagegen immer einen eigenen
-    // Schritt.
+    // ---------- Undo and redo (Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z)
+    // The native undo stack of the browser is not usable here (see the file header comment).
+    // The module has its own slim history on MODEL level (text plus cursor position).
+    // Typing in sequence is grouped by time (COALESCE_MS).
+    // So an undo does not go back character by character, but by whole typing groups.
+    // An explicit insertion (dropdown or palette) is always its own step.
     const HISTORY_LIMIT = 100, COALESCE_MS = 600, COALESCE_MAX_CHARS = 20;
     let undoStack = [], redoStack = [], lastPushAt = 0, groupBaseLen = 0, suppressHistory = false;
     const snapshot = () => ({ text: getText(), caret: getCaretOffset(el) });
@@ -406,11 +407,11 @@
       return true;
     }
 
-    // Zentrale Stelle für JEDE inhaltliche Änderung (Tippen, Einfügen aus
-    // Dropdown/Palette): Modell synchronisieren, Editor neu rendern,
-    // Nachvalidierung anstoßen. caretMode 'preserve' = aktuelle
-    // Cursorposition beibehalten (normales Tippen); {offset} bzw.
-    // {range:[start,end]} = Cursor explizit setzen (Einfügen).
+    // The central place for EVERY change of the content (typing, insertion from the dropdown or
+    // palette):
+    // synchronize the model, render the editor again, trigger the revalidation.
+    // caretMode 'preserve' = keep the current cursor position (normal typing).
+    // {offset} or {range:[start,end]} = set the cursor explicitly (insertion).
     function applyText(newText, caretMode) {
       setText(newText);
       if (caretMode === 'preserve') {
@@ -423,10 +424,10 @@
       debouncedRevalidate();
     }
 
-    // Ersetzt [rStart,rEnd) im aktuellen Text durch insertText, selektiert
-    // anschließend [selStart,selEnd) davon (Platzhalter direkt überschreibbar).
+    // Replaces [rStart,rEnd) in the current text with insertText.
+    // Then it selects [selStart,selEnd) of it, so the user can overwrite placeholders directly.
     function insertAtSelection(rStart, rEnd, insertText, selStart, selEnd) {
-      pushHistory(false); // explizites Einfügen = eigener Undo-Schritt
+      pushHistory(false); // An explicit insertion is its own undo step.
       const val = getText();
       const newText = val.slice(0, rStart) + insertText + val.slice(rEnd);
       el.focus();
@@ -434,10 +435,10 @@
     }
 
     function accept(item, start, end) {
-      // Kandidaten mit onAccept() (z.B. formulaBuilder.js: eine Spalte statt
-      // Primitive/Funktion/Zustand/Variable - erst Alias auflösen/anlegen,
-      // dann wie eine normale Variable einfügen) ERSETZEN insertText/
-      // selStart/selEnd komplett durch den Rückgabewert.
+      // Candidates with onAccept() (for example formulaBuilder.js: a column and not a primitive,
+      // function, state or variable:
+      // first resolve or create the alias, then insert it like a normal variable)
+      // COMPLETELY REPLACE insertText, selStart and selEnd with the return value.
       let insertText = item.insertText, selStart = item.selStart, selEnd = item.selEnd;
       if (item.onAccept) {
         const resolved = item.onAccept();
@@ -448,7 +449,7 @@
     }
 
     el.addEventListener('input', () => {
-      pushHistory(true); // zusammenhängendes Tippen zu einer Gruppe zusammenfassen
+      pushHistory(true); // Merge continuous typing into one group.
       setText(serializeEditor(el));
       refresh(null);
       debouncedRevalidate();
@@ -468,8 +469,8 @@
       applyText(newText, { offset: sel.start + text.length });
     });
     el.addEventListener('keydown', e => {
-      // Rückgängig/Wiederholen vor allem anderen behandeln - der native
-      // Browser-Undo greift hier nicht (siehe Datei-Kopfkommentar).
+      // Handle undo and redo before everything else. The native browser undo does not work here
+      // (see the file header comment).
       const mod = e.ctrlKey || e.metaKey;
       if (mod && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); closeDropdown(); undo(); return; }
       if (mod && ((e.key === 'y' || e.key === 'Y') || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); closeDropdown(); redo(); return; }
@@ -479,16 +480,16 @@
         if (e.key === 'Enter' || e.key === 'Tab') { if (acceptActiveOrFirst()) { e.preventDefault(); return; } }
         else if (e.key === 'Escape') { closeDropdown(); return; }
       }
-      if (e.key === 'Enter') { e.preventDefault(); return; } // einzeilig - kein Zeilenumbruch
+      if (e.key === 'Enter') { e.preventDefault(); return; } // Single line. No line break.
     });
     el.addEventListener('blur', () => {
       setTimeout(closeDropdown, 150);
       refresh(null, { preserveCaret: false });
     });
     if (paletteBtn) {
-      // preventDefault auf mousedown verhindert, dass der Button dem Editor
-      // den Fokus entzieht - sonst würde der blur-Handler die gerade per
-      // openPalette() geöffnete Liste ~150ms später wieder zumachen.
+      // preventDefault on mousedown stops the button from taking the focus from the editor.
+      // Otherwise the blur handler would close the list, which openPalette() just opened, about 150
+      // ms later.
       paletteBtn.addEventListener('mousedown', e => e.preventDefault());
       paletteBtn.onclick = openPalette;
     }

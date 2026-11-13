@@ -1,5 +1,5 @@
-/* Topology editor (tab "Stammdaten LSA" > "Topologie"). Uses the tokens from tokens.css.
-   Road colours are local tokens: a plan drawing keeps its look in every theme. */
+/* Topology editor (tab "Stammdaten LSA" > "Topologie"). It uses the tokens from tokens.css.
+   The road colors are local tokens. A plan drawing keeps its look in every theme. */
 .topo{
   --topo-paper:#fbfcfd;
   --topo-grid:#eef1f4;
@@ -70,7 +70,7 @@
 }
 .topo-draw-bar button{ padding:3px 12px; font-size:12px; }
 
-/* canvas elements */
+/* Canvas elements */
 .t-grid line{ stroke:var(--topo-grid); stroke-width:1; vector-effect:non-scaling-stroke; }
 .t-grid line.major{ stroke:var(--topo-grid-major); }
 .t-road{ fill:var(--topo-road); stroke:var(--topo-road); stroke-width:.06; stroke-linejoin:round; }
@@ -164,7 +164,7 @@
 .t-walk{ fill:none; stroke:var(--topo-walk); stroke-width:5; stroke-linejoin:round; stroke-linecap:butt; }
 .t-label.light{ stroke:rgba(30,36,44,.8); }
 
-/* legend card (plan style: light-blue headings, colour swatches) */
+/* Legend card (plan style: light-blue headings, color swatches) */
 .topo-legend{
   position:absolute; top:12px; left:12px; background:rgba(255,255,255,.94); border:1px solid var(--border);
   border-radius:var(--radius-md); padding:8px 12px 10px; font-size:11.5px; color:var(--text-muted); box-shadow:var(--shadow-sm);

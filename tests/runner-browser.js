@@ -1,4 +1,5 @@
-/* Runs the suite in the browser and shows the result. The page has a strict CSP, so there is no inline script. */
+/* Runs the suite in the browser and shows the result. The page has a strict CSP, so it has no
+   inline script. */
 (function () {
   'use strict';
   window.GZT.runAll().then(function (results) {

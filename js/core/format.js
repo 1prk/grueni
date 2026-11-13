@@ -1,5 +1,5 @@
-/* GZ.format — Zeit-/Zahlenformatierung und HTML-Escaping.
-   Reine Funktionen ohne DOM- oder Analyse-Abhängigkeiten. */
+/* GZ.format formats times and numbers. It also escapes HTML.
+   The functions are pure. They do not use the DOM or an analysis. */
 (function (GZ) {
   'use strict';
 
@@ -24,7 +24,8 @@
     const d = new Date(ms);
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
-  // "Xh Ym" bzw. "Ym Zs" - für Dunkel-/Abschaltzeiträume (Sekunden bis viele Stunden).
+  // Formats a span as "Xh Ym" or "Ym Zs".
+  // Use it for dark periods and switch-off periods. These last from seconds to many hours.
   function fmtDauer(sek) {
     sek = Math.round(sek);
     const h = Math.floor(sek / 3600), m = Math.floor((sek % 3600) / 60), s = sek % 60;
@@ -33,17 +34,17 @@
     return `${s}s`;
   }
 
-  // Number with German decimal comma. Empty value for null/NaN.
+  // Returns a number with a German decimal comma. Returns an empty text for null or NaN.
   function fmtNum(v, digits) {
     if (v == null || !Number.isFinite(v)) return '–';
     return v.toFixed(digits || 0).replace('.', ',');
   }
-  // "HH:MM" of a timestamp (local time).
+  // Returns "HH:MM" of a timestamp in local time.
   function fmtHm(ms) {
     const d = new Date(ms);
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
-  // "h:mm h" for a span in seconds.
+  // Returns "h:mm h" for a span in seconds.
   function fmtHoursMinutes(sek) {
     const m = Math.round(sek / 60);
     return `${Math.floor(m / 60)}:${pad(m % 60)} h`;

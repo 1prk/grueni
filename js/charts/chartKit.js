@@ -1,6 +1,7 @@
-/* GZ.charts.kit — drawing helpers for the report style charts of the green
-   time and wait time tabs. Plain SVG, no d3. One generic time chart
-   (`timeChart`) and one generic CDF chart (`cdfChart`) serve both tabs. */
+/* GZ.charts.kit has drawing helpers for the report-style charts of the green time tab and the
+   wait time tab.
+   It uses plain SVG and no d3.
+   One generic time chart (`timeChart`) and one generic CDF chart (`cdfChart`) serve both tabs. */
 (function (GZ) {
   'use strict';
   const { esc, pad } = GZ.format;
@@ -43,7 +44,7 @@
     t.style.top = Math.max(4, top) + 'px';
   }
   function hideTooltip() { tooltipEl().style.display = 'none'; }
-  // html: string or function(evt) returning a string
+  // html: a string or a function(evt) that returns a string
   function attachTooltip(node, html, wide) {
     node.addEventListener('mousemove', e => showTooltip(e, typeof html === 'function' ? html(e) : html, wide));
     node.addEventListener('mouseleave', hideTooltip);
@@ -52,7 +53,7 @@
   /* ---------------- Time axis ---------------- */
   const TICK_STEPS_MS = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].map(m => m * 60000);
 
-  // Tick times aligned to local clock time, about one label per 90 px.
+  // Tick times that align to local clock time. About one label for each 90 px.
   function timeTicks(tMin, tMax, widthPx) {
     const span = tMax - tMin;
     const wanted = Math.max(2, widthPx / 90);
@@ -95,7 +96,7 @@
        dividers: [t]                               signal plan changes (dashed)
        hours:    [t]                               hour borders (solid, light)
        hLines:   [{ y, color, label, labelColor }]  horizontal reference lines
-       windows:  [{ t0, t1, med, lo, hi }]         median line and P5–P95 band per window
+       windows:  [{ t0, t1, med, lo, hi }]         median line and P5 to P95 band for each window
        steps:    [{ t0, t1, y }]                   step line segments (cycle time)
        points:   [{ t, y, color, r, tip }]
        crosses:  [{ t, tip }]                      "no green in this cycle" marks on the baseline

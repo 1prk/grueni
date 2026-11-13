@@ -1,12 +1,12 @@
-/* GZ.configIO — Speichern/Laden der Umlaufprüfung-Konfiguration (Formel-
-   Builder + Auswahl-"Layout") als JSON-Datei. Enthält bewusst NICHT die
-   Rohdaten selbst (können bei großen Aufzeichnungen bis zu 100k Zeilen
-   umfassen) - nur einen kompakten "Fingerabdruck" (Spaltennamen, Zeilen-
-   zahl, Zeitraum) zur Prüfung, ob eine gerade geladene CSV zur gespeicherten
-   Konfiguration passt. Spaltenverweise in der Konfiguration selbst
-   (Formel-Variablen, Auswahl-Listen) sind daher immer Name+Kürzel, nie der
-   rohe Spaltenindex - Indizes sind nur innerhalb einer geparsten CSV
-   stabil, Namen bleiben es auch über neue Exports derselben Anlage hinweg. */
+/* GZ.configIO saves and loads the configuration of the cycle check as a JSON file.
+   The configuration holds the formula builder and the selection "layout".
+   The file does NOT hold the raw data. A big recording can have up to 100,000 rows.
+   The file holds a small fingerprint: the column names, the row count and the time range.
+   The fingerprint shows if a loaded CSV fits the saved configuration.
+   Column references in the configuration are always the name plus the kuerzel.
+   They are never the raw column index.
+   An index is stable only inside one parsed CSV.
+   A name stays stable across new exports of the same installation. */
 (function (GZ) {
   'use strict';
 
@@ -16,11 +16,11 @@
     return { columnNames, rowCount: a.times.length, tMin: a.tMin, tMax: a.tMax };
   }
 
-  // exact: identische Aufzeichnung (Spalten, Zeilenzahl UND Zeitraum stimmen
-  //   überein) - Konfiguration passt mit hoher Sicherheit.
-  // columnsMatch: zumindest dieselbe Spaltenstruktur (z.B. derselbe Knoten,
-  //   aber ein anderer Aufzeichnungszeitraum) - Namenszuordnung sollte
-  //   trotzdem funktionieren, aber sicherheitshalber als Hinweis ausweisen.
+  // exact: the same recording. The columns, the row count AND the time range match.
+  //   The configuration fits with high confidence.
+  // columnsMatch: at least the same column structure.
+  //   An example is the same junction with another recording period.
+  //   The name mapping must still work. Show a note to be safe.
   function fingerprintMatches(fp, a) {
     const cur = buildFingerprint(a);
     if (!fp || !cur) return { exact: false, columnsMatch: false };

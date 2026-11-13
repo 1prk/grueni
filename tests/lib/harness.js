@@ -1,5 +1,5 @@
-/* GZT: a small test harness. It runs in Node (inside a vm context) and in the browser.
-   Tests can return a promise. */
+/* GZT is a small test harness. It runs in Node (inside a vm context) and in the browser.
+   A test can return a promise. */
 (function (root) {
   'use strict';
   const tests = [];
@@ -12,7 +12,7 @@
     equal(actual, expected, message) {
       if (actual !== expected) fail(message || 'values differ', 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
     },
-    // Compare as JSON. Arrays from another vm context have another prototype.
+    // Compares as JSON. Arrays from another vm context have another prototype.
     same(actual, expected, message) {
       const a = JSON.stringify(actual), e = JSON.stringify(expected);
       if (a !== e) fail(message || 'values differ', 'expected ' + e.slice(0, 300) + ', got ' + a.slice(0, 300));

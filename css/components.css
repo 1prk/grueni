@@ -1,4 +1,4 @@
-/* ---------- Buttons & form controls ---------- */
+/* ---------- Buttons and form controls ---------- */
 button, .btn{
   font-family:var(--sans); font-size:12.5px; font-weight:600;
   border:1px solid var(--border-strong); background:var(--bg-surface); color:var(--text);
@@ -43,7 +43,7 @@ select, input[type=number], input[type=text]{
 }
 select:focus, input:focus{ outline:none; border-color:var(--accent); }
 
-/* ---------- Panels / cards ---------- */
+/* ---------- Panels and cards ---------- */
 .panel{
   background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-lg);
   box-shadow:var(--shadow-sm); overflow:hidden;
@@ -96,7 +96,7 @@ tbody tr.spl-group-row td{
   border-top:2px solid var(--border-strong); padding:6px 10px;
 }
 
-/* ---------- Mode / scope toggle groups ---------- */
+/* ---------- Mode and scope toggle groups ---------- */
 .seg-toggle{ display:flex; gap:2px; }
 .seg-toggle button{ padding:4px 11px; font-size:11.5px; }
 .seg-toggle button.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
@@ -113,7 +113,7 @@ tbody tr.spl-group-row td{
 .kpi.crit{ border-color:var(--sig-red); background:var(--crit-bg); }
 .kpi.crit .kpi-value{ color:var(--sig-red); }
 
-/* ---------- Config forms (Wartezeit / Umlaufprüfung Zuweisung) ---------- */
+/* ---------- Config forms (Wartezeit and Umlaufprüfung assignment) ---------- */
 .cfg-grid{ display:grid; grid-template-columns:1fr 1.3fr; gap:18px 26px; padding:16px; }
 .cfg-stack{ display:flex; flex-direction:column; gap:18px; padding:16px; }
 .cfg-field{ display:flex; flex-direction:column; gap:7px; }
@@ -125,20 +125,24 @@ tbody tr.spl-group-row td{
 .cfg-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; }
 .cfg-field-wide{ grid-column:1 / -1; }
 
-/* ---------- Umlaufprüfung: vereinheitlichte Objekt-Liste (SG/DET/APW/
-   ÖPNV/FORMEL in einer sortierbaren Liste statt getrennter Checklisten) -
-   Reihenfolge = Zeilen-Reihenfolge im DOM, per Ziehen am Griff links
-   (.obj-drag) neu anordenbar (siehe wireObjList() in umlaufpruefung.js);
-   ausgewählt = angehakt, unabhängig von der Suche (die nur die Sichtbarkeit
-   filtert, siehe .obj-row-hidden). */
+/* ---------- Cycle check: unified object list ----------
+   The list has signal groups, detectors, APW, public transport and formulas (SG, DET, APW, ÖPNV,
+   FORMEL).
+   It is one sortable list, not separate check lists.
+   The order is the row order in the DOM. The user drags the handle on the left (.obj-drag) to
+   change it.
+   See wireObjList() in umlaufpruefung.js.
+   A selected object is a checked object. This does not depend on the search.
+   The search only filters the visibility. See .obj-row-hidden. */
 .obj-search{ margin-bottom:6px; }
 .obj-list{ display:flex; flex-direction:column; gap:1px; max-height:280px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm); padding:5px; background:var(--bg-surface); }
 .obj-row{ display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:var(--radius-sm); }
 .obj-row:hover{ background:var(--bg-surface-2); }
 .obj-row.obj-row-hidden{ display:none; }
 .obj-row.dragging{ opacity:.35; }
-/* Mehrfachauswahl per Strg-Klick (nur zum gemeinsamen Ziehen, siehe
-   multiSelectKeys in umlaufpruefung.js) - eigenständig vom Anhak-Status. */
+/* Multiple selection with Ctrl+click. It is only for dragging together (see multiSelectKeys in
+   umlaufpruefung.js).
+   It is independent of the checked state. */
 .obj-row.obj-row-selected{ background:var(--accent-bg); box-shadow:inset 0 0 0 1px var(--accent); }
 .obj-row.obj-row-selected:hover{ background:var(--accent-bg-strong); }
 .obj-row.dragging-group{ opacity:.35; }
@@ -153,10 +157,11 @@ tbody tr.spl-group-row td{
 .obj-row-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .obj-list-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; padding:4px 2px; }
 
-/* ---------- Umlaufprüfung: Filterbedingungen (separat von der Objekt-
-   Auswahl oben) - je Zeile ein Objekt + eine typabhängige Bedingung
-   (Zustand-Gleichheit für SG/DET/FORMEL, Operator+Zahl für APW/ÖPNV), siehe
-   renderFilterRows()/buildFilterCondEl() in umlaufpruefung.js. ---------- */
+/* ---------- Cycle check: filter conditions ----------
+   They are separate from the object selection above.
+   Each row has one object and one condition that depends on the type:
+   equality of the state for SG, DET and FORMEL, operator plus number for APW and ÖPNV.
+   See renderFilterRows() and buildFilterCondEl() in umlaufpruefung.js. */
 .up-filter-rows{ display:flex; flex-direction:column; gap:6px; }
 .up-filter-row{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .up-filter-obj{ flex:1; min-width:200px; }
@@ -181,13 +186,13 @@ tbody tr.spl-group-row td{
   .kpi-grid{ grid-template-columns:repeat(2,1fr); }
 }
 
-/* ---------- Wartezeit-Ereignistabelle: Statuszeilen ---------- */
+/* ---------- Wartezeit event table: status rows ---------- */
 tr.wz-excluded td{ color:var(--text-faint); font-style:italic; }
 tr.wz-warnung td:nth-child(6), tr.wz-warnung td:nth-child(7){ color:var(--warn-text); font-weight:700; }
 tr.wz-grenzwert td:nth-child(6), tr.wz-grenzwert td:nth-child(7){ color:var(--sig-red); font-weight:700; }
 tr.wz-unresolved td{ color:var(--sig-red); font-style:italic; }
 
-/* ---------- ÖPNV-Ereignistabelle: LOS-Stufen + Statuszeilen ---------- */
+/* ---------- ÖPNV event table: LOS levels and status rows ---------- */
 .los-chip{ display:inline-flex; align-items:center; justify-content:center; min-width:20px; padding:1px 7px; border-radius:10px; font-weight:700; font-family:var(--mono); font-size:11px; color:var(--text); }
 .los-chip.los-A{ background:var(--los-a); color:#fff; }
 .los-chip.los-B{ background:var(--los-b); }
@@ -214,7 +219,7 @@ tr.oe-hidden{ display:none; }
 .oe-row-remove{ font-size:11px; padding:4px 9px; color:var(--sig-red); border-color:var(--sig-red); }
 .oe-row-remove:hover{ background:var(--crit-bg); }
 
-/* ---------- Umlaufprüfung: Formel-Builder ---------- */
+/* ---------- Cycle check: formula builder ---------- */
 .up-formula-list{ display:flex; flex-direction:column; gap:8px; }
 .up-var-row{ display:flex; align-items:center; gap:6px; }
 .up-var-row .up-var-alias{ width:120px; flex-shrink:0; }
@@ -222,19 +227,20 @@ tr.oe-hidden{ display:none; }
 .up-var-status, .up-formula-status, .oe-filter-status{ width:16px; flex-shrink:0; text-align:center; font-weight:700; cursor:help; }
 .up-var-status.ok, .up-formula-status.ok, .oe-filter-status.ok{ color:var(--sig-green); }
 .up-var-status.err, .up-formula-status.err, .oe-filter-status.err{ color:var(--sig-red); }
-/* "noch nicht fertig" (siehe exprEngine incomplete) - bewusst unauffällig,
-   damit normales Tippen nicht permanent nach Fehler aussieht. */
+/* "Not finished yet" (see exprEngine incomplete). It is not conspicuous on purpose.
+   So normal typing does not look like a permanent error. */
 .up-formula-status.pending, .oe-filter-status.pending{ color:var(--text-faint); }
 .mono-input{ font-family:var(--mono); }
 .oe-filter-row{ display:flex; align-items:flex-start; gap:6px; }
 .oe-filter-row .expr-input-wrap{ flex:1; min-width:0; }
 
-/* Formel-Zeile als Karte statt Ein-Zeiler (Kopf: Name/Status/Aktionen,
-   darunter der Ausdruck über die volle Breite - dadurch mehr Platz für
-   längere/verschachtelte Formeln, siehe .expr-editor white-space:pre-wrap).
-   up-formula-row-{ok,err,pending} (siehe validateFormulaRow() in
-   formulaBuilder.js) färbt den linken Rand als sofort sichtbaren
-   Status-Streifen, ohne dafür jede Zeile bis zum Ende lesen zu müssen. */
+/* A formula row is a card, not a one-liner.
+   The head has name, status and actions. The expression is below it across the full width.
+   So there is more room for longer or nested formulas (see .expr-editor white-space:pre-wrap).
+   up-formula-row-{ok,err,pending} (see validateFormulaRow() in formulaBuilder.js) colors the
+   left border.
+   It is a status stripe that the user sees at once.
+   The user does not need to read each row to the end. */
 .up-formula-row{
   display:flex; flex-direction:column; gap:8px;
   background:var(--bg-surface); border:1px solid var(--border); border-left:3px solid var(--border-strong);
@@ -254,9 +260,9 @@ tr.oe-hidden{ display:none; }
 .up-formula-head-spacer{ flex:1; }
 .up-formula-row .expr-input-wrap{ flex:1; min-width:0; }
 
-/* Kompakte quadratische Symbol-Buttons (ƒ / Hervorheben / Entfernen) statt
-   unterschiedlich gestalteter Einzelelemente - eine Bauform für alle
-   sekundären Aktionen im Kartenkopf. */
+/* Compact square icon buttons (ƒ / highlight / remove).
+   They replace single elements with different designs.
+   One shape serves all secondary actions in the card head. */
 .up-formula-head .icon-btn, .up-formula-head .expr-palette-btn{
   width:25px; height:25px; flex-shrink:0; padding:0; box-sizing:border-box;
   display:inline-flex; align-items:center; justify-content:center;
@@ -271,10 +277,10 @@ tr.oe-hidden{ display:none; }
 .up-formula-head .up-formula-remove{ color:var(--sig-red); border-color:var(--sig-red); }
 .up-formula-head .up-formula-remove:hover{ background:var(--crit-bg); }
 
-/* Hervorhebungs-Popover (ersetzt das frühere <select>, dessen eigener
-   Platzhaltertext im festen 92px-Feld abgeschnitten wurde) - position:fixed
-   wie .expr-autocomplete, aus demselben Grund: umgeht das overflow:hidden
-   von .panel (siehe positionHlPopover() in formulaBuilder.js). */
+/* Highlight popover. It replaces the earlier <select>.
+   The own placeholder text of that <select> was cut off in the fixed 92px field.
+   It uses position:fixed like .expr-autocomplete, for the same reason:
+   it avoids the overflow:hidden of .panel (see positionHlPopover() in formulaBuilder.js). */
 .up-formula-hl-wrap{ position:relative; }
 .up-formula-hl-pop{
   position:fixed; z-index:45; min-width:170px; max-height:230px; overflow-y:auto;
@@ -289,25 +295,26 @@ tr.oe-hidden{ display:none; }
 .up-formula-hl-opt:hover{ background:var(--accent-bg); }
 .up-formula-hl-opt.active{ background:var(--accent); color:#fff; font-weight:700; }
 
-/* Fehler-/Hinweistext direkt unter dem Ausdruck (siehe validateFormulaRow())
-   statt ausschließlich im Tooltip des Status-Zeichens - sichtbar, sobald man
-   die Zeile überhaupt anschaut, nicht erst bei Hover. */
+/* Error or note text directly under the expression (see validateFormulaRow()).
+   Before, the text was only in the tooltip of the status sign.
+   Now it is visible as soon as the user looks at the row. The user does not need to hover. */
 .up-formula-msg{ font-size:11px; line-height:1.5; padding:5px 8px; border-radius:6px; }
 .up-formula-msg.err{ color:var(--crit-text); background:var(--crit-bg); }
 .up-formula-msg.pending{ color:var(--text-muted); background:var(--bg-surface-2); }
 
-/* Farb-Schlüssel unter der Formel-Liste (siehe .legend/.swatch, sonst für
-   Diagramm-Legenden genutzt) - erklärt einmal fest, was die Chip-Farben
-   bedeuten, statt es nur je Chip als Tooltip zu verstecken. */
+/* Color key under the formula list (see .legend and .swatch, which charts use for legends
+   otherwise).
+   It explains once and for all what the chip colors mean.
+   It does not hide the meaning in a tooltip for each chip. */
 .up-formula-legend{ border:1px solid var(--border); border-radius:var(--radius-sm); margin-top:10px; }
 
-/* ---------- "Bausteine" (Variablen/Funktionen, einklappbar) ----------
-   Dieselbe Mechanik wie .data-panel (siehe layout.css): Klick auf den Kopf
-   togglet die Klasse "open" am Container, CSS zeigt/versteckt den Body und
-   tauscht den Umschalter-Text per ::before - kein zusätzlicher JS-Zustand
-   nötig. Formeln bleiben dadurch der primäre, immer offene Arbeitsbereich;
-   Variablen/Funktionen (nach dem Einrichten selten gebraucht) starten
-   eingeklappt. */
+/* ---------- "Bausteine" (variables and functions, collapsible) ----------
+   The mechanism is the same as .data-panel (see layout.css).
+   A click on the head toggles the class "open" on the container.
+   CSS shows or hides the body and swaps the toggle text with ::before.
+   It needs no extra JS state.
+   So the formulas stay the main workspace that is always open.
+   The variables and functions (rarely needed after the setup) start collapsed. */
 .baustein-panel{ border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-surface-2); overflow:hidden; }
 .baustein-panel-head{
   display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer; user-select:none;
@@ -334,16 +341,17 @@ tr.oe-hidden{ display:none; }
 .up-func-status.ok{ color:var(--sig-green); }
 .up-func-status.err{ color:var(--sig-red); }
 
-/* ---------- Umlaufprüfung: Formel-Builder Layout ---------- */
+/* ---------- Cycle check: formula builder layout ---------- */
 .formula-layout{ padding:16px; }
 
-/* ---------- Umlaufprüfung: Ausdrucks-Editor (Fehler-Markierung,
-   Autovervollständigung, Funktions-Palette) ---------- contenteditable
-   statt <input>, um Token live einzufärben - siehe js/core/exprEditor.js
-   Kopfkommentar (ein früherer Overlay-Trick mit unsichtbarem <input> über
-   farbigem <div> hatte einen strukturellen Makel: Textauswahl wurde von
-   manchen Browsern trotz color:transparent sichtbar gerendert und
-   überlappte mit dem Highlight darunter). */
+/* ---------- Cycle check: expression editor (error marking, autocomplete, function palette)
+   ----------
+   It uses contenteditable and not <input>, to color the tokens live. See the header comment of
+   js/core/exprEditor.js.
+   An earlier overlay trick used an invisible <input> over a colored <div>. It had a structural
+   flaw:
+   some browsers rendered the text selection visibly in spite of color:transparent.
+   The selection overlapped the highlight below it. */
 .expr-input-wrap{ position:relative; display:flex; align-items:flex-start; gap:4px; }
 .expr-editor{
   flex:1; min-width:0; box-sizing:border-box; border:1px solid var(--border-strong);
@@ -359,9 +367,10 @@ tr.oe-hidden{ display:none; }
   background:var(--bg-surface); color:var(--text-muted); cursor:pointer;
 }
 .expr-palette-btn:hover{ background:var(--accent-bg); color:var(--accent-strong); border-color:var(--accent); }
-/* position:fixed statt :absolute (Koordinaten per JS, siehe positionDropdown()
-   in formulaBuilder.js) - umgeht das overflow:hidden von .panel, das ein
-   absolut positioniertes Dropdown sonst am Panel-Rand abschneiden würde. */
+/* position:fixed and not :absolute (JS sets the coordinates, see positionDropdown() in
+   formulaBuilder.js).
+   This avoids the overflow:hidden of .panel.
+   That overflow would cut off an absolutely positioned dropdown at the panel edge. */
 .expr-autocomplete{
   position:fixed; min-width:260px; max-width:420px;
   max-height:240px; overflow-y:auto; background:var(--bg-surface); border:1px solid var(--border-strong);
@@ -373,8 +382,8 @@ tr.oe-hidden{ display:none; }
 .expr-ac-label{ font-weight:700; color:var(--text); }
 .expr-ac-hint{ color:var(--text-faint); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-/* Eingefärbter Text je Token-Art (Zahlen/Operatoren/Klammern/AND-OR-NOT/
-   Zustände/Funktionsnamen/Bezeichner). */
+/* Colored text for each token kind (numbers, operators, brackets, AND/OR/NOT, states, function
+   names, identifiers). */
 .expr-tok-num{ color:var(--accent-strong); }
 .expr-tok-kw{ color:var(--text-muted); font-weight:700; }
 .expr-tok-op{ color:var(--text); }
@@ -383,12 +392,13 @@ tr.oe-hidden{ display:none; }
 .expr-tok-kat{ color:var(--formula-on); font-weight:600; }
 .expr-tok-func{ color:var(--req-marker); font-weight:600; }
 .expr-tok-var{ color:var(--accent); }
-/* Text-Literal ("..."/'...') - z.B. für den ÖPNV-Zeilenfilter (SPL-Vergleich). */
+/* Text literal ("..." or '...'), for example for the public transport row filter (SPL
+   comparison). */
 .expr-tok-text{ color:var(--sig-redyellow); font-weight:600; }
-/* Bekannter Bezeichner mit individueller Akzentfarbe (identColorFor()-Hook
-   in js/core/exprEditor.js) statt der generischen Variablenfarbe - z.B. eine
-   referenzierte Formel trägt dieselbe Farbe wie ihre eigene Zeile in
-   formulaBuilder.js (siehe formulaColorFor()). */
+/* Known identifier with its own accent color (hook identColorFor() in js/core/exprEditor.js).
+   It replaces the generic variable color.
+   For example a referenced formula has the same color as its own row in formulaBuilder.js (see
+   formulaColorFor()). */
 .expr-tok-accent{ box-shadow:inset 0 -2px 0 0 var(--ident-accent); border-radius:2px; }
 
 /* ---------- Umlaufprüfung ---------- */
@@ -397,7 +407,7 @@ tr.oe-hidden{ display:none; }
 .up-group:last-child{ border-bottom:none; }
 .up-group:hover{ background:var(--bg-surface-2); }
 
-/* Hover-Fadenkreuz (alle Spuren eines Umlaufs), siehe wireCrosshair() */
+/* Hover crosshair (all tracks of a cycle), see wireCrosshair() */
 .up-crosshair-label{
   position:absolute; bottom:2px; display:none; transform:translateX(-50%);
   font-family:var(--mono); font-size:10px; font-weight:700; color:var(--text);
@@ -405,7 +415,7 @@ tr.oe-hidden{ display:none; }
   padding:1px 5px; pointer-events:none; white-space:nowrap; z-index:2;
 }
 
-/* ---------- Stammdaten LSA: Phasenmatrix ---------- */
+/* ---------- Stammdaten LSA: phase matrix ---------- */
 .phase-matrix-wrap{ overflow-x:auto; }
 table.phase-matrix{ width:auto; min-width:100%; border-collapse:collapse; font-size:12.5px; }
 table.phase-matrix th, table.phase-matrix td{ padding:8px 10px; border-bottom:1px solid var(--border); text-align:center; white-space:nowrap; }
@@ -480,7 +490,7 @@ table.static-rows tbody tr{ cursor:default; }
 
 .panel-head-actions{ display:flex; align-items:center; gap:8px; }
 
-/* ---------- Modal (Hilfe & Beispiele) ---------- */
+/* ---------- Modal (help and examples) ---------- */
 .modal-overlay{
   position:fixed; inset:0; z-index:900; background:rgba(20,30,45,.45);
   display:flex; align-items:center; justify-content:center; padding:24px;

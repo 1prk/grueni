@@ -1,21 +1,21 @@
-/* GZ.detectors — assignment of detectors to signal groups.
+/* GZ.detectors assigns detectors to signal groups.
 
-   Wait time analysis needs to know which detectors request which signal group.
-   Three sources, in this order:
-   1. Name rule ("name"): IS | DF | RD + number [+ "_lane"] belongs to the vehicle
-      or bicycle signal group K<number> / R<number>; FT | BT | FTV + number belongs
-      to the pedestrian signal group F<number>.
-   2. Data check ("data"): a presence detector that requests a signal group is
-      occupied before the green start and stays occupied until shortly after it.
+   The wait time analysis must know which detectors request which signal group.
+   There are three sources, in this order:
+   1. Name rule ("name"): IS, DF or RD plus a number (and an optional "_lane")
+      belongs to the vehicle or bicycle signal group K<number> or R<number>.
+      FT, BT or FTV plus a number belongs to the pedestrian signal group F<number>.
+   2. Data check ("data"): a presence detector that requests a signal group
+      is occupied before the green start. It stays occupied until shortly after the green start.
       So its occupancy periods span green starts of that signal group.
-      The check suggests an assignment when the name rule gives none and
-      shows a warning when a name-based link contradicts the data.
+      The check suggests an assignment when the name rule gives none.
+      It shows a warning when a link from the name contradicts the data.
    3. Manual ("manual").
-   A detector may belong to several signal groups. Several detectors of one
-   signal group are combined with OR.
+   A detector can belong to several signal groups.
+   The detectors of one signal group are combined with OR.
 
-   Detector kinds: "presence" (induction loop, camera field, radar) and
-   "pulse" (push button; the request stays until green). */
+   Detector kinds: "presence" (induction loop, camera field, radar)
+   and "pulse" (push button, the request stays until green). */
 (function (GZ) {
   'use strict';
   const { buildSegments } = GZ.segments;
@@ -29,11 +29,11 @@
 
   // An occupancy period must be at least this long to count in the data check.
   const MIN_OCCUPANCY_SEC = 3;
-  // Data check score from which a link counts as confirmed / contradicted.
+  // The data check score from which a link counts as confirmed or contradicted.
   const CONFIRMED = 0.8;
   const CONTRADICTED = 0.5;
-  // Scores this close to the best score count as a tie (for example two
-  // signal groups with parallel green).
+  // Scores that are this close to the best score count as a tie.
+  // An example is two signal groups with a parallel green.
   const TIE_MARGIN = 0.03;
 
   // Signal group types. Public transport (OCIT type "tram") has its own tab.
@@ -51,7 +51,7 @@
     return rule ? rule.kind : 'presence';
   }
 
-  // Names of the signal groups a detector name points to.
+  // Returns the names of the signal groups that a detector name points to.
   function nameTargets(name, sgNames) {
     const rule = NAME_RULES.find(r => r.re.test(name));
     if (!rule) return [];
@@ -62,7 +62,8 @@
   /* ---------------- State ---------------- */
   function data() { return GZ.state.data.detectors; }
 
-  // Call once per new analysis. Builds the detector list and applies the name rule.
+  // Call this function once for each new analysis. It builds the detector list and applies the name
+  // rule.
   function init(a) {
     const eligible = a.allStats.filter(s => sgClass(s.col) !== 'transit');
     const sgByName = new Map(eligible.map(s => [s.col.name.toUpperCase(), s.col.index]));
@@ -98,8 +99,9 @@
     return c.get(det.col.index);
   }
 
-  // Share of the occupancy periods of a presence detector that span a green
-  // start of the signal group. null for pulse detectors (no occupancy period).
+  // Returns the share of the occupancy periods of a presence detector that span a green start of
+  // the signal group.
+  // Returns null for pulse detectors. They have no occupancy period.
   function score(a, det, sgIndex) {
     if (det.kind === 'pulse') return null;
     const key = det.col.index + ':' + sgIndex;
@@ -110,7 +112,7 @@
       const starts = entry.stats.greens.map(g => g.start);
       let hits = 0;
       periods.forEach(p => {
-        // first green start at or after the period start
+        // The first green start at or after the start of the period.
         let lo = 0, hi = starts.length;
         while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] < p.start) lo = mid + 1; else hi = mid; }
         if (lo < starts.length && starts[lo] <= p.end) hits++;
@@ -122,8 +124,9 @@
 
   function eligibleSgs(a) { return a.allStats.filter(s => sgClass(s.col) !== 'transit'); }
 
-  // Best data match for a presence detector. On a (near) tie, a signal group
-  // without any detector wins. Returns { sg (column index), score, ties } or null.
+  // Returns the best data match for a presence detector.
+  // In a (near) tie, a signal group without a detector wins.
+  // Returns { sg (column index), score, ties } or null.
   function bestMatch(a, det) {
     if (det.kind === 'pulse') return null;
     const ranked = eligibleSgs(a).map(s => ({ sg: s.col.index, score: score(a, det, s.col.index) })).sort((x, y) => y.score - x.score);
@@ -134,14 +137,15 @@
     return { sg: pick.sg, score: pick.score, ties: tied.filter(x => x !== pick).map(x => x.sg) };
   }
 
-  // Occupancy per sample (OR over the given detectors).
+  // Occupancy for each sample (OR over the given detectors).
   function occupancy(a, dets) {
     const series = dets.map(d => a.seriesByCol.get(d.col.index));
     return a.times.map((_, i) => series.some(s => wzIstBelegt(s[i])));
   }
 
-  /* ---------------- Persistence (part of the node configuration file) ---------------- */
-  // References use column names, never indices (indices are stable only inside one parsed file).
+  /* ---------------- Persistence (part of the junction configuration file) ---------------- */
+  // References use column names. They never use indices. An index is stable only inside one parsed
+  // file.
   function toConfig(a) {
     const nameOf = new Map(a.allStats.map(s => [s.col.index, s.col.name]));
     return {
@@ -149,7 +153,7 @@
       ignored: list().filter(d => d.ignored).map(d => d.name)
     };
   }
-  // Returns a list of messages for references that no longer exist.
+  // Returns a list of messages for references that do not exist any more.
   function fromConfig(a, cfg) {
     const skipped = [];
     const sgIndexByName = new Map(a.allStats.map(s => [s.col.name, s.col.index]));

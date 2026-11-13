@@ -1,29 +1,31 @@
-/* GZ.topology — topology of one intersection (geometry and model, no DOM).
+/* GZ.topology is the topology of one intersection (geometry and model, no DOM).
 
    Drawing steps:
    1. Axes: splines through control points (metres, x = east, y = north).
    2. Arms: an arm is one half of an axis, from the centre of the intersection outward.
-      The centre is the crossing point of the axes (or set by hand).
-   3. Lanes: ingress ("in") and egress ("out") lanes per arm, built as parallel
-      offset curves of the arm axis. A lane starts at the stop line and runs
-      away from the intersection (same order as the MAP node list).
+      The centre is the crossing point of the axes (or the user sets it by hand).
+   3. Lanes: ingress ("in") and egress ("out") lanes for each arm.
+      The code builds them as parallel offset curves of the arm axis.
+      A lane starts at the stop line and runs away from the intersection (same order as the MAP
+      node list).
    4. Connections: ingress lane -> egress lane (MAP "connectsTo").
 
-   Signal groups and detectors are attached to lanes by NAME (never by column
-   index; indices are stable only inside one parsed file, same rule as GZ.configIO).
+   The code attaches signal groups and detectors to lanes by NAME (never by column index).
+   Indices are stable only inside one parsed file. This is the same rule as GZ.configIO.
 
-   Traffic drives on the right. Looking outward along an arm, ingress lanes are
-   on the left side and egress lanes on the right side. */
+   Traffic drives on the right.
+   Look outward along an arm.
+   The ingress lanes are on the left side and the egress lanes are on the right side. */
 (function (GZ) {
   'use strict';
 
   const DEFAULTS = {
     stopDist: 12,        // m from the centre to the stop line
     gap: 0,              // m between the ingress side and the egress side (median)
-    minArmLen: 4,        // m; shorter arms are ignored
-    maxCenterDist: 30,   // m; an axis farther away from the centre is not part of the intersection
+    minArmLen: 4,        // m. The code ignores shorter arms.
+    maxCenterDist: 30,   // m. An axis that is farther away from the centre is not part of the intersection.
     crossWidth: 4,       // m, distance between the two dashed lines of a pedestrian crossing
-    corridorTol: 8,      // m; axes that do not cross but come this close still form an intersection
+    corridorTol: 8,      // m. Axes that do not cross but come this close still form an intersection.
     islandLen: 30,       // m, length of a median island (Mittelinsel) from the stop line outward
     islandBack: 2,       // m, the island starts this far before the stop line (round end)
     taper: 8,            // m, length of the taper at the end of a short (turning) lane
@@ -31,9 +33,9 @@
     triRound: 0.9,       // m, radius of its rounded corners
     triTip: 1.6,         // m, width of the nose of the triangle island
     cornerRadius: 8,     // m, kerb radius of a junction corner (circle tangent to both arm edges)
-    rightRadius: 12.5,   // m, radius of a right turn (its tangent length is limited by it)
+    rightRadius: 12.5,   // m, radius of a right turn (it limits the tangent length)
     triDepth: 0.6        // the tip of the triangle island is cut at this depth (times the base) behind its base
-    ,collideSlack: 0.2   // m, a path may come this much closer to an island or kerb than half its lane width
+    ,collideSlack: 0.2   // m. A path can come this much closer to an island or kerb than half its lane width.
   };
 
   const LANE_TYPES = {
@@ -109,12 +111,15 @@
     if (dense.length < 2) return [];
     const cl = cumLen(dense), L = cl[cl.length - 1];
     r = Math.min(r, L / 2);
-    const cap = d => (d >= r ? r : Math.sqrt(Math.max(0, 2 * r * d - d * d)));   // circle: height at distance d from the end
+    // circle: height at distance d from the end
+    const cap = d => (d >= r ? r : Math.sqrt(Math.max(0, 2 * r * d - d * d)));
     const hw = cl.map(s => Math.min(cap(s), cap(L - s)));
     return offsetPoly(dense, hw).concat(offsetPoly(dense, hw.map(h => -h)).reverse());
   }
 
-  // Rounds the corners of a polygon. pts: [{x,y,round?}]. Only points with round = true are rounded.
+  // Rounds the corners of a polygon.
+  // pts: [{x,y,round?}].
+  // The function rounds only points with round = true.
   function roundCorners(pts, r) {
     const n = pts.length, out = [];
     for (let i = 0; i < n; i++) {
@@ -292,7 +297,8 @@
   const COMPASS = ['Nord', 'Nordost', 'Ost', 'Südost', 'Süd', 'Südwest', 'West', 'Nordwest'];
   function compassName(bearing) { return COMPASS[Math.round(bearing / 45) % 8]; }
 
-  // Signed turn angle in degrees (counter-clockwise is positive = left) from heading a to heading b.
+  // Signed turn angle in degrees (counter-clockwise is positive = left) from heading a to heading
+  // b.
   function turnAngle(a, b) {
     return Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y) * 180 / Math.PI;
   }
@@ -308,12 +314,14 @@
     return {
       version: 1, name: '', refLat: null, refLon: null,
       axes: [],          // { id, name, points:[{x,y}] }
-      center: null,      // manual centre { x, y }; null = automatic
+      center: null,      // manual centre { x, y }, null = automatic
       arms: {},          // key "<axisId>:s|e" -> { name?, stopDist?, gap? }
       lanes: [],         // { id, armKey, dir:'in'|'out', order, type, width, sgs:[], detectors:[] }
       crosswalks: [],    // { id, armKey, width, sgs:[], detectors:[] }
       connections: [],   // { id, from, to, sg|null }
-      background: null,  // { name, src (data URL), wPx, hPx, mPerPx, x, y (world position of the top left corner), opacity }
+      // { name, src (data URL), wPx, hPx, mPerPx, x, y (world position of the top left corner),
+      // opacity }
+      background: null,
       planOpacity: 1,    // opacity of the drawn plan over the background
       seq: {}
     };
@@ -451,7 +459,7 @@
         });
       });
     }
-    // clockwise from north; an arm up to 22.5 degrees left of north still counts as the first one
+    // clockwise from north, an arm up to 22.5 degrees left of north still counts as the first one
     const sector = arm => (arm.bearing + 22.5) % 360;
     arms.sort((a, b) => sector(a) - sector(b));
     const used = {};
@@ -469,13 +477,16 @@
       arm.outStart = Math.max(0, +cfg.outStart || 0);
       buildArmGeometry(model, arm);
     });
-    // Free right turn: the slip lane leaves its arm slipBack m before the stop line and joins the
-    // egress lane slipAhead m after the stop line of the target arm. The kerb of the corner and the
-    // triangle island follow. kerbFrom: the arm edge has no kerb (and no footway) before this distance.
+    // Free right turn:
+    // The slip lane leaves its arm slipBack m before the stop line.
+    // It joins the egress lane slipAhead m after the stop line of the target arm.
+    // The kerb of the corner and the triangle island follow.
+    // kerbFrom: the arm edge has no kerb (and no footway) before this distance.
     const derived = { center, autoCenter: autoC, arms, axes: entries };
     arms.forEach(arm => { arm.kerbFromIn = 0; arm.kerbFromOut = 0; arm.corner = null; arm.slipShared = false; });
-    // A slip lane that also has other movements (e.g. straight on) is shared: the slip lane branches off
-    // it, and the lane itself goes on to the stop line.
+    // A slip lane can also have other movements (for example straight on).
+    // Then the lanes share it.
+    // The slip lane branches off it, and the lane itself goes on to the stop line.
     arms.forEach(arm => {
       if (!arm.freeRight) return;
       const prev = freeRightTarget(derived, arm), ins = arm.in.filter(isVehicle);
@@ -495,7 +506,7 @@
       pair.prev.kerbFromOut = arm.slipAhead;
       if (!arm.slipShared) pair.slip.slipStart = arm.slipBack;
     });
-    // kerb arcs of the other corners; the arm edges have no kerb before the arc touches them
+    // kerb arcs of the other corners, the arm edges have no kerb before the arc touches them
     const usable = arms.filter(a => a.widthIn + a.widthOut > 0);
     if (usable.length > 2) usable.forEach((a, i) => {
       const b = usable[(i + 1) % usable.length];
@@ -523,13 +534,16 @@
       const subTotal = scl[scl.length - 1];
       arm[dir] = laneList.map((lane, i) => {
         // A short lane (turning lane) is only possible for the innermost and the outermost lane.
-        // It ends with a taper. The width it leaves becomes island (inner lane) or footway (outer lane).
+        // It ends with a taper. The width it leaves becomes island (inner lane) or footway (outer
+        // lane).
         const n = laneList.length;
         const len = lane.length > 0 && n >= 2 && (i === 0 || i === n - 1) && lane.length < subTotal ? lane.length : null;
         const cut = len ? { len, anchor: i === 0 ? 'outer' : 'inner' } : null;
-        // An ingress lane can have its own stop line, set back from the stop line of the arm by stopOffset.
+        // An ingress lane can have its own stop line.
+        // The code sets it back from the stop line of the arm by stopOffset.
         // Its centre line (and so its connections) starts there.
-        // The egress lanes of an arm can start further out (outStart), e.g. behind a large corner.
+        // The egress lanes of an arm can start further out (outStart), for example behind a large
+        // corner.
         const stopOff = Math.max(0, Math.min(subTotal - 2, dir === 'in' ? lane.stopOffset || 0 : arm.outStart || 0));
         const part = subPoly(sub, scl, stopOff, cut ? Math.min(subTotal, cut.len + DEFAULTS.taper / 2) : subTotal);
         const path = offsetPoly(part, side * (inner + lane.width / 2));
@@ -568,7 +582,8 @@
 
 
   // Stop line pieces of an arm: one per group of neighbouring ingress lanes with the same stop line
-  // offset. skipId: a lane without stop line (the slip lane of a free right turn). Returns [[a, b]].
+  // offset. skipId: a lane without stop line (the slip lane of a free right turn). Returns [[a,
+  // b]].
   function stopLineSegments(arm, skipId) {
     const out = [];
     let cur = null;
@@ -590,7 +605,8 @@
     const arm = g.arm, side = g.dir === 'in' ? 1 : -1;
     const total = arm.subCl[arm.subCl.length - 1];
     const end = g.cut ? Math.min(total, g.cut.len + DEFAULTS.taper) : total;
-    // an ingress lane is filled up to the stop line of the arm; an egress lane from where it starts
+    // The code fills an ingress lane up to the stop line of the arm.
+    // It fills an egress lane from where the lane starts.
     const s0 = g.dir === 'out' ? Math.min(g.stopOff || 0, end) : 0;
     const poly = subPoly(arm.sub, arm.subCl, s0, end);
     if (poly.length < 2) return (g._outline = { pts: [], innerEdge: [], outerEdge: [], poly, cl: [] });
@@ -607,7 +623,7 @@
   //   walk    footway band beside the road
   //   gapBase road colour under the median
   //   island  median island with pointed ends (when the median is wider than 0.3 m)
-  //   freed   area an inner short lane leaves behind (also island)
+  //   freed   area that an inner short lane leaves behind (also island)
   //   kerbs   polylines and polygons that get a kerb line
   function armSurfaces(arm) {
     const out = { walk: null, gapBase: null, outBase: null, island: null, freed: [], kerbs: [], kerbPolys: [] };
@@ -624,7 +640,8 @@
       if (part.length >= 2) out.outBase = offsetPoly(part, -half).concat(offsetPoly(part, -(half + arm.widthOut)).reverse());
     }
     if (arm.gap > 0.3 && arm.islandLen > 0) {
-      // the round end lies at the stop line of the innermost ingress lane (it may be set back)
+      // the round end is at the stop line of the innermost ingress lane (the stop line can be
+      // further back)
       const back = arm.in.length ? arm.in[0].stopOff : 0;
       const a = Math.max(0, arm.stopDist + back - DEFAULTS.islandBack), b = Math.min(arm.length, arm.stopDist + back + arm.islandLen);
       const path = subPoly(arm.path, arm.cl, a, b);
@@ -666,12 +683,14 @@
     return out;
   }
 
-  // Kerb of the corner between the right edge of arm a and the left edge of the next arm b: a circle of
-  // radius R that touches both edges (as in road design, "Eckausrundung"). The edges follow the arm
-  // axes, so the circle also fits curved arms. Returns { pts, sa, sb } or null:
-  //   pts  outline from the stop line corner of a, along the edge of a, the arc, along the edge of b, to
-  //        the stop line corner of b
-  //   kerb the kerb line of the corner (the arc, and the edge parts on the junction side of the stop lines)
+  // Kerb of the corner between the right edge of arm a and the left edge of the next arm b.
+  // It is a circle of radius R that touches both edges (in road design: "Eckausrundung").
+  // The edges follow the arm axes, so the circle also fits curved arms.
+  // Returns { pts, sa, sb } or null:
+  //   pts  outline from the stop line corner of a, along the edge of a, the arc,
+  //        along the edge of b, to the stop line corner of b
+  //   kerb the kerb line of the corner (the arc, and the edge parts on the junction side of the
+  //   stop lines)
   //   sa, sb  distance (along the arm axis from the centre) of the points where the arc touches the edges
   function cornerArc(a, b, R) {
     if (!(R > 0.5) || a.path.length < 2 || b.path.length < 2) return null;
@@ -702,8 +721,9 @@
     let ea = edge(a, a.stopDist, sa, -wa); if (sa < a.stopDist) ea = ea.reverse();
     let eb = edge(b, b.stopDist, sb, wb); if (sb >= b.stopDist) eb = eb.reverse();
     const join = parts => { const o = []; parts.forEach(q => { if (!o.length || dist(o[o.length - 1], q) > 0.02) o.push(q); }); return o; };
-    // the outline goes along the edges to the arc; an edge part is kerb only on the junction side of the
-    // stop line (beyond the stop line, the edge borders the road of the corner, not the footway)
+    // The outline goes along the edges to the arc.
+    // An edge part is kerb only on the junction side of the stop line.
+    // Beyond the stop line, the edge borders the road of the corner and not the footway.
     const pts = join(ea.concat(arc, eb));
     const kerb = join((sa < a.stopDist ? ea : []).concat(arc, sb < b.stopDist ? eb : []));
     return { pts, kerb, sa, sb };
@@ -722,7 +742,8 @@
       else cmds.push({ type: 'L', pts: [a.cornerLeft] }, { type: 'L', pts: [a.cornerRight] });
       const F = b.freeRight && b.slipBack != null && usable.length > 2 ? freeRightSlip(b, a) : null;
       if (F) {
-        // the corner kerb is the kerb of the slip lane ('kerb': the kerb line, for drawing and collision checks)
+        // the corner kerb is the kerb of the slip lane ('kerb': the kerb line, for drawing and
+        // collision checks)
         cmds.push({ type: 'L', pts: F.kerb, kerb: F.kerb }, { type: 'L', pts: [b.cornerLeft] });
         return;
       }
@@ -737,7 +758,8 @@
         ((ctrl.x - a.cornerRight.x) * a.dir.x + (ctrl.y - a.cornerRight.y) * a.dir.y) < 0.01 &&
         ((ctrl.x - b.cornerLeft.x) * b.dir.x + (ctrl.y - b.cornerLeft.y) * b.dir.y) < 0.01;
       if (usable.length > 2 && ok) cmds.push({ type: 'Q', pts: [ctrl, b.cornerLeft] });
-      // no curve (e.g. two arms of the same axis with different widths): a straight kerb between the corners
+      // no curve (for example two arms of the same axis with different widths): a straight kerb
+      // between the corners
       else if (usable.length > 2) cmds.push({ type: 'L', pts: [b.cornerLeft], kerb: [a.cornerRight, b.cornerLeft] });
       else cmds.push({ type: 'L', pts: [b.cornerLeft] });
     });
@@ -799,7 +821,8 @@
     return lane && lane.sgs.length === 1 ? lane.sgs[0] : null;
   }
 
-  // Proposes connections by geometry. Does not change the model; returns [{from,to}].
+  // Proposes connections by geometry.
+  // It does not change the model. It returns [{from,to}].
   function proposeConnections(model, derived) {
     const out = [];
     const reserved = new Set(), reservedBy = new Map();
@@ -820,13 +843,13 @@
         const score = m === 'straight' ? ang : Math.abs(ang - 90);
         if (!targets[m] || score < targets[m].score) targets[m] = { arm: other, score };
       });
-      let throughIdx = 0;      // number of through lanes before the lane that is handled now
+      let throughIdx = 0;      // number of through lanes before the lane that the code handles now
       const pick = (g, targetArm, m) => {
         // the egress lane of a free right turn belongs to the slip lane only
         const free = targetArm.out.filter(o => !reserved.has(o.lane.id) || g.lane.id === reservedBy.get(o.lane.id));
         const outs = free.length ? free : targetArm.out;
         const same = outs.filter(o => o.lane.type === g.lane.type);
-        // a motor vehicle may use a shared tram lane, never a bike lane
+        // a motor vehicle can use a shared tram lane, never a bike lane
         const motor = outs.filter(o => o.lane.type !== 'bike');
         const pool = same.length ? same : (g.lane.type !== 'bike' && motor.length ? motor : outs);
         let idx = m === 'left' ? 0 : m === 'right' ? pool.length - 1 : Math.min(throughIdx, pool.length - 1);
@@ -835,7 +858,7 @@
       const vehicleIns = ins.filter(isVehicle);
       ins.forEach(g => {
         let wanted;
-        if (g.lane.type === 'tram') return;          // tracks are connected by hand
+        if (g.lane.type === 'tram') return;          // the user connects tracks by hand
         if (g.lane.type === 'bike') wanted = ['straight'];
         else {
           const k = vehicleIns.indexOf(g), n = vehicleIns.length;
@@ -848,7 +871,7 @@
             // innermost lane: a short lane turns left only
             wanted = g.cut && g.cut.anchor === 'outer' ? ['left'] : (n === 2 && !arm.freeRight ? ['left', 'straight'] : ['left']);
           } else wanted = ['straight'];
-          // only movements that exist at this junction; a lane without any keeps the nearest one
+          // only movements that exist at this junction, a lane without any keeps the nearest one
           wanted = wanted.filter(has);
           if (!wanted.length) wanted = ['straight', 'right', 'left'].filter(has).slice(0, 1);
         }
@@ -874,20 +897,23 @@
     if (!prev || prev === arm) return null;
     const veh = lanes => lanes.filter(isVehicle);
     const ins = veh(arm.in), outs = veh(prev.out);
-    // The island lies between the slip lane and the next lane inside it. So the slip lane and its egress
-    // lane must not be the innermost lanes (another lane of any type, e.g. a tram lane, lies inside).
+    // The island is between the slip lane and the next lane inside it.
+    // So the slip lane and its egress lane must not be the innermost lanes.
+    // Another lane of any type (for example a tram lane) must be inside.
     if (!ins.length || !outs.length) return null;
     const slip = ins[ins.length - 1], target = outs[outs.length - 1];
     if ((slip.index < 1 && !arm.slipShared) || target.index < 1) return null;
     return { prev, slip, target };
   }
 
-  // Slip lane of a free right turn between arm (slip lane) and prev (target arm). Its centre line S leaves
-  // the slip lane slipBack m before the stop line and joins the egress lane slipAhead m after the stop
-  // line of the target arm. S is straight - arc - straight like every right turn (radius
-  // DEFAULTS.rightRadius at most). The kerb (right of S) and the island edge (left of S) keep the lane
-  // width; the width goes smoothly from the slip lane to the egress lane.
-  // Returns { slip, target, S, curve (island edge), kerb (from prev to arm), dSlip, dEgress } or null.
+  // Slip lane of a free right turn between arm (slip lane) and prev (target arm).
+  // Its centre line S leaves the slip lane slipBack m before the stop line.
+  // It joins the egress lane slipAhead m after the stop line of the target arm.
+  // S is straight - arc - straight, like every right turn (radius DEFAULTS.rightRadius at most).
+  // The kerb (right of S) and the island edge (left of S) keep the lane width.
+  // The width goes smoothly from the slip lane to the egress lane.
+  // Returns { slip, target, S, curve (island edge), kerb (from prev to arm), dSlip, dEgress } or
+  // null.
   function freeRightSlip(arm, prev) {
     const veh = l => l.filter(isVehicle);
     const ins = veh(arm.in), outs = veh(prev.out);
@@ -914,12 +940,15 @@
     return { slip, target, S, curve, kerb, dSlip, dEgress };
   }
 
-  // Inner handle position of a right turn: 0.5 up to 65 degrees, rounder (down to 0.3) for sharper turns.
+  // Inner handle position of a right turn: 0.5 up to 65 degrees, rounder (down to 0.3) for sharper
+  // turns.
   // Fitted to hand-drawn driving lines.
   const rightHandle = angle => Math.max(0.3, Math.min(0.5, 0.7 - 0.0031 * angle));
 
-  // Straight - arc - straight from p0 (heading h0) to p1 (heading h1). X: where the two headings meet;
-  // L0, L1: tangent lengths of the arc at X; b: position of the inner handles of the quintic arc.
+  // Straight - arc - straight from p0 (heading h0) to p1 (heading h1).
+  // X: where the two headings meet.
+  // L0, L1: tangent lengths of the arc at X.
+  // b: position of the inner handles of the quintic arc.
   function arcPath(p0, h0, p1, h1, X, L0, L1, b) {
     const a = 0.15, A = along(X, h0, -L0), B = along(X, h1, L1);
     const arc = quintic([A, along(A, h0, a * L0), along(A, h0, b * L0), along(B, h1, -b * L1), along(B, h1, -a * L1), B], 48);
@@ -936,7 +965,8 @@
       const pair = freeRightPair(derived, arm);
       if (!pair) return;
       const { prev, slip, target } = pair;
-      // the island starts at the inner edge of the slip lane, or at its outer edge when the lane is shared
+      // the island starts at the inner edge of the slip lane, or at its outer edge when the lanes
+      // share the slip lane
       const legIn = arm.slipShared ? slip.outer : slip.inner;
       const v1 = { x: arm.stopPt.x + arm.normal.x * legIn, y: arm.stopPt.y + arm.normal.y * legIn };
       const v2 = { x: prev.stopPt.x - prev.normal.x * target.inner, y: prev.stopPt.y - prev.normal.y * target.inner };
@@ -949,13 +979,18 @@
       if (!F) return;
       const { curve, kerb, dSlip, dEgress } = F;
 
-      // The island must never reach into a lane: its straight legs lie on the lane boundaries and
-      // its curved side keeps the lane width to the kerb. The thin ends are cut where the island is
-      // DEFAULTS.triTip wide (a thinner end can not be rounded); the flat ends are then rounded.
+      // The island must never reach into a lane.
+      // Its straight legs are on the lane boundaries.
+      // Its curved side keeps the lane width to the kerb.
+      // The code cuts the thin ends where the island is DEFAULTS.triTip wide (a thinner end cannot
+      // be rounded).
+      // Then it rounds the flat ends.
       // signed distance of q to the line through v along d, positive on the island side (sgn)
       const gapTo = (q, v, d, sgn) => sgn * ((q.y - v.y) * d.x - (q.x - v.x) * d.y);
-      // the slip lane turns toward the kerb, so the island lies on the kerb side of the ingress leg and on
-      // the outer side of the egress leg (a shared slip lane starts on the wrong side of its leg)
+      // The slip lane turns toward the kerb.
+      // So the island is on the kerb side of the ingress leg and on the outer side of the egress
+      // leg.
+      // (A shared slip lane starts on the wrong side of its leg.)
       const k = curve.findIndex(q => gapTo(q, v1, arm.dir, 1) >= DEFAULTS.triTip);
       let m = -1;
       curve.forEach((q, i) => { if (gapTo(q, v2, prev.dir, -1) >= DEFAULTS.triTip) m = i; });
@@ -963,12 +998,14 @@
       const onLine = (q, v, d) => { const t = (q.x - v.x) * d.x + (q.y - v.y) * d.y; return { x: v.x + d.x * t, y: v.y + d.y * t }; };
       const pa = onLine(curve[k], v1, arm.dir), pb = onLine(curve[m], v2, prev.dir);
       let pts = [pa].concat(curve.slice(k, m + 1), [pb, apex]);
-      // When the slip lane leaves before the stop line (or joins after it), the island lies between the
-      // slip lane and the two stop lines: its side toward the junction is the line from v2 to v1.
+      // The slip lane can leave before the stop line (or join after it).
+      // Then the island is between the slip lane and the two stop lines.
+      // Its side toward the junction is the line from v2 to v1.
       const outward = (q, v, dir) => (q.x - v.x) * dir.x + (q.y - v.y) * dir.y > 0.5;
       const chord = (arm.slipBack || 0) > 0 || (arm.slipAhead || 0) > 0;
       if (chord) pts = (outward(pa, v1, arm.dir) ? [v1, pa] : [pa]).concat(curve.slice(k, m + 1), outward(pb, v2, prev.dir) ? [pb, v2] : [pb]);
-      // When the two arms meet at a sharp angle, the legs are long and the tip reaches into the through
+      // When the two arms meet at a sharp angle, the legs are long and the tip reaches into the
+      // through
       // lanes. The tip is then cut flat: no point lies deeper than DEFAULTS.triDepth times the base
       // (the line from v1 to v2) behind the base.
       const base = dist(v1, v2);
@@ -986,20 +1023,23 @@
     return out;
   }
 
-  // The arm that receives the free right turn of an arm (the next arm counterclockwise, on the kerb side).
+  // The arm that receives the free right turn of an arm (the next arm counterclockwise, on the kerb
+  // side).
   function freeRightTarget(derived, arm) {
     const arms = derived.arms;
     if (arms.length < 2) return null;
     const prev = arms[(arms.indexOf(arm) - 1 + arms.length) % arms.length];
     return prev && prev !== arm ? prev : null;
   }
-  // True when a free right turn can be switched on: the arm has a vehicle ingress lane and a neighbour arm.
-  // Missing lanes are added when it is switched on (see applyFreeRight).
+  // True when the user can switch on a free right turn.
+  // The arm must have a vehicle ingress lane and a neighbour arm.
+  // The code adds missing lanes when the user switches it on (see applyFreeRight).
   function freeRightPossible(derived, arm) {
     return !!freeRightPair(derived, arm) || (!!freeRightTarget(derived, arm) && arm.in.some(isVehicle));
   }
 
-  // Inserts a lane after the last vehicle lane of an arm side (a bike lane at the kerb stays outside).
+  // Inserts a lane after the last vehicle lane of an arm side (a bike lane at the kerb stays
+  // outside).
   function insertVehicleLane(model, derived, armKey, dir, length) {
     const arm = derived.arms.find(a => a.key === armKey);
     const list = arm ? arm[dir] : [];
@@ -1013,10 +1053,13 @@
     return lane;
   }
 
-  // Switches the free right turn of an arm. The slip lane then only turns right.
-  // When switched on and lanes are missing, they are added:
-  //  - a short slip lane at the kerb, when the arm has only one vehicle ingress lane, or when its
-  //    outermost vehicle lane also has movements that are not a right turn into the target arm;
+  // Switches the free right turn of an arm on or off.
+  // The slip lane then only turns right.
+  // When the user switches it on and lanes are missing, the code adds them:
+  //  - a short slip lane at the kerb.
+  //    This happens when the arm has only one vehicle ingress lane.
+  //    It also happens when the outermost vehicle lane has movements that are not a right turn into
+  //    the target arm.
   //  - a short merge lane at the target arm, when that arm has only one vehicle egress lane.
   // Returns the list of added lanes.
   function applyFreeRight(model, derived, armKey, on) {
@@ -1053,7 +1096,8 @@
     const isl = (islands || freeRightIslands(derived)).find(i => i.slipFrom === conn.from && i.slipTo === conn.to);
     if (isl) return isl.slipPath;
     const cands = drivingPaths(a, b);
-    // the first shape that keeps the lane clear of islands and kerbs; else the one with the most room
+    // the first shape that keeps the lane clear of islands and kerbs, otherwise the one with the
+    // most room
     const need = clearanceNeed(a, b), obst = obstacles(derived, islands);
     let best = null, bestRoom = -Infinity;
     for (const make of cands) {
@@ -1064,7 +1108,8 @@
     return best;
   }
 
-  // Islands (polygons) and curved kerbs (polylines) a connection must not touch. Cached on the derived data.
+  // Islands (polygons) and curved kerbs (polylines) a connection must not touch. Cached on the
+  // derived data.
   function obstacles(derived, islands) {
     if (derived._obstacles) return derived._obstacles;
     const solid = [];
@@ -1076,9 +1121,11 @@
     });
     return (derived._obstacles = { solid, kerbs: kerbPolylines(derived) });
   }
-  // The path ends in the middle of its egress lane: a narrow egress lane may be closer to the kerb.
+  // The path ends in the middle of its egress lane.
+  // A narrow egress lane can be closer to the kerb.
   const clearanceNeed = (g, h) => Math.min(g.lane.width, h.lane.width) / 2 - DEFAULTS.collideSlack - 0.01;
-  // Smallest distance of a centre line to the obstacles: { island, kerb } and min of both as a number.
+  // Smallest distance of a centre line to the obstacles: { island, kerb } and min of both as a
+  // number.
   function clearanceParts(line, obst) {
     let island = Infinity, kerb = Infinity;
     line.forEach(p => {
@@ -1112,19 +1159,24 @@
     return out;
   }
 
-  // Driving line of a connection, like a vehicle drives it: straight out of the ingress lane, one
+  // Driving line of a connection, as a vehicle drives it: straight out of the ingress lane, one
   // smooth arc, straight into the egress lane.
-  //  - The two lane headings meet at the corner point X. The arc uses a tangent length on each side
-  //    (L0 toward the ingress lane, L1 toward the egress lane); the rest of each leg is straight.
-  //  - The arc is a quintic Bezier curve with its inner handles on the lane headings. Its curvature is
-  //    zero at both ends, so the line has no kinks and no jumps in curvature. Handles of 0.15 L and
-  //    about 0.6 L give a peak curvature near that of a circle with the same tangent length.
-  //  - When the egress lane starts very close to the corner, the arc continues into the egress lane,
-  //    so the turning radius stays realistic (a vehicle finishes the turn after the crossing).
-  //  - A movement without a usable corner (straight on, with or without a small sideways shift) is
-  //    one symmetric S curve.
-  // Returns candidate lines as functions (computed only when needed), the preferred shape first;
-  // connectionPolyline uses the first that is clear.
+  //  - The two lane headings meet at the corner point X.
+  //    The arc uses a tangent length on each side (L0 toward the ingress lane, L1 toward the egress
+  //    lane).
+  //    The rest of each leg is straight.
+  //  - The arc is a quintic Bezier curve with its inner handles on the lane headings.
+  //    Its curvature is zero at both ends, so the line has no kinks and no jumps in curvature.
+  //    Handles of 0.15 L and about 0.6 L give a peak curvature near that of a circle with the same
+  //    tangent length.
+  //  - When the egress lane starts very close to the corner, the arc continues into the egress
+  //    lane.
+  //    So the turning radius stays realistic (a vehicle finishes the turn after the crossing).
+  //  - A movement without a usable corner is one symmetric S curve.
+  //    Examples are straight on, with or without a small sideways shift.
+  // Returns candidate lines as functions (the code computes them only when needed), the preferred
+  // shape first.
+  // connectionPolyline uses the first one that is clear.
   function drivingPaths(fromG, toG) {
     const p0 = fromG.startPt;
     const h0 = { x: -fromG.arm.dir.x, y: -fromG.arm.dir.y };
@@ -1136,9 +1188,12 @@
       const d0 = (X.x - p0.x) * h0.x + (X.y - p0.y) * h0.y, d1 = (q.x - X.x) * hq.x + (q.y - X.y) * hq.y;
       return { X, d0, d1 };
     };
-    // Straight on (below 45 degrees): a nearly direct line between the two lane ends, with short
-    // handles (a smooth bend only near each end), like a vehicle drives across. Fitted to hand-drawn
-    // driving lines. Other S curves follow as fallbacks (islands at the far or near side).
+    // Straight on (below 45 degrees):
+    // A nearly direct line between the two lane ends, with short handles.
+    // The bend is smooth only near each end.
+    // This is how a vehicle drives across.
+    // The values fit hand-drawn driving lines.
+    // Other S curves follow as fallbacks (islands at the far or near side).
     const sLines = [];
     if (angle < 45) {
       const q = toG.startPt, hq = { x: toG.arm.dir.x, y: toG.arm.dir.y }, D = dist(p0, q);
@@ -1148,10 +1203,12 @@
     }
     let c = angle >= 12 && angle <= 160 ? corner(p1, h1) : null;
     const right = turnAngle(h0, h1) < 0;
-    // A right turn sweeps with a radius of about DEFAULTS.rightRadius: its tangent length is limited.
+    // A right turn sweeps with a radius of about DEFAULTS.rightRadius. This limits its tangent
+    // length.
     const Lmax = right && angle >= 45 ? DEFAULTS.rightRadius * Math.tan(angle * Math.PI / 360) : Infinity;
     if (c && c.d0 > 0.5 && angle >= 45) {
-      // The turn continues into the egress lane when the egress leg is shorter than the wanted tangent
+      // The turn continues into the egress lane when the egress leg is shorter than the wanted
+      // tangent
       // (a vehicle finishes the turn after the crossing).
       const want = right ? Math.min(c.d0, Lmax) : 0.6 * c.d0;
       const avail = (toG.cut ? Math.min(toG.cut.len, toG.cl[toG.cl.length - 1]) : toG.cl[toG.cl.length - 1]) - 1;
@@ -1162,16 +1219,22 @@
       }
     }
     if (c && c.d0 > 0.5 && c.d1 > 0.5) {
-      // The line is straight - arc - straight. The arc has the tangent lengths L0 (toward the ingress
-      // lane) and L1 (toward the egress lane) at the corner point X, where the two lane headings meet.
-      //  - left turn: the arc uses nearly the whole of both legs (each at most 1.3 times the other);
-      //  - right turn: both tangents are at most Lmax (radius DEFAULTS.rightRadius);
+      // The line is straight - arc - straight.
+      // The arc has the tangent lengths L0 (toward the ingress lane) and L1 (toward the egress
+      // lane) at the corner point X.
+      // X is where the two lane headings meet.
+      //  - left turn: the arc uses nearly the whole of both legs (each at most 1.3 times the
+      //    other).
+      //  - right turn: both tangents are at most Lmax (radius DEFAULTS.rightRadius).
       //  - small bend (below 45 degrees): one long, gentle curve over both legs.
-      // b: position of the inner handles (0.5 to 0.75 gives a near-circular arc with zero curvature at
-      // its ends; the values for turns are fitted to hand-drawn driving lines). Other shapes follow as fallbacks, for lines that would touch an island or a kerb.
+      // b: position of the inner handles.
+      // A value of 0.5 to 0.75 gives a near-circular arc with zero curvature at its ends.
+      // The values for turns fit hand-drawn driving lines.
+      // Other shapes follow as fallbacks, for lines that touch an island or a kerb.
       const b = angle < 45 ? Math.max(0.5, Math.min(0.75, 0.8 - 0.0025 * angle)) : right ? rightHandle(angle) : 0.6;
-      // run: a straight part before the arc (and after it), so the line can pass the round end of a
-      // median island next to the lane. Lines with a shorter run are tried first.
+      // run: a straight part before the arc (and after it).
+      // So the line can pass the round end of a median island next to the lane.
+      // The code tries lines with a shorter run first.
       const island = g => g.index === 0 && g.arm.gap > 0.3 && g.arm.islandLen > 0;
       const arcLine = (lengths, bb, run) => {
         const e0 = Math.max(0.5, c.d0 - (island(fromG) ? run : 0)), e1 = Math.max(0.5, c.d1 - (island(toG) ? run : 0));
@@ -1224,7 +1287,8 @@
   }
 
   // Rule: the lane of a connection must never touch an island or a kerb inside the junction.
-  // Returns [{ connId, kind: 'island'|'kerb', dist }] (dist = smallest distance of the centre line).
+  // Returns [{ connId, kind: 'island'|'kerb', dist }] (dist = smallest distance of the centre
+  // line).
   function connectionIssues(model, derived) {
     const islands = freeRightIslands(derived), obst = obstacles(derived, islands);
     const geoms = allLaneGeoms(derived), out = [];
@@ -1255,14 +1319,14 @@
     };
     const V = 'vehicle', B = 'bike';
     // Main road: median island, left turning lane (35 m), bike lane along the south kerb.
-    lanes('West', 'in', [V, V, V, B]);  lanes('West', 'out', [V, V, V]);   // the third egress lane belongs to the free right turn
+    lanes('West', 'in', [V, V, V, B]);  lanes('West', 'out', [V, V, V]);
     lanes('Ost', 'in', [V, V, V]);      lanes('Ost', 'out', [V, V, B]);
     ['West', 'Ost'].forEach(n => {
       const cfg = model.arms[arm(n).key];
       cfg.gap = 3; cfg.islandLen = 40; cfg.stopDist = 18;
       lanesOf(model, arm(n).key, 'in')[0].length = 35;
     });
-    // Side street: free right turn from the north (triangle island in the north-west corner), bike lane along the east kerb.
+    // the third egress lane belongs to the free right turn
     lanes('Nord', 'in', [V, V]);        lanes('Nord', 'out', [V, B]);
     lanes('Süd', 'in', [V, V, B]);      lanes('Süd', 'out', [V]);
     ['Nord', 'Süd'].forEach(n => { model.arms[arm(n).key].stopDist = 20; });
@@ -1274,9 +1338,12 @@
   }
 
 
-  /* ---------------- Background image (plan, aerial photo, PDF page) ---------------- */
-  // Places a new background. When the old background has the same pixel size, its position and scale are kept
-  // (the same plan imported again, or a configuration saved without the image data).
+  /* Side street: free right turn from the north (triangle island in the north-west corner), bike
+     lane along the east kerb. */
+  // Places a new background.
+  // If the old background has the same pixel size, the code keeps its position and scale.
+  // This is the case when the user imports the same plan again, or loads a configuration that the
+  // user saved without the image data.
   function placeBackground(model, img, center) {
     const old = model.background;
     if (old && old.wPx === img.wPx && old.hPx === img.hPx) {
@@ -1291,8 +1358,9 @@
     return true;
   }
 
-  // Scale tool: the two points a and b (world metres, measured on the image) are "realLength" metres apart.
-  // The image is scaled around a, so a stays where it is.
+  // Scale tool: the two points a and b (world metres, measured on the image) are "realLength"
+  // metres apart.
+  // The code scales the image around a, so a stays where it is.
   function scaleBackground(model, a, b, realLength) {
     const bg = model.background;
     const measured = dist(a, b);
@@ -1304,11 +1372,14 @@
     return f;
   }
 
-  // World position of an image pixel and back (y of the world points north, y of the image points down).
+  // Scale tool: the two points a and b (world metres, measured on the image) are "realLength"
+  // metres apart.
+  // The image is scaled around a, so a stays where it is.
   function bgPixelToWorld(bg, px, py) { return { x: bg.x + px * bg.mPerPx, y: bg.y - py * bg.mPerPx }; }
   function bgWorldToPixel(bg, p) { return { px: (p.x - bg.x) / bg.mPerPx, py: (bg.y - p.y) / bg.mPerPx }; }
 
-  /* ---------------- Persistence (part of the node configuration file) ---------------- */
+  /* World position of an image pixel and back (y of the world points north, y of the image
+     points down). */
   function toConfig(model) {
     return JSON.parse(JSON.stringify({
       version: 1, name: model.name, refLat: model.refLat, refLon: model.refLon,
@@ -1354,7 +1425,7 @@
     const laneIds = new Set(m.lanes.map(l => l.id));
     m.connections = (cfg.connections || []).filter(c => c && c.id && laneIds.has(c.from) && laneIds.has(c.to))
       .map(c => ({ id: String(c.id), from: c.from, to: c.to, sg: typeof c.sg === 'string' && c.sg ? c.sg : null }));
-    // continue the id counters after the highest stored id
+    // ---------------- Persistence (part of the node configuration file) ----------------
     const bump = (prefix, items) => items.forEach(x => {
       const n = parseInt(String(x.id).slice(prefix.length), 10);
       if (String(x.id).startsWith(prefix) && n > (m.seq[prefix] || 0)) m.seq[prefix] = n;
@@ -1363,8 +1434,8 @@
     return m;
   }
 
-  /* ---------------- MAP export (MAPEM JSON, simplified) ---------------- */
-  // Reduces a polyline with the Douglas-Peucker rule (tolerance in metres).
+  /* continue the id counters after the highest stored id */
+  // ---------------- MAP export (MAPEM JSON, simplified) ----------------
   function simplify(poly, tol) {
     if (poly.length < 3) return poly.slice();
     const keep = new Array(poly.length).fill(false);
@@ -1389,7 +1460,7 @@
 
   const MANEUVER_FLAG = { straight: 'maneuverStraightAllowed', left: 'maneuverLeftAllowed', right: 'maneuverRightAllowed', uturn: 'maneuverUTurnAllowed' };
 
-  // sgIds: Map name -> number (MAP signalGroup id). Build it with signalGroupIds().
+  // Reduces a polyline with the Douglas-Peucker rule (tolerance in metres).
   function signalGroupIds(model, sortFn) {
     const names = new Set();
     model.lanes.forEach(l => l.sgs.forEach(n => names.add(n)));
@@ -1399,7 +1470,7 @@
     return new Map(sorted.map((n, i) => [n, i + 1]));
   }
 
-  // Local metres to centimetres, relative to the previous node (first node: relative to the reference point).
+  // sgIds: Map name -> number (MAP signalGroup id). Build it with signalGroupIds().
   function nodeList(poly, origin) {
     const out = [];
     let prev = origin;
@@ -1484,10 +1555,11 @@
 
   GZ.topology = {
     DEFAULTS, LANE_TYPES, COMPASS,
-    // geometry
+    // Local metres to centimetres, relative to the previous node (first node: relative to the
+    // reference point).
     sampleSpline, cleanPoly, resamplePoly, stadiumPolygon, roundCorners, laneOutline, armSurfaces, freeRightPair, freeRightPossible, freeRightSlip, arcPath, cornerArc, drivingPaths, stopLineSegments, freeRightIslands, applyFreeRight, insetPolygon, fitRadius, connectionPolyline, connectionIssues, pointPolygonDistance, kerbPolylines, cumLen, polyLength, pointAt, subPoly, offsetPoly, projectOnPoly,
     segIntersect, lineIntersect, polyCrossings, closestApproach, bearingOf, compassName, turnAngle, maneuverOfAngle, simplify,
-    // model
+    // geometry
     placeBackground, scaleBackground, bgPixelToWorld, bgWorldToPixel,
     create, addAxis, removeAxis, setLaneCount, setLaneType, setCrosswalk, addConnection, removeConnection, ensureDefaults,
     lanesOf, derive, junctionOutline, allLaneGeoms, connectionCurve, cubicPoint, connectionManeuver, laneManeuvers, connectionSg,

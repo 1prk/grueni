@@ -1,17 +1,19 @@
-/* GZ.views.logBar — controls for the log markers (shown in every tab that
-   has time charts). Appears when a log file is loaded: summary, a toggle per
-   severity, a text filter, a list of the entries and a button to remove the
-   log. A click on a list entry opens its cycle in the cycle check. All
-   containers with the attribute data-log-bar show the same state. */
+/* GZ.views.logBar has the controls for the log markers. It shows them in every tab that has time
+   charts.
+   It appears when the user loads a log file.
+   It shows a summary, a toggle for each severity, a text filter, a list of the entries and a
+   button to remove the log.
+   A click on a list entry opens its cycle in the cycle check.
+   All containers with the attribute data-log-bar show the same state. */
 (function (GZ) {
   'use strict';
   const { esc, fmtTs } = GZ.format;
 
-  // More rows make the list slow. The filters narrow it down.
+  // More rows make the list slow. The filters narrow the list.
   const MAX_LIST_ROWS = 500;
 
-  // Quick filter of the LIST only (the chips filter list and markers).
-  // A level in the list is shown when its rank is at least the chosen one.
+  // Quick filter of the LIST only. The chips filter the list and the markers.
+  // The list shows a level when its rank is at least the chosen rank.
   const RANK = { debug: 0, other: 1, info: 2, warning: 3, error: 4, critical: 5 };
   const LIST_FILTERS = [
     { id: 'all', label: 'Alle', min: 0 },
@@ -23,9 +25,9 @@
   let onChange = () => {};
   let listOpen = false;
   let listFilter = 'all';
-  let inRecordingOnly = true; // list: only entries inside the time range of the recording
-  let active = null;  // the entry that was opened last
-  let listed = [];    // entries shown in the list, same order as the rows
+  let inRecordingOnly = true; // The list shows only entries inside the time range of the recording.
+  let active = null;  // The entry that the user opened last.
+  let listed = [];    // The entries in the list, in the same order as the rows.
 
   function containers() { return [...document.querySelectorAll('[data-log-bar]')]; }
 
@@ -44,7 +46,7 @@
     return `<b>Log</b> ${esc(st.fileName)} · ${st.entries.length} Einträge${range}${skipped}`;
   }
 
-  // The list of entries that pass the filters. Click = open in the cycle check.
+  // The list of entries that pass the filters. A click opens the entry in the cycle check.
   function renderLists() {
     const min = LIST_FILTERS.find(f => f.id === listFilter).min;
     const a = GZ.state.data.currentAnalysis;
@@ -86,7 +88,7 @@
     renderLists();
   }
 
-  // Marks the entry that was opened last (without redrawing, so the scroll position stays).
+  // Marks the entry that the user opened last. It does not redraw, so the scroll position stays.
   function markActive(entry) {
     active = entry;
     containers().forEach(box => {
@@ -113,7 +115,7 @@
       const input = e.target.closest('.log-search');
       if (!input) return;
       GZ.logs.state().search = input.value;
-      // keep the other search fields in sync without re-rendering (focus stays)
+      // Keeps the other search fields in sync without a new render. The focus stays.
       document.querySelectorAll('.log-search').forEach(o => { if (o !== input) o.value = input.value; });
       renderLists(); onChange();
     });

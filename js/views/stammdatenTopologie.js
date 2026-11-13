@@ -1,13 +1,14 @@
-/* GZ.views.stammdatenTopologie — sub-tab "Topologie" in "Stammdaten LSA".
+/* GZ.views.stammdatenTopologie is the sub-tab "Topologie" in "Stammdaten LSA".
 
-   The user draws the intersection in four steps and attaches signal groups and
-   detectors to the lanes:
+   The user draws the intersection in four steps and attaches signal groups and detectors to the
+   lanes:
    1. Axes   2. Arms   3. Lanes   4. Connections
-   The model and all geometry live in GZ.topology (js/core/topology.js). This
-   file only draws it (d3, SVG, units in metres) and handles the input.
+   The model and all geometry are in GZ.topology (js/core/topology.js).
+   This file only draws the model (d3, SVG, units in metres) and handles the input.
 
-   The canvas needs no recording. Signal groups and detectors come from the
-   loaded recording when there is one; otherwise names can be typed. */
+   The canvas needs no recording.
+   Signal groups and detectors come from the loaded recording, if there is one.
+   Otherwise the user can type names. */
 (function (GZ) {
   'use strict';
   const T = GZ.topology;
@@ -126,7 +127,7 @@ let linkStops = false;     // move all stop lines together
     if (topo) refresh();
   }
 
-  // Called from the tab switch and after the configuration was loaded.
+  // The tab switch calls this, and the code calls it after the configuration loads.
   function refresh() {
     if (!els || els.paneTopo.style.display === 'none') return;
     update();
@@ -190,7 +191,7 @@ let linkStops = false;     // move all stop lines together
     layers.grid = worldG.append('g').attr('class', 'layer-grid');
     layers.bg = worldG.append('g').attr('class', 'layer-bg');
     bgImg = layers.bg.append('image').attr('class', 't-bg').attr('preserveAspectRatio', 'none').style('display', 'none');
-    // the drawn plan: one group, so its opacity can be set over the background
+    // the drawn plan: one group, so the code can set its opacity over the background
     planG = worldG.append('g').attr('class', 'layer-plan');
     ['walk', 'roads', 'laneFill', 'marks', 'cross', 'conns', 'lanes', 'labels'].forEach(name => {
       layers[name] = planG.append('g').attr('class', 'layer-' + name);
@@ -347,7 +348,8 @@ let linkStops = false;     // move all stop lines together
       if (sf.island) dark.push({ pts: sf.island, r: 0 });
       sf.freed.forEach(poly => dark.push({ pts: poly, r: 0 }));
     });
-    T.freeRightIslands(derived).forEach(i => dark.push({ pts: i.polygon, r: i.r }));   // r > 0: the stroke rounds every corner
+    // r > 0: the stroke rounds every corner
+    T.freeRightIslands(derived).forEach(i => dark.push({ pts: i.polygon, r: i.r }));
     // Islands: one kerb outline under all fills, so no line shows where two islands meet.
     dark.forEach(d => { html += `<polygon class="t-island-edge" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.3)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
     dark.forEach(d => { html += `<polygon class="t-island" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.02)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
@@ -376,7 +378,8 @@ let linkStops = false;     // move all stop lines together
       ['in', 'out'].forEach(dir => {
         const side = dir === 'in' ? 1 : -1;
         const lanes = arm[dir];
-        // a free right turn: no lines where the triangle island lies (before the slip lane leaves or joins)
+        // a free right turn: no lines where the triangle island lies (before the slip lane leaves
+        // or joins)
         const kerbFrom = dir === 'in' ? arm.kerbFromIn : arm.kerbFromOut;
         const laneFrom = dir === 'out' ? arm.outStart || 0 : 0;     // egress lanes can start further out
         lanes.forEach((g, i) => {
@@ -391,7 +394,8 @@ let linkStops = false;     // move all stop lines together
         });
       });
       if (arm.in.length) {
-        // one piece per group of lanes with the same stop line; the slip lane of a free right turn has none
+        // one piece for each group of lanes with the same stop line, the slip lane of a free right
+        // turn has none
         const fr = arm.freeRight ? T.freeRightPair(derived, arm) : null;
         T.stopLineSegments(arm, fr ? fr.slip.lane.id : null).forEach(([a, b]) => {
           mk += `<line class="t-stop" x1="${f2(a.x)}" y1="${f2(-a.y)}" x2="${f2(b.x)}" y2="${f2(-b.y)}"/>`;
@@ -452,7 +456,8 @@ let linkStops = false;     // move all stop lines together
     layers.cross.html(html);
   }
 
-  // Lane arrows (pointing up, units in metres). Every glyph is at most 2.6 m wide, so it stays inside its
+  // Lane arrows (pointing up, units in metres). Every glyph is at most 2.6 m wide, so it stays
+  // inside its
   // lane. With a through arrow the turn branch leaves the stem low, beside (not on) the arrow head.
   function arrowGlyphs(mans) {
     const has = m => mans.includes(m);
@@ -1160,7 +1165,8 @@ let linkStops = false;     // move all stop lines together
     document.head.appendChild(el);
   });
 
-  // PDF: first (or chosen) page as a picture. pdf.js runs in the page itself (no worker), so it also works from file://.
+  // PDF: first (or chosen) page as a picture. pdf.js runs in the page itself (no worker), so it
+  // also works from file://.
   async function renderPdf(file) {
     if (!window.pdfjsLib) {
       await loadScript('js/vendor/pdfjs/pdf.worker.min.js');   // defines pdfjsWorker: pdf.js then runs without a worker
@@ -1234,7 +1240,7 @@ let linkStops = false;     // move all stop lines together
     GZ.configIO.downloadJson(`map_${id}.json`, out);
   }
 
-  // Replaces the model (after a configuration was loaded) and redraws.
+  // Replaces the model (after the code loads a configuration) and draws again.
   function setModel(model) {
     GZ.state.data.topology = model;
     sel = null; armSel = null; draft = null; fitted = false; bgMode = null; scalePts = [];

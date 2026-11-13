@@ -1,12 +1,13 @@
-/* GZ.wartezeitLogic — Wartezeit ab Anforderung (Detektorbelegung ->
-   Freigabebeginn): reine Berechnungslogik, ereignisbasierte Flankenerkennung.
-   TX/TU sind nur informativ (siehe txAtTime/computeGlobalTU). */
+/* GZ.wartezeitLogic is the wait time from request (Wartezeit ab Anforderung):
+   detector occupancy to start of green.
+   It is pure calculation logic with event-based edge detection.
+   TX and TU are only for information (see txAtTime and computeGlobalTU). */
 (function (GZ) {
   'use strict';
 
-  // Voreinstellungen der Bewertungsgrenzen je Signalgruppentyp - reine
-  // Orientierungswerte ohne Richtlinienbezug, in der UI überschreibbar
-  // (maßgebliche Werte: RiLSA/HBS). Warnung null = keine Warnstufe.
+  // Default limits for the rating for each signal group type.
+  // They are only guide values without a guideline reference. The UI can override them.
+  // The authoritative values are in RiLSA and HBS. A warning value of null means no warning level.
   const wzThresholdDefaults = {
     MIV: { warn: 90, grenz: 120 },
     FUSS: { warn: null, grenz: 85 }
@@ -25,19 +26,19 @@
     return Number.isFinite(v) && v > 0;
   }
 
-  // Anforderung = Detektor wird belegt, während SG nicht grün ist und keine
-  // Anforderung bereits läuft. Ereignis endet, sobald SG (wieder) grün wird.
-  // gapTolSek: Belegungslücken bis zu dieser Dauer unterbrechen eine laufende
-  //   Anforderung nicht; längere Lücken lösen sie ohne Grün auf.
-  // holdUntilGreen (Impulsdetektor/Taster): die Anforderung bleibt unabhängig
-  //   von der Belegung bis zur nächsten Freigabe bestehen - bei kurzen
-  //   Impulsschleifen steht das Fahrzeug HINTER der Schleife an der
-  //   Haltlinie, eine Lückenauflösung würde genau die langen Wartezeiten
-  //   verwerfen, die gefunden werden sollen.
+  // A request starts when the detector becomes occupied while the SG is not green and no request is
+  // active.
+  // The event ends as soon as the SG becomes green (again).
+  // gapTolSek: gaps in the occupancy up to this duration do not interrupt an active request.
+  //   Longer gaps end it without a green.
+  // holdUntilGreen (pulse detector or push button): the request stays until the next green.
+  //   This does not depend on the occupancy.
+  //   With short pulse loops the vehicle waits BEHIND the loop at the stop line.
+  //   A gap resolution would drop exactly the long wait times that the analysis must find.
   function computeWartezeitEvents(times, sgRaw, detOccupied, splRaw, inkBlinken, gapTolSek, holdUntilGreen, exclSpl) {
     const n = times.length;
     const events = [];
-    const cancelledTimes = []; // start times of requests that ended without green
+    const cancelledTimes = []; // Start times of requests that ended without green.
     let prevBelegt = false, inGreenPeriod = false, waitingForGreen = false;
     let requestStartIdx = -1, letzteBelegtZeit = 0, nAufgeloest = 0;
     for (let i = 0; i < n; i++) {

@@ -1,9 +1,10 @@
-/* GZ.views.phasenauswertung — Tab "Phasenauswertung": zeigt für jede im Tab
-   "Stammdaten LSA" definierte Phase, wann und wie oft sie in der Aufzeichnung
-   vollständig angezeigt wurde (alle Mitglieds-Signalgruppen gleichzeitig
-   Grün). Da Phasen per Definition nie gleichzeitig aktiv sind (Zwischenzeiten
-   trennen sie), werden alle Phasen in EINER gemeinsamen Spur mit je eigener
-   Farbe dargestellt statt einer Spur je Phase. */
+/* GZ.views.phasenauswertung is the tab "Phasenauswertung".
+   For each phase that the user defines in the tab "Stammdaten LSA", it shows when and how often
+   the recording shows the phase completely. All signal groups that are members of the phase are
+   green at the same time.
+   By definition, phases are never active at the same time. The intergreen times separate them.
+   So the tab shows all phases in ONE common track. Each phase has its own color.
+   There is no separate track for each phase. */
 (function (GZ) {
   'use strict';
   const { esc, fmtDauer, fmtTimeShort } = GZ.format;

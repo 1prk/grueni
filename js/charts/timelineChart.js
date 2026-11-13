@@ -1,7 +1,8 @@
-/* GZ.charts.timelineChart — komplettes Signalzeitendiagramm: Programmleiste
-   (SPL), eine Spur je Signalgruppe (via timelineLane) und die gemeinsame
-   Zeitachse. Baut die Spuren-Zeilen (Label/An/Ab/TF/Track) bei jedem Render
-   neu auf - Datengrößen sind klein genug, dass Diffing keinen Mehrwert bringt. */
+/* GZ.charts.timelineChart is the complete signal time chart.
+   It has the plan bar (SPL), one track for each signal group (through timelineLane) and the
+   shared time axis.
+   It builds the track rows (label, An, Ab, TF, track) again in each render.
+   The data is small, so a diff gives no benefit. */
 (function (GZ) {
   'use strict';
   const { fmtTimeShort, esc } = GZ.format;

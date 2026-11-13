@@ -1,13 +1,14 @@
-/* Golden-master tests for the OCIT parser and the analyses built on it.
-   The golden values are compact hashes, written by `node tests/run-suite.js --update-golden`
-   into tests/golden/golden-data.js. They record what the current code does. A later rewrite
-   of the importer must give the same values. */
+/* Golden-master tests for the OCIT parser and the analyses that use it.
+   The golden values are compact hashes. The command `node tests/run-suite.js --update-golden`
+   writes them to tests/golden/golden-data.js.
+   They record what the current code does.
+   A later rewrite of the importer must give the same values. */
 (function () {
   'use strict';
   const GZ = window.GZ, T = window.GZT, H = T.hash, HL = T.hashList;
   GZ.state = GZ.state || { data: {} };
 
-  // Map and Set become arrays, so JSON keeps their content. Cycles are cut.
+  // Map and Set become arrays, so that JSON keeps their content. The function cuts cycles.
   function plain(x, seen) {
     seen = seen || new Set();
     if (x === null || typeof x !== 'object') return x;
@@ -23,7 +24,7 @@
   }
   const digestOf = x => { try { return H(JSON.stringify(plain(x))); } catch (e) { return 'error:' + e.message; } };
 
-  // Times are compared as differences, so the result does not depend on the time zone.
+  // The code compares times as differences. So the result does not depend on the time zone.
   function digestParsed(p) {
     const times = p.times, diffs = [];
     for (let i = 1; i < times.length; i++) diffs.push(times[i] - times[i - 1]);
@@ -76,7 +77,7 @@
     return out;
   }
 
-  // name -> text. Built once.
+  // name -> text. The code builds this map once.
   let cache = null;
   function fixtures() {
     if (cache) return cache;
@@ -94,8 +95,9 @@
     return r;
   }
 
-  // The parse hashes do not depend on the time zone. The downstream hashes contain absolute times
-  // and clock labels, so they are compared only in the time zone that wrote the golden data.
+  // The parse hashes do not depend on the time zone.
+  // The downstream hashes contain absolute times and clock labels.
+  // So the tests compare them only in the time zone that wrote the golden data.
   const tzOffset = () => new Date(2026, 10, 3, 6).getTimezoneOffset();
 
   T.allFixtures = fixtures;
@@ -123,7 +125,8 @@
       T.assert.ok(g && g[name], 'no golden value for ' + name);
       const now = compute(name), want = g[name];
       if (g.__meta.tzOffset === tzOffset()) T.assert.same(now, want);
-      else T.assert.same({ parse: now.parse, error: now.error }, { parse: want.parse, error: want.error });   // other time zone: parse hashes only
+      // Other time zone: compare the parse hashes only.
+      else T.assert.same({ parse: now.parse, error: now.error }, { parse: want.parse, error: want.error });
     });
   });
 })();

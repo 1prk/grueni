@@ -1,9 +1,11 @@
-/* GZ.views.oepnvQa — Tab "ÖPNV — Anmeldung/Abmeldung": beliebig viele
-   Signalgruppen gleichzeitig, je mit eigenen An-/Abmeldedetektor(en) und
-   Fahrzeit-/Löschparametern; gemeinsame QSV-Stufen (A-F) und SPL-Ausschluss.
-   Rohpunkte-Ansicht und Streudiagramm je Signalgruppe, kombinierte Kennzahlen
-   (+ Aufschlüsselung je Signalgruppe) und eine sortier-/durchsuchbare,
-   nach Excel exportierbare Ereignistabelle. */
+/* GZ.views.oepnvQa is the tab "ÖPNV — Anmeldung/Abmeldung".
+   It handles any number of signal groups at the same time.
+   Each signal group has its own registration and deregistration detectors
+   and its own travel time and clearance parameters.
+   All signal groups share the QSV levels (A to F) and the exclusion of signal plans.
+   The tab has a raw points view and a scatter chart for each signal group,
+   combined key figures (with a breakdown for each signal group)
+   and an event table that the user can sort, search and export to Excel. */
 (function (GZ) {
   'use strict';
   const { esc, fmtTs } = GZ.format;
@@ -19,19 +21,21 @@
   let els = null;
   let rows = []; // {id, sgIdx, anIdx:Set<colIndex>, abIdx:Set<colIndex>, sollfahrzeitSek, zwangsloeschSek}
   let nextRowId = 1;
-  let lastModelRows = []; // voller (ungefilterter) Zeilensatz der letzten Berechnung
-  let lastFilteredRows = []; // nach Filterausdruck eingeschränkt - das, was Tabelle/Sortierung/Export tatsächlich nutzen
+  let lastModelRows = []; // Full (unfiltered) row set of the last calculation
+  let lastFilteredRows = []; // Limited by the filter expression. The table, the sorting and the export use this set.
   let filterExprText = '';
   let sortState = { key: 'anTime', dir: 'asc' };
 
-  // ---------- Zeilenfilter: derselbe Ausdrucks-Editor (GZ.exprEditor) wie im
-  // Formel-Builder der Umlaufprüfung, aber mit eigenem, festem Felder-Satz
-  // statt frei wählbarer Spalten-Variablen - jede fertig berechnete Anmelde-
-  // Zeile (siehe buildRowModel()) wird EINMAL, ohne Zeitreihen-Sweep, gegen
-  // diesen Ausdruck geprüft (siehe filterScopeForRow()). Ergebnis ist rein
-  // WAHR/FALSCH je Zeile (kein synthetischer Spaltenbezug wie bei Formeln in
-  // der Umlaufprüfung) und schränkt Kennzahlen/Diagramm/Tabelle GEMEINSAM
-  // ein (siehe recompute()).
+  // ---------- Row filter ----------
+  // It uses the same expression editor (GZ.exprEditor) as the formula builder of the cycle check
+  // (Umlaufprüfung).
+  // But it has its own fixed set of fields. It has no free column variables.
+  // The code checks each registration row that is fully calculated (see buildRowModel()) ONCE
+  // against this expression.
+  // It does this without a time series sweep (see filterScopeForRow()).
+  // The result is only TRUE or FALSE for each row.
+  // There is no synthetic column reference as with formulas in the cycle check.
+  // The result limits the key figures, the chart and the table TOGETHER (see recompute()).
   const FILTER_VAR_TYPES = { TX: 'NUM', SPL: 'TEXT', Verlustzeit: 'NUM', IstFahrzeit: 'NUM', QSV: 'KAT_QSV', Ergebnis: 'KAT_ERGEBNIS', SG: 'TEXT' };
   const FILTER_FIELD_DESC = {
     TX: 'Sekunden seit Umlaufbeginn der Anmeldung',
@@ -42,17 +46,17 @@
     Ergebnis: 'ABGEMELDET, ZWANGSGELOESCHT, AUSGESCHLOSSEN (SPL) oder UNAUFGELOEST (Datenende)',
     SG: 'Name der Signalgruppe'
   };
-  // QSV-Stufen (A-F, siehe LOS_LEVELS) als Kategorie-Literale NUR für diesen
-  // Filterausdruck aktiv (extraKatTokens, siehe GZ.exprEngine.tokenize()) -
-  // reserviert die Buchstaben nicht global.
+  // The QSV levels (A to F, see LOS_LEVELS) are category literals.
+  // They are active ONLY for this filter expression (extraKatTokens, see GZ.exprEngine.tokenize()).
+  // They do not reserve the letters globally.
   const QSV_KAT_TOKENS = Object.fromEntries(LOS_LEVELS.map(l => [l, 'KAT_QSV']));
   const ERGEBNIS_KAT_TOKENS = { ABGEMELDET: 'KAT_ERGEBNIS', ZWANGSGELOESCHT: 'KAT_ERGEBNIS', AUSGESCHLOSSEN: 'KAT_ERGEBNIS', UNAUFGELOEST: 'KAT_ERGEBNIS' };
   const FILTER_KAT_TOKENS = { ...QSV_KAT_TOKENS, ...ERGEBNIS_KAT_TOKENS };
 
-  // Vergleichsoperatoren + Zahl-/Text-Platzhalter, damit ein Filterausdruck
-  // auch rein per Klick vollständig (und gültig) zusammensetzbar ist - ohne
-  // sie endet der Klickweg zwangsläufig bei einem halben Ausdruck wie "QSV",
-  // der noch von Hand zu einem Vergleich ergänzt werden müsste.
+  // Comparison operators and placeholders for numbers and text.
+  // With them the user can build a complete and valid filter expression with clicks only.
+  // Without them the click path ends in half an expression such as "QSV".
+  // The user would have to complete it by hand to a comparison.
   const FILTER_OPERATORS = [
     { label: '==', insert: ' == ', hint: 'gleich', desc: 'Gleichheit - für Zahlen, Texte UND Zustände' },
     { label: '!=', insert: ' != ', hint: 'ungleich', desc: 'Ungleichheit' },
@@ -80,12 +84,12 @@
     return items;
   }
 
-  // scope-Objekt für GZ.exprEngine.compile().run() - siehe FILTER_VAR_TYPES.
-  // Fehlende Zahlen (unaufgelöste Zeilen ohne Verlustzeit/TX) werden zu NaN
-  // (jeder Vergleich damit ist automatisch false, siehe exprEngine.js
-  // Kopfkommentar) statt null (das JS bei numerischen Vergleichen fälschlich
-  // zu 0 coercen würde). QSV ist bei Zwangslöschung/Ausschluss/unaufgelöst
-  // null - ein Kategorie-Vergleich mit null ist ebenfalls automatisch false.
+  // The scope object for GZ.exprEngine.compile().run(). See FILTER_VAR_TYPES.
+  // Missing numbers (unresolved rows without lost time or TX) become NaN.
+  // Each comparison with NaN is automatically false (see the header comment of exprEngine.js).
+  // They do not become null. In numeric comparisons JS would wrongly coerce null to 0.
+  // QSV is null for a forced clearance, an exclusion and an unresolved row.
+  // A category comparison with null is also automatically false.
   function filterScopeForRow(r) {
     return {
       TX: r.tx == null ? NaN : r.tx,
@@ -104,16 +108,16 @@
     return compile(text, FILTER_VAR_TYPES, {}, FILTER_KAT_TOKENS);
   }
 
-  // Validiert (Syntax/Typen) und zeichnet Status + Fehlerposition im Editor
-  // nach - liefert das compile()-Ergebnis, damit recompute() es direkt zum
-  // tatsächlichen Filtern weiterverwenden kann (keine doppelte Kompilierung).
+  // Validates (syntax and types) and draws the status and the error position in the editor.
+  // It returns the result of compile(), so that recompute() can use it for the real filtering.
+  // There is no double compilation.
   function validateFilterExpr() {
     const result = compileFilterExpr();
     if (els.filterStatus) {
       if (result.empty) { els.filterStatus.textContent = ''; els.filterStatus.className = 'oe-filter-status'; els.filterStatus.title = ''; }
       else if (result.ok) { els.filterStatus.textContent = '✓'; els.filterStatus.className = 'oe-filter-status ok'; els.filterStatus.title = 'Gültig'; }
-      // Noch unfertig (Tippen/Zusammenklicken) neutral statt rot - siehe
-      // exprEngine ExprError/incomplete.
+      // Not finished yet (typing or clicking together): neutral and not red. See ExprError and
+      // incomplete in exprEngine.
       else if (result.incomplete) { els.filterStatus.textContent = '…'; els.filterStatus.className = 'oe-filter-status pending'; els.filterStatus.title = result.message; }
       else { els.filterStatus.textContent = '✕'; els.filterStatus.className = 'oe-filter-status err'; els.filterStatus.title = result.message; }
     }
@@ -200,10 +204,10 @@
     return a ? a.otherColumns.filter(c => c.kuerzel === 'DET') : [];
   }
 
-  // Lesezugriff für die Umlaufprüfung (ÖV-Fahrzeiten-Zusatzspuren): die hier
-  // konfigurierten Zeilen für eine gegebene Signalgruppe, mit aufgelösten
-  // Detektor-Spalten statt roher Indizes. Nur vollständig konfigurierte
-  // Zeilen (An- UND Abmeldedetektor gesetzt).
+  // Read access for the cycle check (extra tracks for public transport travel times):
+  // the rows that the user configured here for a given signal group,
+  // with resolved detector columns instead of raw indices.
+  // Only fully configured rows (registration AND deregistration detector set).
   function getRowsForSg(sgIdx) {
     const detCols = currentDetCols();
     return rows.filter(r => r.sgIdx === sgIdx).map(r => ({
@@ -368,10 +372,10 @@
     els.chartPanel.style.display = 'block';
     els.tablePanel.style.display = 'block';
 
-    // Filter (siehe validateFilterExpr()/filterScopeForRow()) schränkt Kenn-
-    // zahlen, Diagramm UND Tabelle GEMEINSAM ein - daher zuerst das volle
-    // Zeilenmodell bauen, dann EINMAL filtern, und ALLE nachfolgenden
-    // Darstellungen aus lastFilteredRows ableiten statt aus den Roh-Events.
+    // The filter (see validateFilterExpr() and filterScopeForRow()) limits the key figures, the
+    // chart AND the table TOGETHER.
+    // So first build the full row model. Then filter ONCE.
+    // Derive ALL later displays from lastFilteredRows, not from the raw events.
     lastModelRows = buildRowModel(allEvents, unresolvedList, losBounds, results);
     const filterResult = validateFilterExpr();
     lastFilteredRows = (filterResult.ok || filterResult.empty)

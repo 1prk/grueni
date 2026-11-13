@@ -1,6 +1,7 @@
-/* GZ.charts.report — small charts inside the report tables of the green time
-   and wait time tabs: green time histogram, position in the cycle, share
-   bar, small CDF. Each function returns an SVG element. */
+/* GZ.charts.report has small charts for the report tables of the green time tab and the wait
+   time tab:
+   green time histogram, position in the cycle, share bar and small CDF.
+   Each function returns an SVG element. */
 (function (GZ) {
   'use strict';
   const { el, text, attachTooltip } = GZ.charts.kit;
@@ -12,7 +13,7 @@
 
   function newSvg(w, h) { return el('svg', { width: w, height: h, viewBox: `0 0 ${w} ${h}` }, null); }
 
-  // Number axis with labels at multiples of `step` (labels use the "s" unit).
+  // Number axis with labels at multiples of `step`. The labels use the unit "s".
   function axis(width, xMax, step, height) {
     const svg = newSvg(width, height);
     for (let v = 0; v <= xMax; v += step) {
@@ -21,8 +22,9 @@
     return svg;
   }
 
-  /* Green time histogram: one stacked bar per 1-second class, scaled to the
-     highest class of the row. o = { xMax, stackKeys: [key], keyOf(green), colorOf(key), tipPrefix(key) } */
+  /* Green time histogram: one stacked bar for each 1-second class.
+     The scale is the highest class of the row.
+     o = { xMax, stackKeys: [key], keyOf(green), colorOf(key), tipPrefix(key) } */
   function histogram(st, o) {
     const svg = newSvg(HIST_W, HIST_H);
     const x = v => v / o.xMax * HIST_W, barWidth = x(1);
@@ -52,9 +54,10 @@
     return svg;
   }
 
-  /* Position of the green window in the cycle: light bar between the median
-     start and median end, whiskers (P5–P95) at both edges, dashed line at the median
-     cycle time. o = { xMax } */
+  /* Position of the green window in the cycle.
+     A light bar goes from the median start to the median end.
+     Whiskers (P5 to P95) mark both edges. A dashed line marks the median cycle time.
+     o = { xMax } */
   function lane(st, o) {
     const svg = newSvg(LANE_W, LANE_H);
     const x = v => v / o.xMax * LANE_W, cy = LANE_H / 2;
@@ -84,7 +87,7 @@
     return svg;
   }
 
-  /* Small CDF of wait times with warning (yellow) and limit (red) marks.
+  /* Small CDF of wait times with marks for the warning (yellow) and the limit (red).
      o = { xMax, warn, limit } */
   function miniCdf(values, o) {
     const svg = newSvg(CDF_W, CDF_H);

@@ -1,8 +1,8 @@
-/* GZ.charts.logMarkers — draws log entries as a marker lane under a time chart.
-   Entries close together (in pixels) form one marker with a count.
-   Colour shows the highest severity of the cluster. Hovering shows the
-   entries (time, level, text) and a guide line up into the chart.
-   The log text is escaped before it goes into the tooltip. */
+/* GZ.charts.logMarkers draws log entries as a marker lane under a time chart.
+   Entries that are close together (in pixels) form one marker with a count.
+   The color shows the highest severity of the cluster.
+   Hovering shows the entries (time, level, text) and a guide line up into the chart.
+   The code escapes the log text before it goes into the tooltip. */
 (function (GZ) {
   'use strict';
   const { esc, fmtTimeShort } = GZ.format;
@@ -53,8 +53,8 @@
     });
   }
 
-  // Thin marker strip for one time window (one row per cycle in the cycle check).
-  // svgEl: target <svg>. o = { wMin, wMax, width, height, entries }
+  // Thin marker strip for one time window (one row for each cycle in the cycle check).
+  // svgEl is the target <svg>. o = { wMin, wMax, width, height, entries }
   function drawStrip(svgEl, o) {
     const kit = GZ.charts.kit;
     while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);

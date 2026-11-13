@@ -1,25 +1,27 @@
-/* GZ.greenTime — quantitative green time analysis.
-   Builds, from one analysis, a model with all complete signal cycles and all
-   green phases per signal group. Statistics are computed per slice
-   (whole recording, one signal plan, one clock hour; see GZ.slices).
+/* GZ.greenTime is the quantitative green time analysis.
+   It builds a model from one analysis. The model has all complete signal cycles
+   and all green phases of each signal group.
+   The statistics are computed for each slice
+   (the whole recording, one signal plan or one clock hour, see GZ.slices).
 
    Terms:
-   - "fixed" (Festzeit): the green time of a signal group does not vary.
-   - "actuated" (verkehrsabhängig): the green time varies.
-   A signal group counts as fixed when at least `fixedShare` percent of its
-   green times lie within median ± `tolerance` seconds. */
+   - "fixed" (Festzeit): the green time of a signal group does not change.
+   - "actuated" (verkehrsabhängig): the green time changes.
+   A signal group is fixed when at least `fixedShare` percent of its green times
+   are within the median ± `tolerance` seconds. */
 (function (GZ) {
   'use strict';
   const { median, mean, stdDev } = GZ.stats;
-  // GZ.stats.percentile expects a sorted array. This one sorts a copy.
+  // GZ.stats.percentile needs a sorted array. This function sorts a copy.
   const percentile = (values, p) => GZ.stats.percentile([...values].sort((x, y) => x - y), p);
   const { findSplAt, mapGreensToSegIndex, adjacentTransitionDurations } = GZ.segments;
   const { UNKNOWN_PLAN } = GZ.slices;
 
-  // Fewer green phases than this are too few to tell fixed from actuated.
+  // With fewer green phases than this, you cannot tell fixed from actuated.
   const MIN_GREENS = 5;
-  // A recorded cycle longer than this factor times the median cycle time is
-  // not a normal cycle (data gap, switch-off). It is left out of the statistics.
+  // A recorded cycle that is longer than this factor times the median cycle time is not a normal
+  // cycle.
+  // The cause is a data gap or a switch-off. The statistics leave it out.
   const IRREGULAR_CYCLE_FACTOR = 2.5;
 
   const params = { fixedShare: 95, tolerance: 1 };
@@ -33,9 +35,10 @@
     return found;
   }
 
-  // Red time (seconds) before every green phase of one signal group, in the
-  // order of stats.greens. null when the time before the green is unknown
-  // (first green, data gap, dark or unknown state in between).
+  // Red time in seconds before each green phase of one signal group, in the order of stats.greens.
+  // The value is null if the time before the green is unknown.
+  // This is the case for the first green, for a data gap, and for a dark or unknown state in
+  // between.
   function redTimesBeforeGreens(segs) {
     const out = [];
     let acc = 0, haveGreen = false, unknown = false;
@@ -52,12 +55,12 @@
     return out;
   }
 
-  // Builds the model of one analysis (a = GZ.state.data.currentAnalysis).
+  // Builds the model of one analysis. a is GZ.state.data.currentAnalysis.
   function build(a) {
     const starts = a.cycleStarts || [];
     const planAt = t => findSplAt(t, a.times, a.splValues) || UNKNOWN_PLAN;
 
-    // Complete cycles only: from one cycle start to the next.
+    // The model uses only complete cycles. A complete cycle goes from one cycle start to the next.
     const cycles = [];
     for (let i = 0; i + 1 < starts.length; i++) {
       cycles.push({ i, t: starts[i], tu: (starts[i + 1] - starts[i]) / 1000, plan: planAt(starts[i]) });
@@ -91,7 +94,8 @@
       };
     });
 
-    // cycles: all complete cycles (indexed by green.cycle); only regular ones enter the statistics.
+    // cycles: all complete cycles (indexed by green.cycle). Only regular cycles enter the
+    // statistics.
     return { cycles, hasCycles: regularCount >= 2, irregularCount: cycles.length - regularCount, tuMedian, sgs };
   }
 
@@ -104,7 +108,7 @@
     return model.cycles.filter(c => c.regular && GZ.slices.contains(sliceKey, c.t, c.plan));
   }
 
-  // Statistics of one signal group within one slice.
+  // Statistics of one signal group in one slice.
   function stats(model, sg, sliceKey) {
     const gs = greensInSlice(sg, sliceKey);
     const cyc = cyclesInSlice(model, sliceKey);
@@ -133,8 +137,9 @@
     };
   }
 
-  // Is the plant actuated in this slice? True as soon as one signal group
-  // (with enough green phases) varies.
+  // Tests if the plant is actuated in this slice. The result is true as soon as one signal group
+  // varies.
+  // The signal group must have enough green phases.
   function plantActuated(model, sliceKey) {
     return model.sgs.some(sg => { const st = stats(model, sg, sliceKey); return st.n && st.enough && !st.isFixed; });
   }
@@ -149,8 +154,8 @@
     return { n: tus.length, min: Math.min(...tus), max: Math.max(...tus), med: median(tus) };
   }
 
-  // Which edge of the green window moves? Uses P5–P95, so a single
-  // intervention does not count as "variable".
+  // Tests which edge of the green window moves.
+  // It uses P5 to P95, so a single intervention does not count as "variable".
   function behaviour(st) {
     const fixedOn = st.onHi - st.onLo <= 0.5;
     const fixedOff = st.offHi - st.offLo <= 0.5;

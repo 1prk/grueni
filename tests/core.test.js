@@ -187,7 +187,8 @@ test('green time: a dark period without TX gives one irregular cycle that is lef
   const out = lines.slice(0, 7);
   for (let i = 7; i < lines.length; i++) {
     const f = lines[i].split('\t'), sec = i - 7;
-    if (sec >= 7200 && sec < 9000) { f[2] = '0'; for (let c = 5; c <= 8; c++) f[c] = '0'; }   // 08:00-08:30 dark, TX frozen
+    // 08:00-08:30 dark, TX frozen
+    if (sec >= 7200 && sec < 9000) { f[2] = '0'; for (let c = 5; c <= 8; c++) f[c] = '0'; }
     out.push(f.join('\t'));
   }
   const p2 = GZ.parser.parseOcitText(out.join('\n'));
@@ -375,7 +376,8 @@ test('topology: MAPEM export has unique lane ids, delta nodes and signal groups'
   assert.strictEqual(lane.ingressApproach, 1);
   assert.ok(lane.connectsTo.length > 0 && lane.connectsTo.every(c => c.signalGroup === 2));
   assert.ok(lane.nodeList.nodes.length >= 2);
-  // the first node of an ingress lane is the stop line point (relative to the reference point, in cm)
+  // the first node of an ingress lane is the stop line point (relative to the reference point, in
+  // cm)
   const first = lane.nodeList.nodes[0].delta['node-XY'];
   near(first.y, Math.round(north.in[0].startPt.y * 100), 1);
   assert.ok(set.some(l => l.laneAttributes.laneType.crosswalk && l.connectsTo && l.connectsTo[0].signalGroup));
@@ -407,7 +409,7 @@ test('topology: a short inner lane tapers to zero width and leaves an island', (
   near(width(o.innerEdge.length - 1), 0, 0.01, 'zero width at the end of the taper');
   const surf = T.armSurfaces(arm);
   assert.strictEqual(surf.freed.length, 1, 'the freed width becomes island');
-  // the middle lane can not be short, the outermost lane anchors at its inner side
+  // the middle lane cannot be short, the outermost lane anchors at its inner side
   T.lanesOf(m, key, 'in')[1].length = 10;
   assert.strictEqual(T.derive(m).arms.find(a => a.key === key).in[1].cut, null);
   T.lanesOf(m, key, 'in')[2].length = 15;
@@ -431,7 +433,8 @@ test('topology: a median gap gives an island with pointed ends', () => {
   assert.ok(surf.island && surf.gapBase && surf.walk);
   const xs = surf.island.map(p => p.y);       // east arm: the island width runs along y
   near(Math.max(...xs) - Math.min(...xs), 3, 0.05, 'island is as wide as the gap');
-  // lanes keep their place: the first ingress lane starts half the gap plus half a lane from the axis
+  // lanes keep their place: the first ingress lane starts half the gap plus half a lane from the
+  // axis
   near(arm.in[0].startPt.y, 1.5 + 3.25 / 2, 0.1);
   near(Math.hypot(surf.island[0].x - surf.island[surf.island.length - 1].x, surf.island[0].y - surf.island[surf.island.length - 1].y), 0, 0.01, 'pointed nose');
 });
@@ -481,7 +484,8 @@ test('topology: a free right turn gives a triangle island between slip lane and 
   const fromSlip = m.connections.filter(c => c.from === pair.slip.lane.id);
   assert.strictEqual(fromSlip.length, 1);
   assert.strictEqual(T.connectionManeuver(pair.slip, d.arms.find(a => a.name === 'West').out[0]), 'right');
-  // the island lies between the slip lane and the through lane: x between the lane boundary and the slip lane
+  // the island lies between the slip lane and the through lane: x between the lane boundary and the
+  // slip lane
   const isl = islands.find(i => i.armKey === north.key).polygon;
   const slipInner = Math.abs(north.in[1].startPt.x) - 3.25 / 2;   // inner edge of the slip lane
   isl.forEach(p => assert.ok(p.x <= -slipInner + T.DEFAULTS.triTip, 'island stays at the lane boundary (the noses may reach a little into the through lane)'));
@@ -514,12 +518,14 @@ test('topology: applyFreeRight rewires the slip lane and can be switched off', (
   T.ensureDefaults(m, T.derive(m));
   const key = T.derive(m).arms.find(a => a.name === 'Nord').key;
   T.setLaneCount(m, key, 'in', 2);
-  T.setLaneCount(m, T.derive(m).arms.find(a => a.name === 'West').key, 'out', 2);   // the slip lane needs its own egress lane
+  // the slip lane needs its own egress lane
+  T.setLaneCount(m, T.derive(m).arms.find(a => a.name === 'West').key, 'out', 2);
   let d = T.derive(m);
   T.proposeConnections(m, d).forEach(c => T.addConnection(m, c.from, c.to));
   const slipId = d.arms.find(a => a.key === key).in[1].lane.id;
   assert.ok(m.connections.filter(c => c.from === slipId).length >= 2, 'before: straight and right');
-  // the outer lane also goes straight on: it keeps that movement and a new short slip lane is added
+  // the outer lane also goes straight on: it keeps that movement and the code adds a new short slip
+  // lane
   const added = T.applyFreeRight(m, d, key, true);
   assert.strictEqual(added.length, 1);
   assert.strictEqual(added[0].length, 25);
@@ -650,7 +656,7 @@ test('topology: a connection that crosses an island is found', () => {
   const c = T.addConnection(m, east.in[1].lane.id, west.out[2].lane.id);
   const issues = T.connectionIssues(m, T.derive(m));
   assert.ok(issues.some(i => i.connId === c.id && i.kind === 'island'), 'found');
-  // the path of the slip lane itself keeps its distance to the kerb: it is not reported
+  // the path of the slip lane itself keeps its distance to the kerb: the check does not report it
   const slip = m.connections.find(x => x.from === T.freeRightPair(d, d.arms.find(a => a.name === 'Nord')).slip.lane.id);
   assert.ok(!issues.some(i => i.connId === slip.id));
 });
@@ -753,7 +759,7 @@ test('topology: the Rödelstraße reconstruction loads and has no collisions', (
   assert.strictEqual(T.freeRightIslands(d).length, 1);
   const east = d.arms.find(a => a.name === 'Ost');
   assert.strictEqual(east.freeRight, true);
-  // two ingress lanes; the slip lane branches off the outer one, which also goes straight on
+  // two ingress lanes, the slip lane branches off the outer one, which also goes straight on
   assert.strictEqual(east.in.length, 2);
   assert.strictEqual(east.slipShared, true);
   assert.ok(m.connections.filter(c => c.from === east.in[1].lane.id).length >= 2);

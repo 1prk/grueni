@@ -1,6 +1,6 @@
-/* Design-Tokens. Signalfarben (--sig-*) folgen der Ampel-Farbsemantik aus
-   dem Ursprungswerkzeug und werden von den D3-Diagrammen referenziert -
-   nicht verändern, ohne die Legenden gegenzuprüfen. */
+/* Design tokens. The signal colors (--sig-*) follow the traffic signal color meaning of the
+   original tool.
+   The D3 charts reference them. Do not change them without a check of the legends. */
 :root{
   --bg-app:#eef1f4;
   --bg-header:#141d27;
@@ -26,9 +26,9 @@
   --sig-yellow:#e0a721;
   --sig-green:#1f8a4c;
   --sig-dark:#4b5563;
-  /* Umrandung der Segmentkästen im Spur-Stil "Minimal" (siehe charts.css) -
-     bewusst fast schwarz wie im gedruckten Signalzeitenplan, nicht das
-     hellere --border-strong der Flächenelemente. */
+  /* Outline of the segment boxes in the track style "Minimal" (see charts.css).
+     The color is almost black on purpose, as in the printed signal timing plan.
+     It is not the lighter --border-strong of the surface elements. */
   --lane-outline:#1a1f26;
   --req-marker:#7c4fd1;
   --req-marker-bg:#efe8fb;
@@ -38,8 +38,10 @@
   --crit-bg:#fbeaea;
   --crit-text:#a11f1f;
 
-  /* LOS-Stufen (Qualitätsstufen ÖPNV-Anmeldung), grün(gut)->rot(schlecht).
-     A/F erhalten wegen Kontrast weiße Chip-Schrift, B-E dunkle - siehe .los-chip. */
+  /* LOS levels (quality levels of the public transport registration), from green (good) to red
+     (bad).
+     Levels A and F get white chip text because of contrast. Levels B to E get dark text. See
+     .los-chip. */
   --los-a:#1f8a4c;
   --los-b:#5da53c;
   --los-c:#9aac1f;
@@ -47,29 +49,34 @@
   --los-e:#c76a1f;
   --los-f:#c0272b;
 
-  /* Umlaufprüfung: ÖV-Fahrzeiten-Zusatzspuren (Sollfahrzeit/Verlustzeit/
-     Zwangslöschzeit-Fenster) - bewusst kräftige, mit nichts sonst
-     kollidierende Farben (kein Rot/Grün/Gelb der Signalfarben, kein Blau
-     der Detektor-/Accent-Farbe, kein Lila der Anforderungs-Marker). */
+  /* Cycle check: extra tracks for public transport travel times
+     (planned travel time, lost time and the window of the forced clearance time).
+     The colors are strong on purpose. No other color uses them:
+     not the red, green or yellow of the signal colors, not the blue of the detector and accent
+     color,
+     and not the purple of the request markers. */
   --fz-soll:#0089a3;
   --fz-verlust:#e6007e;
 
-  /* Umlaufprüfung: APW/ÖPNV-Rohwert-Spur - alternierend je Segment (nicht
-     semantisch wie fz-soll/-verlust, nur zur Abgrenzung benachbarter
-     Zeitabschnitte mit unterschiedlichem Rohwert, z.B. Countdown 10,9,8...). */
+  /* Cycle check: raw value track for APW and public transport. The color alternates for each
+     segment.
+     The colors have no meaning like fz-soll and fz-verlust.
+     They only separate neighboring time periods that have different raw values, for example a
+     countdown 10, 9, 8, ... */
   --apw-a:#7c1f84;
   --apw-b:#eebaf3;
 
-  /* Umlaufprüfung: synthetische Formel-Spalten (Formel-Builder) - eigener
-     Jade-/Grünton zwischen --sig-green und --fz-soll, damit ein berechneter
-     "Detektor" auf einen Blick von echten Detektoren (--accent) und
-     APW-Werten (--apw-*) unterscheidbar bleibt. */
+  /* Cycle check: synthetic formula columns (formula builder).
+     The color is its own jade green between --sig-green and --fz-soll.
+     So the user can tell at one glance a calculated "detector" from real detectors (--accent)
+     and APW values (--apw-*). */
   --formula-on:#159378;
 
-  /* Umlaufprüfung: Kennzahl-Spuren (Umlaufstatistiken, siehe
-     umlaufstatistiken.js getSyntheticColumns()) - warmer Goldton, kollidiert
-     weder mit den Signalfarben noch mit --formula-on, --fz-soll/-verlust
-     oder --apw-a/-b. */
+  /* Cycle check: key figure tracks (cycle statistics, see getSyntheticColumns() in
+     umlaufstatistiken.js).
+     The color is a warm gold.
+     It does not collide with the signal colors, --formula-on, --fz-soll, --fz-verlust, --apw-a
+     or --apw-b. */
   --kennzahl-bg:#b8860b;
 
   --radius-sm:4px;

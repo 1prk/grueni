@@ -1,5 +1,6 @@
-/* Differential tests: GZ.csvImport must give the same result as GZ.parser.parseOcitText,
-   for every fixture, for every way of cutting the bytes into chunks, and for random odd files.
+/* Differential tests. GZ.csvImport must give the same result as GZ.parser.parseOcitText.
+   This applies to every fixture, to every way to cut the bytes into chunks, and to random odd
+   files.
    The old parser is the reference. */
 (function () {
   'use strict';
@@ -35,7 +36,7 @@
   function reference(text) {
     try { return { ok: snapshot(GZ.parser.parseOcitText(text)) }; } catch (e) { return { error: e.message }; }
   }
-  // chunk: 0 = one piece, else the size of each piece in bytes
+  // chunk: 0 means one piece. Any other number is the size of each piece in bytes.
   function candidate(text, chunk) {
     const bytes = enc.encode(text);
     try {
@@ -127,7 +128,7 @@
     ['sample', 'synthetic'].forEach(name => [7, 100, 4096, 65536].forEach(size => expectSame('chunk ' + size + ' ' + name, all[name], size)));
   });
 
-  // random odd files
+  // Random odd files.
   function mulberry32(a) {
     return function () {
       a |= 0; a = a + 0x6D2B79F5 | 0;

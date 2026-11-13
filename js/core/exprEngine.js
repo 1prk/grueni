@@ -1,82 +1,88 @@
-/* GZ.exprEngine — kleiner, abhängigkeitsfreier Formel-Interpreter für den
-   Umlaufprüfung-Formel-Builder (synthetische Detektoren aus Variablen-
-   Ausdrücken) UND für Umlaufstatistiken (umlaufweise berechnete Kennzahlen-
-   Spalten, siehe js/views/umlaufstatistiken.js). Reine Berechnungslogik,
-   kein DOM-Bezug.
+/* GZ.exprEngine is a small formula interpreter without dependencies.
+   It serves the formula builder of the cycle check (Umlaufprüfung): synthetic detectors from
+   variable expressions.
+   It also serves Umlaufstatistiken (key figure columns that the code calculates cycle by cycle,
+   see js/views/umlaufstatistiken.js).
+   It is pure calculation logic. It has no link to the DOM.
 
-   Umlaufweise Primitiven (An/Ab/TF/RG/GE/Ausgeloest/AnzahlAusloesungen,
-   siehe PRIMITIVES weiter unten) lesen aus handle.cycleMetrics statt aus
-   handle.sweep - einem vom Aufrufer gepflegten, flachen Objekt mit den
-   Kennzahlen des jeweils "aktuellen" Umlaufs (GZ.segments.
-   computeCycleSgMetrics/computeCycleDetMetrics). compileValue() (wie
-   compile(), aber ohne die BOOL-Pflicht) ist der Einstiegspunkt für
-   Umlaufstatistiken, wo der Ausdruck selbst der gesuchte Wert ist statt
-   einer Filterbedingung.
+   The cycle-wise primitives (An, Ab, TF, RG, GE, Ausgeloest, AnzahlAusloesungen, see PRIMITIVES
+   below)
+   read from handle.cycleMetrics and not from handle.sweep.
+   handle.cycleMetrics is a flat object that the caller maintains.
+   It has the key figures of the "current" cycle (GZ.segments.computeCycleSgMetrics and
+   computeCycleDetMetrics).
+   compileValue() is like compile(), but without the BOOL rule.
+   It is the entry point for Umlaufstatistiken, where the expression itself is the wanted value
+   and not a filter condition.
 
-   Grammatik (Präzedenz niedrig -> hoch):
+   Grammar (precedence from low to high):
      or   := and (OR and)*
      and  := not (AND not)*
      not  := NOT not | cmp
-     cmp  := add ((> | >= | < | <= | == | !=) add)?     -- nicht verkettbar
+     cmp  := add ((> | >= | < | <= | == | !=) add)?     -- cannot be chained
      add  := mul ((+|-) mul)*
      mul  := unary ((*|/) unary)*
      unary:= '-' unary | atom
      atom := NUMBER | KATLIT | IDENT | IDENT '(' (or (',' or)*)? ')' | '(' or ')'
 
-   Typen: NUM, BOOL, SG, DET (Objekt-Handles auf eine Signalgruppen-/
-   Detektor-Variable), KAT_SG, KAT_DET (Zustands-Konstanten, z.B. GRUEN/
-   BELEGT), ANY (Platzhalter für einen noch nicht gebundenen Funktions-
-   parameter, siehe compileFunctionDef() - erfüllt jede Typprüfung, damit
-   eine Funktionsdefinition VOR ihrer ersten Verwendung syntaktisch geprüft
-   werden kann, ohne die konkreten Argumenttypen zu kennen). Operatoren
-   erzwingen den erwarteten Typ ihrer Operanden (AND/OR/NOT nur BOOL,
-   Arithmetik nur NUM, Vergleich NUM==NUM ODER gleichartiges KAT==KAT) -
-   Typfehler werden beim Parsen erkannt, ohne dass Daten ausgewertet werden
-   müssen. Der Gesamtausdruck einer Formel (siehe compile()) muss zu BOOL
-   auswerten; der Rumpf einer benutzerdefinierten Funktion (siehe
-   compileFunctionDef()) darf einen beliebigen Typ liefern - erst der
-   tatsächliche Aufruf an einer Formel entscheidet, ob das passt.
+   Types: NUM, BOOL, SG, DET (object handles to a signal group or detector variable),
+   KAT_SG, KAT_DET (state constants, for example GRUEN or BELEGT),
+   ANY (a placeholder for a function parameter that is not bound yet, see compileFunctionDef()).
+   ANY satisfies each type check.
+   So the code can check the syntax of a function definition BEFORE its first use, without the
+   concrete argument types.
+   Operators enforce the expected type of their operands:
+   AND, OR and NOT accept only BOOL. Arithmetic accepts only NUM.
+   A comparison accepts NUM==NUM OR KAT==KAT of the same kind.
+   The parser finds type errors at parse time. It does not need to evaluate data.
+   The whole expression of a formula (see compile()) must evaluate to BOOL.
+   The body of a user-defined function (see compileFunctionDef()) can return any type.
+   Only the real call in a formula decides if it fits.
 
-   Benutzerdefinierte Funktionen (funcs-Parameter von compile()/parse(), Form
-   { [name]: {params:string[], exprText:string} }): ein Aufruf FUNC(a,b,...)
-   wird "inline" expandiert - der Rumpftext wird mit einer neuen varTypes-
-   Bindung (Parametername -> tatsächlicher Argumenttyp DIESES Aufrufs) neu
-   geparst/typgeprüft (siehe parseCall()). Das bedeutet: derselbe Funktions-
-   rumpf wird potenziell mehrfach mit unterschiedlichen konkreten Typen
-   spezialisiert (wie C++-Templates/Java-Generics bei der Instanziierung),
-   nicht einmalig kompiliert. Ein visiting-Set (Funktionsnamen im aktuellen
-   Expansions-Stack) verhindert zyklische Aufrufe (A ruft B ruft A) mit
-   einem klaren Fehler statt eines Stapelüberlaufs.
+   User-defined functions (the funcs parameter of compile() and parse(), form { [name]:
+   {params:string[], exprText:string} }):
+   the code expands a call FUNC(a,b,...) "inline".
+   It parses and type-checks the body text again with a new varTypes binding
+   (parameter name -> real argument type of THIS call, see parseCall()).
+   So the same function body can be specialized many times with different concrete types.
+   This works like C++ templates or Java generics at instantiation. The code does not compile the
+   body once.
+   A visiting set (function names in the current expansion stack) prevents cyclic calls (A calls
+   B calls A).
+   The result is a clear error and not a stack overflow.
 
-   Eingebaute Funktionen (PRIMITIVES unten) verwandeln ein Objekt-Handle in
-   einen auswertbaren Wert - Zustand(sg|det)->KAT_*, Dauer(sg|det)->NUM
-   (Sekunden im aktuellen Zustand), DauerSeit(sg|det, kategorie)->NUM
-   (Sekunden seit dem letzten Eintritt in "kategorie", 0 wenn gerade nicht
-   in diesem Zustand). Der aktuelle Auswertungszeitpunkt wird NICHT als
-   Argument übergeben, sondern läuft intern/implizit über das jeweilige
-   Objekt-Handle (siehe scope unten, handle.sweep) - TX bleibt zwar als
-   normale NUM-Variable im scope verfügbar (z.B. für eigene Bedingungen wie
-   "TX > 60" in einer Funktion), muss aber nie an eine Primitive übergeben
-   werden und ist daher nirgends ein Pflichtargument.
+   Built-in functions (PRIMITIVES below) turn an object handle into a value that the code can
+   evaluate:
+   Zustand(sg|det) -> KAT_*,
+   Dauer(sg|det) -> NUM (seconds in the current state),
+   DauerSeit(sg|det, category) -> NUM (seconds since the last entry into "category", 0 if the
+   object is not in this state now).
+   The code does NOT pass the current evaluation time as an argument.
+   It runs internally and implicitly through the object handle (see scope below, handle.sweep).
+   TX is still available as a normal NUM variable in the scope
+   (for example for own conditions such as "TX > 60" in a function).
+   But it never needs to go to a primitive. So it is nowhere a required argument.
 
-   scope-Objekt bei run(scope): Alias -> Wert. NUM-Variablen (APW/ÖPNV) sind
-   number (NaN bei fehlendem Rohwert - jeder Vergleich mit NaN ist in JS
-   automatisch false, Division durch 0 ergibt Infinity/NaN - kein Sonderfall
-   nötig, das Verhalten ist bewusst "fehlender/undefinierter Wert ->
-   Bedingung nicht erfüllt"). SG-/DET-Variablen sind ein Handle
-   { class:'SG'|'DET', sweep }, wobei sweep ein GZ.segments.
-   makePointSegmentSweep()-Objekt ist, dessen advance(t) VOR jedem run()-
-   Aufruf einmal je Zeile vom Aufrufer (formulaBuilder.js berechnen())
-   vorgerückt wird - die Primitiven lesen nur sweep.segment()/sweep.time(). */
+   The scope object for run(scope): alias -> value.
+   NUM variables (APW, ÖPNV) are numbers.
+   A missing raw value gives NaN. In JS each comparison with NaN is automatically false.
+   A division by 0 gives Infinity or NaN. This needs no special case.
+   The behavior is "missing or undefined value -> the condition is not met", on purpose.
+   SG and DET variables are a handle { class:'SG'|'DET', sweep }.
+   sweep is a GZ.segments.makePointSegmentSweep() object.
+   The caller advances advance(t) once for each row BEFORE each run() call (formulaBuilder.js
+   berechnen()).
+   The primitives read only sweep.segment() and sweep.time(). */
 (function (GZ) {
   'use strict';
 
-  // incomplete: der Ausdruck ist nicht FALSCH, sondern (noch) NICHT FERTIG -
-  // z.B. "DauerSeit(K1, GRUEN) > " mitten im Tippen oder ein für sich
-  // gültiger, nur noch nicht zu WAHR/FALSCH ergänzter Ausdruck. Aufrufer
-  // können das neutral statt als roten Fehler anzeigen (siehe
-  // validateFormulaRow() in formulaBuilder.js) - sonst blinkt beim normalen
-  // Tippen dauernd eine Fehlermeldung auf, die gar keine ist.
+  // incomplete: the expression is not WRONG, it is (not yet) NOT FINISHED.
+  // Examples: "DauerSeit(K1, GRUEN) > " in the middle of typing,
+  // or an expression that is valid but not yet completed to TRUE or FALSE.
+  // Callers can show this neutral and not as a red error (see validateFormulaRow() in
+  // formulaBuilder.js).
+  // Otherwise an error message flashes all the time during normal typing, and it is not a real
+  // error.
   class ExprError extends Error {
     constructor(message, pos, incomplete) { super(message); this.pos = pos; this.incomplete = !!incomplete; }
   }
@@ -90,25 +96,23 @@
   })[t] || t;
   const isNumCompatible = t => t === 'NUM' || t === 'ANY';
   const isTextCompatible = t => t === 'TEXT' || t === 'ANY';
-  // KAT_* ist offen für beliebig viele konkrete Zustands-Kategorien (aktuell
-  // KAT_SG/KAT_DET aus KAT_TOKENS unten, plus was ein Aufrufer per
-  // extraKatTokens registriert, z.B. KAT_QSV in oepnvQa.js) - generisch am
-  // Namensschema erkannt statt eine feste Liste zu pflegen.
+  // KAT_* is open for any number of concrete state categories
+  // (now KAT_SG and KAT_DET from KAT_TOKENS below,
+  // plus what a caller registers with extraKatTokens, for example KAT_QSV in oepnvQa.js).
+  // The code finds them by the name scheme. It does not keep a fixed list.
   const isKatType = t => typeof t === 'string' && t.indexOf('KAT_') === 0;
   const isKatCompatible = t => isKatType(t) || t === 'ANY';
   const isObjCompatible = t => t === 'SG' || t === 'DET' || t === 'ANY';
-  // Zwei Typen "passen zusammen", wenn sie exakt gleich sind oder (mindestens)
-  // einer davon noch ANY ist (unspezialisierter Funktionsparameter ODER das
-  // LEER-Literal, siehe parseAtom() - beide passen sich jedem konkreten Typ
-  // an). Grundlage von WENN() unten: "dann" und "sonst" müssen denselben
-  // Ergebnistyp liefern, sonst wäre der Typ des Gesamtausdrucks nicht
-  // eindeutig.
+  // Two types "match" if they are exactly equal or if (at least) one of them is still ANY
+  // (an unspecialized function parameter OR the LEER literal, see parseAtom(). Both adapt to each
+  // concrete type).
+  // It is the basis of WENN() below: "then" and "else" must give the same result type.
+  // Otherwise the type of the whole expression would not be unique.
   const typesMatch = (a, b) => a === b || a === 'ANY' || b === 'ANY';
 
-  // Zustands-Konstanten (exakte Schreibweise, siehe GZ.parser STATE_CAT/
-  // categorizeDetRaw) - UNBEKANNT/INV/LUECKE sind bewusst NICHT als
-  // schreibbare Literale exponiert (Datenqualitäts-Artefakte, keine
-  // "echten" Signalzustände).
+  // State constants (exact spelling, see GZ.parser STATE_CAT and categorizeDetRaw).
+  // UNBEKANNT, INV and LUECKE are NOT exposed as writable literals on purpose.
+  // They are data quality artifacts and not "real" signal states.
   const KAT_TOKENS = {
     GRUEN: 'KAT_SG', ROT: 'KAT_SG', GELB: 'KAT_SG', ROTGELB: 'KAT_SG', DUNKEL: 'KAT_SG',
     BELEGT: 'KAT_DET', FREI: 'KAT_DET'
@@ -116,11 +120,12 @@
 
   const katTypeForObj = t => t === 'SG' ? 'KAT_SG' : t === 'DET' ? 'KAT_DET' : 'ANY';
 
-  // Eingebaute Funktionen: Objekt-Handle (+ optional Kategorie/TX) -> Wert.
-  // check(argNodes, pos) wirft ExprError bei Typfehlern und liefert den
-  // Ergebnistyp; run(argNodes) baut den run(scope)-Closure. Akzeptiert ANY
-  // (noch unspezialisierter Funktionsparameter) überall dort, wo sonst SG/
-  // DET/NUM/KAT_* verlangt wird - siehe Datei-Kopfkommentar zu ANY.
+  // Built-in functions: object handle (plus optional category or TX) -> value.
+  // check(argNodes, pos) throws ExprError for type errors and returns the result type.
+  // run(argNodes) builds the run(scope) closure.
+  // It accepts ANY (a function parameter that is not yet specialized) everywhere that otherwise
+  // requires SG, DET, NUM or KAT_*.
+  // See the file header comment about ANY.
   const PRIMITIVES = {
     Zustand: {
       arity: 1,
@@ -179,28 +184,32 @@
       }
     },
 
-    // ---- Umlaufweise Primitiven (An/Ab/TF/RG/GE/Ausgeloest/AnzahlAusloesungen) ----
-    // Lesen NICHT aus handle.sweep (Zustand am aktuellen Zeitpunkt), sondern
-    // aus handle.cycleMetrics - einem vom Aufrufer gepflegten, flachen
-    // Objekt mit den Kennzahlen des jeweils "aktuellen" Umlaufs (siehe
-    // GZ.segments.computeCycleSgMetrics/computeCycleDetMetrics). Für die
-    // umlaufweise Auswertung (Umlaufstatistiken) wird cycleMetrics einmal je
-    // Umlauf gesetzt; für die zeilenweise Auswertung (Formel-Builder,
-    // umlaufpruefung.js) hält der Aufrufer cycleMetrics beim Überschreiten
-    // einer Umlaufgrenze aktuell (ändert sich sonst nicht pro Zeile). Fehlt
-    // ein Wert (kein Grün in diesem Umlauf bzw. kein cycleMetrics gesetzt),
-    // liefern die NUM-Primitiven NaN (konsistent mit dem NUM/NaN-Vertrag
-    // dieser Datei, siehe Kopfkommentar) statt eines Sonderfalls.
-    // An/Ab/TF/RG/GE sind UNIVERSELL: eine Signalgruppe UND ein Detektor/APW-/
-    // ÖPNV-Wert haben beide genau EINEN "aktiven" Zustand, dessen Beginn/Ende
-    // je Umlauf interessiert - GRUEN bei einer Signalgruppe, BELEGT bei einem
-    // Detektor/Wert (siehe GZ.parser.categorizeSgRaw/categorizeDetRaw). "An"
-    // ist dabei einfach "wann beginnt dieser aktive Zustand" (Anwurf bei einer
-    // Signalgruppe, Belegungsbeginn bei einem Detektor), "Ab" entsprechend
-    // dessen Ende. RG/GE (Rotgelb/Gelb unmittelbar vor/nach der Freigabe)
-    // ergeben nur für Signalgruppen einen Wert ungleich 0 - ein Detektor/Wert
-    // kennt diese Zwischenkategorien nicht (adjacentTransitionDurations()
-    // trifft dort schlicht nie, kein Sonderfall nötig).
+    // ---- Cycle-wise primitives (An, Ab, TF, RG, GE, Ausgeloest, AnzahlAusloesungen) ----
+    // They do NOT read from handle.sweep (the state at the current time).
+    // They read from handle.cycleMetrics. This is a flat object that the caller maintains.
+    // It has the key figures of the "current" cycle (see GZ.segments.computeCycleSgMetrics and
+    // computeCycleDetMetrics).
+    // For the cycle-wise evaluation (Umlaufstatistiken) the caller sets cycleMetrics once for each
+    // cycle.
+    // For the row-wise evaluation (formula builder, umlaufpruefung.js) the caller keeps
+    // cycleMetrics current
+    // when the row crosses a cycle border. Otherwise it does not change for each row.
+    // If a value is missing (no green in this cycle, or no cycleMetrics set),
+    // the NUM primitives return NaN. This is consistent with the NUM/NaN contract of this file (see
+    // the header comment).
+    // It is not a special case.
+    // An, Ab, TF, RG and GE are UNIVERSAL:
+    // a signal group AND a detector, APW or ÖPNV value each have exactly ONE "active" state, and
+    // the start and end of it matter for each cycle.
+    // It is GRUEN for a signal group and BELEGT for a detector or value (see
+    // GZ.parser.categorizeSgRaw and categorizeDetRaw).
+    // "An" simply means "when this active state starts" (the An of a signal group, the start of
+    // occupancy for a detector).
+    // "Ab" means the end of it.
+    // RG and GE (red-amber and amber directly before and after the green) give a value other than 0
+    // only for signal groups.
+    // A detector or value does not have these intermediate categories.
+    // adjacentTransitionDurations() simply never matches there. No special case is needed.
     An: {
       arity: 1,
       check(args, pos) {
@@ -291,19 +300,21 @@
       }
     },
 
-    // WENN: Bedingung -> Wert (wie Excels WENN()/ein Ternary "? :") - erlaubt
-    // eine EINZELNE Spalte, deren Wert von einer Bedingung abhängt, statt
-    // mehrerer Spalten mit sich gegenseitig ausschließenden Formeln, z.B.
-    // WENN(TF(Det1) >= 5, An(Det1), LEER): "der Anwurf von Det1, aber nur für
-    // Umläufe/Ereignisse mit mindestens 5s Belegung, sonst LEER (NaN)" -
-    // gerade in Kombination mit LEER nützlich, weil die Umlaufstatistiken-
-    // Aggregatstatistik NaN-Zellen ohnehin schon aus Mittelwert/Median/etc.
-    // herausfiltert (siehe numericValues() in umlaufstatistiken.js): eine
-    // WENN/LEER-Spalte liefert damit direkt "Durchschnitt NUR über die
-    // Umläufe, die die Bedingung erfüllen". "dann" und "sonst" müssen
-    // denselben Ergebnistyp liefern (siehe typesMatch() oben) - der Typ des
-    // Gesamtausdrucks ist sonst nicht eindeutig; LEER (Typ ANY) passt sich
-    // dabei jedem der beiden an.
+    // WENN: condition -> value (like WENN() in Excel or a ternary "? :").
+    // It allows ONE column whose value depends on a condition, instead of several columns with
+    // formulas that exclude each other.
+    // Example: WENN(TF(Det1) >= 5, An(Det1), LEER) means
+    // "the An of Det1, but only for cycles or events with at least 5 s of occupancy, else LEER
+    // (NaN)".
+    // It is especially useful together with LEER.
+    // The aggregate statistics of Umlaufstatistiken already filter NaN cells out of mean, median
+    // and so on
+    // (see numericValues() in umlaufstatistiken.js).
+    // So a WENN/LEER column gives directly "the average ONLY over the cycles that meet the
+    // condition".
+    // "then" and "else" must give the same result type (see typesMatch() above).
+    // Otherwise the type of the whole expression is not unique.
+    // LEER (type ANY) adapts to each of the two.
     WENN: {
       arity: 3,
       check(args, pos) {
@@ -320,19 +331,20 @@
       }
     },
 
-    // ISTLEER: WAHR, wenn ein Wert LEER ist (siehe dort) - unterscheidet
-    // "es gab hier gar kein Ereignis" von "es gab ein Ereignis, das eine
-    // Bedingung nicht erfüllt hat", wenn beide sonst als dasselbe NaN
-    // ununterscheidbar wären. Typischerweise verschachtelt mit WENN, z.B.
+    // ISTLEER: WAHR if a value is LEER (see there).
+    // It tells apart "there was no event here at all" from "there was an event that did not meet a
+    // condition".
+    // Otherwise both look the same as NaN.
+    // It is typically nested with WENN, for example
     // WENN(ISTLEER(An(Det1)), 0, WENN(TF(Det1) >= 5, An(Det1), LEER)):
-    // "0, wenn Det1 in diesem Umlauf gar nicht ausgelöst hat (An(Det1) hat
-    // dann selbst keinen Wert); sonst der Anwurf, aber nur bei mind. 5s
-    // Belegung, sonst LEER" - das äußere WENN hält Umläufe OHNE Ereignis
-    // sichtbar (als 0), während das innere WENN Umläufe MIT Ereignis, das
-    // die Bedingung nicht erfüllt, ausblendet, statt beide Fälle gleich als
-    // 0 bzw. LEER zu behandeln. Akzeptiert JEDEN Typ (auch Text/Zustand/
-    // WAHR-FALSCH) - LEER liefert technisch immer den rohen JS-Wert NaN,
-    // unabhängig vom "Typ", den es sich per typesMatch() angepasst hat.
+    // "0 if Det1 did not trigger at all in this cycle (An(Det1) then has no value itself).
+    // Otherwise the An, but only with at least 5 s of occupancy, else LEER".
+    // The outer WENN keeps cycles WITHOUT an event visible (as 0).
+    // The inner WENN hides cycles WITH an event that does not meet the condition.
+    // Without both, the code would treat both cases the same as 0 or LEER.
+    // It accepts EACH type (also text, state and WAHR/FALSCH).
+    // Technically LEER always returns the raw JS value NaN, independent of the "type" that it
+    // adapted with typesMatch().
     ISTLEER: {
       arity: 1,
       check() { return 'BOOL'; },
@@ -342,19 +354,18 @@
       }
     },
 
-    // WertBei: der Rohwert einer Signalgruppe ODER eines Detektors/APW-/
-    // ÖPNV-Werts zu einem beliebigen Zeitpunkt innerhalb des aktuellen
-    // Umlaufs [s ab Umlaufbeginn] - typischerweise selbst wieder eine der
-    // Umlaufweisen Primitiven oben, z.B. WertBei(APW_01, Ab(K1)): "welchen
-    // Countdown zeigte APW_01 im Moment des Abwurfs von K1", oder
-    // WertBei(K2, Ab(K1)): "welches Signalbild (Rohwert) zeigte K2 in genau
-    // diesem Moment". Anders als Zustand() (aktueller Zeitpunkt, kategorisiert
-    // zu GRUEN/ROT/.../BELEGT/FREI) oder Ausgeloest/AnzahlAusloesungen (die
-    // nur wissen wollen, OB/WIE OFT belegt) liest dies den tatsächlichen,
-    // unkategorisierten Rohwert zu einem BELIEBIGEN Zeitpunkt - siehe
-    // handle.rawSample (GZ.segments.makeRawValueSampler) und
-    // scope.__cycleStart (Umlaufbeginn in ms, vom Aufrufer gesetzt, siehe
-    // GZ.umlaufContext/formulaBuilder.js berechnen()).
+    // WertBei: the raw value of a signal group OR of a detector, APW or ÖPNV value
+    // at any time inside the current cycle [s from the cycle start].
+    // The time is typically one of the cycle-wise primitives above, for example WertBei(APW_01,
+    // Ab(K1)):
+    // "which countdown APW_01 showed at the moment of the Ab of K1",
+    // or WertBei(K2, Ab(K1)): "which signal image (raw value) K2 showed at exactly this moment".
+    // Zustand() works at the current time and categorizes (GRUEN, ROT, ..., BELEGT, FREI).
+    // Ausgeloest and AnzahlAusloesungen only want to know IF or HOW OFTEN the object was occupied.
+    // WertBei is different. It reads the real, uncategorized raw value at ANY time.
+    // See handle.rawSample (GZ.segments.makeRawValueSampler)
+    // and scope.__cycleStart (the cycle start in ms, set by the caller,
+    // see GZ.umlaufContext and berechnen() in formulaBuilder.js).
     WertBei: {
       arity: 2,
       check(args, pos) {
@@ -373,20 +384,21 @@
       }
     },
 
-    // DauerBei: wie lange (in Sekunden) war eine Signalgruppe ODER ein
-    // Detektor/APW-/ÖPNV-Wert zu einem beliebigen Zeitpunkt bereits
-    // UNUNTERBROCHEN im selben (jeweils aktuellen) Zustand - generische,
-    // um einen expliziten Zeitpunkt erweiterte Fassung von Dauer() (das nur
-    // den JEWEILS AKTUELLEN Zeitpunkt kennt und deshalb in Umlaufstatistiken
-    // nicht nutzbar ist, siehe perRowOnly unten). Beantwortet z.B. "wie lange
-    // war Det1 im Moment des Abwurfs von K1 schon ununterbrochen belegt" -
-    // WertBei(det, Ab(sg)) liefert nur den Rohwert an dieser Stelle, DauerBei
-    // dagegen "seit wann gilt dieser Zustand" - für Signalgruppen ebenso
-    // (z.B. "wie lange war K2 zum Zeitpunkt X schon grün"). Bewusst
-    // GENERISCH: fragt nicht nach einer bestimmten Kategorie (GRUEN/BELEGT/
-    // ...), sondern nach der Dauer des Zustands, der zu diesem Zeitpunkt
-    // eben gerade gilt - siehe handle.durationAt (GZ.segments.
-    // makeSegmentDurationSampler) und scope.__cycleStart (wie bei WertBei).
+    // DauerBei: for how long (in seconds) a signal group OR a detector, APW or ÖPNV value
+    // was already in the same (current) state WITHOUT interruption, at any time.
+    // It is a generic version of Dauer() with an explicit time.
+    // Dauer() knows only the CURRENT time. So Umlaufstatistiken cannot use it (see perRowOnly
+    // below).
+    // Example: "for how long was Det1 already occupied without interruption at the moment of the Ab
+    // of K1".
+    // WertBei(det, Ab(sg)) gives only the raw value at this point. DauerBei gives "since when does
+    // this state apply".
+    // It also works for signal groups (for example "for how long was K2 already green at time X").
+    // It is GENERIC on purpose.
+    // It does not ask for a specific category (GRUEN, BELEGT, ...).
+    // It asks for the duration of the state that applies at this time.
+    // See handle.durationAt (GZ.segments.makeSegmentDurationSampler)
+    // and scope.__cycleStart (as for WertBei).
     DauerBei: {
       arity: 2,
       check(args, pos) {
@@ -405,13 +417,13 @@
       }
     },
 
-    // Versatz/Ueberschneidung: die eigentliche Motivation für An/Ab/TU_MED
-    // oben - "Zeit von Abwurf sg1 bis Anwurf sg2" ist der häufigste Fall,
-    // verdient also eine eigene, selbsterklärende Primitive statt jedes Mal
-    // MOD(An(sg2) - Ab(sg1), TU_MED) von Hand auszuschreiben. Wrapt intern
-    // exakt so (inkl. Umlaufgrenze) - siehe An/Ab oben. Wie An/Ab UNIVERSELL:
-    // "Abwurf"/"Anwurf" gilt sinngemäß auch für Detektor/APW-/ÖPNV-Werte
-    // (Belegungsende/-beginn).
+    // Versatz and Ueberschneidung: the real reason for An, Ab and TU_MED above.
+    // "Time from the Ab of sg1 to the An of sg2" is the most frequent case.
+    // So it deserves its own primitive that explains itself.
+    // Then nobody must write MOD(An(sg2) - Ab(sg1), TU_MED) by hand each time.
+    // It wraps internally in exactly this way (including the cycle border). See An and Ab above.
+    // As An and Ab it is UNIVERSAL: "Ab" and "An" also apply to detector, APW and ÖPNV values (end
+    // and start of occupancy).
     Versatz: {
       arity: 2,
       check(args, pos) {
@@ -428,13 +440,13 @@
           return ((cmTo.an - cmFrom.ab) % tuMed + tuMed) % tuMed;
         };
       },
-      // Objekt-bezogene Spanne für die Darstellung als Balken (siehe
-      // umlaufpruefung.js Kennzahl-Spur): NICHT modulo-normalisiert wie
-      // run() oben - reicht der Versatz über das Umlaufende hinaus
-      // (cmTo.an < cmFrom.ab, siehe Ueberschneidung), liefert das eine
-      // rückwärtslaufende Spanne (endSec < startSec); der Aufrufer erkennt
-      // das und fällt auf die volle Zeilenbreite zurück statt geometrisch
-      // falsch zu zeichnen.
+      // Object-related span for the display as a bar (see the key figure track in
+      // umlaufpruefung.js).
+      // It is NOT normalized by modulo like run() above.
+      // If the offset extends past the end of the cycle (cmTo.an < cmFrom.ab, see Ueberschneidung),
+      // the result is a span that runs backward (endSec < startSec).
+      // The caller detects this and falls back to the full row width.
+      // It does not draw something geometrically wrong.
       span(args) {
         const [fromNode, toNode] = args;
         return scope => {
@@ -468,37 +480,42 @@
     }
   };
 
-  // Anzeige-Metadaten für Primitiven (Autovervollständigung/Funktions-Palette
-  // in formulaBuilder.js UND umlaufstatistiken.js, sowie Tooltip-/Legende-
-  // Text dort) - getrennt von PRIMITIVES.check/run oben, da rein
-  // beschreibend (keine Auswertungslogik). desc ist die einzige Doku, die
-  // Nutzer je Primitive zu sehen bekommen (Autovervollständigung, ƒ-Palette,
-  // Umlaufstatistiken-Legende) - entsprechend ausführlich: was genau
-  // geliefert wird, für welche Objekt-Typen, und wie sich Sonderfälle
-  // (kein Ereignis, keine Rotgelb-/Gelb-Nachbarschaft, ...) verhalten.
+  // Display metadata for primitives
+  // (autocomplete and function palette in formulaBuilder.js AND umlaufstatistiken.js, and the
+  // tooltip and legend text there).
+  // It is separate from PRIMITIVES.check and run above, because it is purely descriptive (no
+  // evaluation logic).
+  // desc is the only documentation that users see for each primitive
+  // (autocomplete, ƒ palette, Umlaufstatistiken legend).
+  // So it is detailed: what exactly the primitive returns, for which object types,
+  // and how special cases behave (no event, no red-amber or amber neighbor, ...).
   //
-  // objArgType (optional): welchen Objekt-Typ das/die Argument(e) dieser
-  // Primitive erwarten - 'SG' oder 'DET', wenn NUR einer der beiden Typen
-  // gültig ist (z.B. Ausgeloest/AnzahlAusloesungen: nur Detektor/Wert, kein
-  // "wie oft war diese Signalgruppe an" definiert); 'OBJ', wenn BEIDES
-  // gültig ist (An/Ab/TF/RG/GE/Versatz/Ueberschneidung/WertBei/DauerBei sind
-  // UNIVERSELL - eine Signalgruppe UND ein Detektor/APW-/ÖPNV-Wert haben
-  // beide genau einen "aktiven" Zustand mit Beginn/Ende, siehe An/Ab-
-  // Kopfkommentar in PRIMITIVES oben); fehlt bei Zustand/Dauer/DauerSeit
-  // (akzeptieren ebenfalls SG ODER DET, sind aber ohnehin perRowOnly und in
-  // Umlaufstatistiken gar nicht erst aufrufbar) sowie bei rein numerischen
-  // Primitiven wie MOD. umlaufstatistiken.js nutzt dies, um innerhalb eines
-  // Funktionsaufrufs (z.B. "An(") gezielt nur Signalgruppen- bzw. Detektor-/
-  // APW-Namen (bzw. bei 'OBJ' beide) vorzuschlagen, statt aller bekannten
-  // Bezeichner - EINZIGE Stelle, die das pflegt (nicht länger separate
-  // SG_ARG_FNS/DET_ARG_FNS-Listen dort).
+  // objArgType (optional): the object type that the argument or arguments of this primitive expect.
+  //   'SG' or 'DET' if ONLY one of the two types is valid
+  //   (for example Ausgeloest and AnzahlAusloesungen: only detector or value. "How often was this
+  //   signal group on" is not defined).
+  //   'OBJ' if BOTH are valid
+  //   (An, Ab, TF, RG, GE, Versatz, Ueberschneidung, WertBei and DauerBei are UNIVERSAL:
+  //   a signal group AND a detector, APW or ÖPNV value each have exactly one "active" state with a
+  //   start and an end.
+  //   See the An/Ab header comment in PRIMITIVES above).
+  //   It is missing for Zustand, Dauer and DauerSeit
+  //   (they also accept SG OR DET, but they are perRowOnly anyway and cannot be called in
+  //   Umlaufstatistiken at all)
+  //   and for purely numeric primitives such as MOD.
+  //   umlaufstatistiken.js uses it to suggest, inside a function call (for example "An("),
+  //   only signal group names or only detector and APW names (or both for 'OBJ'), and not all known
+  //   identifiers.
+  //   It is the ONLY place that maintains this (there are no separate SG_ARG_FNS and DET_ARG_FNS
+  //   lists there any more).
   //
-  // perRowOnly (optional): true, wenn die Primitive aus handle.sweep liest
-  // (Zustand am jeweils AKTUELLEN Zeitpunkt) statt aus handle.cycleMetrics/
-  // handle.rawSample/handle.durationAt - funktioniert daher nur zeilenweise
-  // (Formel-Builder), nicht in Umlaufstatistiken (siehe dortiges
-  // findPerRowOnlyUsage()). DauerBei ist die um einen expliziten Zeitpunkt
-  // erweiterte, dadurch auch in Umlaufstatistiken nutzbare Fassung von Dauer.
+  // perRowOnly (optional): true if the primitive reads from handle.sweep (the state at the CURRENT
+  // time)
+  //   and not from handle.cycleMetrics, handle.rawSample or handle.durationAt.
+  //   So it works only row by row (formula builder) and not in Umlaufstatistiken (see
+  //   findPerRowOnlyUsage() there).
+  //   DauerBei is the version of Dauer with an explicit time. So it also works in
+  //   Umlaufstatistiken.
   const PRIMITIVE_INFO = [
     { name: 'Zustand', params: ['objekt'], desc: 'Aktueller Zustand von objekt (Signalgruppe: GRUEN/ROT/GELB/ROTGELB/DUNKEL; Detektor/APW-/ÖPNV-Wert: BELEGT/FREI). Nur zeilenweise (Formel-Builder) - "aktuell" braucht einen konkreten Zeitpunkt.', perRowOnly: true },
     { name: 'Dauer', params: ['objekt'], desc: 'Sekunden, die objekt bereits ununterbrochen im aktuellen Zustand ist. Nur zeilenweise - siehe DauerBei für die Variante mit explizitem Zeitpunkt (auch in Umlaufstatistiken nutzbar).', perRowOnly: true },
@@ -519,11 +536,12 @@
     { name: 'Ueberschneidung', params: ['objektAbwurf', 'objektAnwurf'], desc: 'Wahr, wenn der aktive Zustand von objektAnwurf in dieser Zeile schon beginnt, BEVOR der von objektAbwurf endet (Versatz würde sonst fälschlich fast eine ganze Umlaufzeit zeigen statt einer echten Überlappung).', objArgType: 'OBJ' }
   ];
 
-  // Zeichenbereich des ERSTEN Parameters innerhalb von "name(argList)"
-  // (relativ zum Anfang, d.h. inkl. "name(" - Offset) - von formulaBuilder.js/
-  // umlaufstatistiken.js beim Einfügen eines Funktionsaufrufs aus Autover-
-  // vollständigung/Palette genutzt, um ihn direkt als Platzhalter zu
-  // selektieren (z.B. "DauerSeit(sg, GRUEN)" mit "sg" selektiert).
+  // Character range of the FIRST parameter inside "name(argList)"
+  // (relative to the start, that is including the "name(" offset).
+  // formulaBuilder.js and umlaufstatistiken.js use it when they insert a function call from the
+  // autocomplete or the palette.
+  // They select the parameter directly as a placeholder (for example "DauerSeit(sg, GRUEN)" with
+  // "sg" selected).
   function argRangesFor(name, params) {
     const prefix = name.length + 1; // "name(".length
     let pos = 0;
@@ -534,12 +552,12 @@
     });
   }
 
-  // extraKatTokens: wie KAT_TOKENS, aber NUR für diesen einen tokenize()-
-  // Aufruf aktiv statt global reserviert (siehe Datei-Kopfkommentar zu
-  // KAT_TOKENS) - damit z.B. oepnvQa.js eigene Zustands-Konstanten (QSV-
-  // Stufen A-F) einführen kann, ohne dass diese Buchstaben dem Formel-
-  // Builder (mit seinen frei wählbaren Variablen-Aliasen) als Bezeichner
-  // verloren gehen.
+  // extraKatTokens: like KAT_TOKENS, but active ONLY for this one tokenize() call and not reserved
+  // globally
+  // (see the file header comment about KAT_TOKENS).
+  // So oepnvQa.js can add its own state constants (the QSV levels A to F)
+  // without the formula builder (with its free variable aliases) losing these letters as
+  // identifiers.
   function tokenize(text, extraKatTokens) {
     const tokens = [];
     const n = text.length;
@@ -563,11 +581,11 @@
       if (isDigit(ch) || (ch === '.' && isDigit(text[i + 1]))) {
         let j = i;
         while (j < n && isDigit(text[j])) j++;
-        // Bezeichner, der mit Ziffern beginnt (z.B. eine OCIT-Signalgruppe/
-        // Knotennummer wie "809_Koord"): folgt direkt ein Buchstabe/
-        // Unterstrich, ist das kein Zahlenliteral - den kompletten
-        // Bezeichner konsumieren statt nur die Ziffern (sonst Absturz beim
-        // Parsen: "809" als NUMBER, "_Koord" als eigenes, unerwartetes IDENT).
+        // An identifier that starts with digits (for example an OCIT signal group or junction
+        // number such as "809_Koord"):
+        // if a letter or an underscore follows directly, it is not a number literal.
+        // The code must consume the complete identifier and not only the digits.
+        // Otherwise parsing crashes: "809" as NUMBER and "_Koord" as its own, unexpected IDENT.
         if (j < n && /[A-Za-z_]/.test(text[j])) {
           let k = j;
           while (k < n && isIdentPart(text[k])) k++;
@@ -602,13 +620,15 @@
   }
 
   // varTypes: { [alias]: 'BOOL'|'NUM'|'SG'|'DET'|'ANY' }
-  // funcs: { [name]: {params:string[], exprText:string} } (benutzerdefinierte
-  // Funktionen, siehe Datei-Kopfkommentar) - optional, Default {}.
-  // visiting: Set<string> der Funktionsnamen im aktuellen Expansions-Stack
-  // (Zyklenerkennung bei Funktionsaufrufen) - optional, Default leeres Set.
-  // Liefert den geparsten/typgeprüften Wurzelknoten OHNE die BOOL-Pflicht
-  // von compile() - die gilt nur für den Formel-Text selbst, nicht für
-  // (Zwischen-)Aufrufe von Funktionsrümpfen.
+  // funcs: { [name]: {params:string[], exprText:string} } (user-defined functions, see the file
+  // header comment).
+  //   Optional, default {}.
+  // visiting: Set<string> of the function names in the current expansion stack (detection of cycles
+  // in function calls).
+  //   Optional, default an empty set.
+  // Returns the parsed and type-checked root node WITHOUT the BOOL rule of compile().
+  // The BOOL rule applies only to the formula text itself, not to (intermediate) calls of function
+  // bodies.
   function parse(tokens, varTypes, funcs, visiting) {
     funcs = funcs || {};
     visiting = visiting || new Set();
@@ -664,10 +684,9 @@
         const opTok = next();
         const right = parseAdd();
         const bothNum = isNumCompatible(left.type) && isNumCompatible(right.type);
-        // Konkret unterschiedliche KAT-Subtypen (z.B. KAT_SG vs. KAT_DET)
-        // sind nie vergleichbar; ist eine Seite noch ANY (unspezialisierter
-        // Funktionsparameter), lässt sich das erst am tatsächlichen Aufruf
-        // entscheiden.
+        // Concretely different KAT subtypes (for example KAT_SG and KAT_DET) are never comparable.
+        // If one side is still ANY (an unspecialized function parameter), the code can decide only
+        // at the real call.
         const concreteKatMismatch = isKatType(left.type) && isKatType(right.type) && left.type !== right.type;
         const bothSameKat = isKatCompatible(left.type) && isKatCompatible(right.type) && !concreteKatMismatch;
         const bothText = isTextCompatible(left.type) && isTextCompatible(right.type);
@@ -737,13 +756,12 @@
         }
         const returnType = prim.check(args, namePos);
         const node = { type: returnType, run: prim.run(args) };
-        // span (nur einige Primitiven, siehe TF/RG/GE/Versatz/Ueberschneidung
-        // oben): die vom Ausdruck gemeinte Zeitspanne innerhalb des Umlaufs,
-        // für eine objekt-bezogene Balkendarstellung statt eines die ganze
-        // Zeile füllenden Balkens (siehe compileValue()/umlaufpruefung.js).
-        // Geht bei jeder weiteren Verknüpfung (+, Vergleich, eigene Funktion,
-        // ...) bewusst verloren - nur ein Ausdruck, der GENAU einer dieser
-        // Primitiven-Aufrufe IST, hat eine eindeutige Spanne.
+        // span (only some primitives, see TF, RG, GE, Versatz and Ueberschneidung above):
+        // the time span inside the cycle that the expression means,
+        // for an object-related bar display and not a bar that fills the whole row (see
+        // compileValue() and umlaufpruefung.js).
+        // It is lost on each further combination (+, comparison, own function, ...) on purpose.
+        // Only an expression that IS exactly one of these primitive calls has a unique span.
         if (prim.span) node.span = prim.span(args);
         return node;
       }
@@ -756,9 +774,10 @@
       if (visiting.has(name)) {
         throw new ExprError(`Zyklischer Funktionsaufruf: "${name}" ruft sich (direkt oder indirekt) selbst auf`, namePos);
       }
-      // Aufruf-Expansion: Rumpf mit den TATSÄCHLICHEN Argumenttypen DIESES
-      // Aufrufs neu parsen/typprüfen (Spezialisierung je Aufrufstelle, siehe
-      // Datei-Kopfkommentar) - kein einmalig kompilierter, generischer Rumpf.
+      // Call expansion: parse and type-check the body again with the REAL argument types of THIS
+      // call
+      // (specialization for each call site, see the file header comment).
+      // There is no generic body that the code compiles once.
       const localVarTypes = { TX: 'NUM' };
       fn.params.forEach((p, i) => { localVarTypes[p] = args[i].type; });
       const nextVisiting = new Set(visiting);
@@ -789,12 +808,13 @@
       if (tok.type === 'IDENT') {
         next();
         if (peek().type === '(') { next(); return parseCall(tok.value, tok.pos); }
-        // LEER: "kein Wert" als Literal (immer NaN) - Typ ANY, damit es an
-        // JEDER Stelle passt, an der WENN()/ein Vergleich einen konkreten Typ
-        // erwartet (siehe typesMatch() bei WENN oben). Vor der varTypes-
-        // Prüfung abgefangen, damit es nicht durch eine gleichnamige Spalte
-        // verdeckt werden kann (unwahrscheinlich, aber eindeutig gewollt:
-        // LEER ist ein reserviertes Wort, keine Variable).
+        // LEER: "no value" as a literal (always NaN).
+        // Its type is ANY, so it fits at EACH place where WENN() or a comparison expects a concrete
+        // type
+        // (see typesMatch() at WENN above).
+        // The code catches it before the varTypes check, so that a column with the same name cannot
+        // hide it.
+        // This is unlikely, but the intention is clear: LEER is a reserved word and not a variable.
         if (tok.value === 'LEER') return { type: 'ANY', run: () => NaN };
         const varType = varTypes[tok.value];
         if (!varType) throw new ExprError(`Unbekannte Variable "${tok.value}"`, tok.pos);
@@ -815,13 +835,13 @@
     return result;
   }
 
-  // Parst UND typprüft (aber wertet nicht aus) EINEN FORMEL-Text - für Live-
-  // Validierung sowie als Vorstufe der eigentlichen Berechnung. Muss zu BOOL
-  // auswerten (anders als ein Funktionsrumpf, siehe compileFunctionDef()).
+  // Parses AND type-checks (but does not evaluate) ONE FORMEL text.
+  // It is for live validation and as a preliminary step of the real calculation.
+  // It must evaluate to BOOL (unlike a function body, see compileFunctionDef()).
   // varTypes: { [alias]: 'BOOL'|'NUM'|'TEXT'|'SG'|'DET'|'KAT_*' }
   // funcs: { [name]: {params:string[], exprText:string} }, optional.
-  // extraKatTokens: siehe tokenize()-Kopfkommentar, optional.
-  // Rückgabe: { ok:true, run(scope)->boolean } | { ok:false, message, pos }
+  // extraKatTokens: see the header comment of tokenize(), optional.
+  // Returns: { ok:true, run(scope)->boolean } | { ok:false, message, pos }
   function compile(text, varTypes, funcs, extraKatTokens) {
     if (!text || !text.trim()) return { ok: false, message: 'Formel ist leer.', pos: 0, incomplete: true };
     try {
@@ -833,8 +853,9 @@
       return { ok: true, run: node.run };
     } catch (e) {
       if (e instanceof ExprError) {
-        // Fehler AM Textende = abgeschnittener, noch unfertiger Ausdruck
-        // (siehe ExprError-Kopfkommentar) - kein echter Denkfehler.
+        // An error AT the end of the text means a cut-off, not yet finished expression (see the
+        // ExprError header comment).
+        // It is not a real mistake in thinking.
         const incomplete = e.incomplete || (typeof e.pos === 'number' && e.pos >= text.replace(/\s+$/, '').length);
         return { ok: false, message: e.message, pos: e.pos, incomplete };
       }
@@ -842,15 +863,14 @@
     }
   }
 
-  // Wie compile(), aber OHNE die BOOL-Pflicht - für Kontexte, in denen der
-  // Ausdruck selbst der gesuchte WERT ist (z.B. eine Umlaufstatistiken-
-  // Spalte: Zahl, WAHR/FALSCH oder Text), nicht eine Filterbedingung.
-  // resultType ist der statisch ermittelte Typ ('NUM'|'BOOL'|'TEXT'|'SG'|
-  // 'DET'|'KAT_*'|'ANY') - für Umlaufstatistiken bereits ausreichend, um zu
-  // entscheiden, ob eine Spalte Zahlen-Aggregatstatistik, einen Wahr/Falsch-
-  // Anteil oder nur Textanzeige bekommt, ohne die Werte selbst inspizieren
-  // zu müssen.
-  // Rückgabe: { ok:true, run(scope)->Wert, resultType } | { ok:false, message, pos }
+  // Like compile(), but WITHOUT the BOOL rule.
+  // It is for contexts where the expression itself is the wanted VALUE
+  // (for example an Umlaufstatistiken column: a number, WAHR/FALSCH or text) and not a filter
+  // condition.
+  // resultType is the statically found type ('NUM'|'BOOL'|'TEXT'|'SG'|'DET'|'KAT_*'|'ANY').
+  // For Umlaufstatistiken it is enough to decide if a column gets number aggregate statistics,
+  // a true/false share or only a text display. The code does not need to inspect the values.
+  // Returns: { ok:true, run(scope)->value, resultType } | { ok:false, message, pos }
   function compileValue(text, varTypes, funcs, extraKatTokens) {
     if (!text || !text.trim()) return { ok: false, message: 'Ausdruck ist leer.', pos: 0, incomplete: true };
     try {
@@ -866,15 +886,15 @@
     }
   }
 
-  // Parst UND typprüft (aber wertet nicht aus) EINEN FUNKTIONS-Rumpf, isoliert
-  // von jeder konkreten Aufrufstelle - jeder Parameter erhält den Platzhalter-
-  // Typ ANY (siehe Datei-Kopfkommentar), da der tatsächliche Typ erst am
-  // jeweiligen Aufruf bekannt ist. Das prüft Syntax + grobe Struktur (bekannte
-  // Bezeichner/Funktionen, Argumentanzahl) VOR der ersten Verwendung, kann
-  // aber echte Typfehler (die erst mit konkreten Argumenttypen entstehen)
-  // naturgemäß nicht abschließend erkennen - die entstehen ggf. erst bei
-  // compile() eines Aufrufers (Fehlermeldung dann "In Funktion […]: …").
-  // Rückgabe: { ok:true, resultType } | { ok:false, message, pos }
+  // Parses AND type-checks (but does not evaluate) ONE FUNCTION body, isolated from each real call
+  // site.
+  // Each parameter gets the placeholder type ANY (see the file header comment), because the real
+  // type is known only at the call.
+  // This checks the syntax and the rough structure (known identifiers and functions, number of
+  // arguments) BEFORE the first use.
+  // But it cannot find all real type errors, which arise only with concrete argument types.
+  // They can arise at the compile() of a caller (the error message is then "In Funktion […]: …").
+  // Returns: { ok:true, resultType } | { ok:false, message, pos }
   function compileFunctionDef(params, text, funcs) {
     if (!text || !text.trim()) return { ok: false, message: 'Ausdruck ist leer.', pos: 0 };
     const varTypes = { TX: 'NUM' };
@@ -889,9 +909,9 @@
     }
   }
 
-  // tokenize/PRIMITIVE_INFO/KAT_TOKENS werden zusätzlich exportiert, damit
-  // formulaBuilder.js Syntax-Highlighting/Autovervollständigung/Funktions-
-  // Palette auf demselben Lexer/derselben Primitiven-Liste aufbaut statt sie
-  // in der UI-Schicht zu duplizieren (Single Source of Truth).
+  // tokenize, PRIMITIVE_INFO and KAT_TOKENS are also exported.
+  // So formulaBuilder.js builds syntax highlighting, autocomplete and the function palette
+  // on the same lexer and the same list of primitives.
+  // It does not duplicate them in the UI layer (single source of truth).
   GZ.exprEngine = { compile, compileValue, compileFunctionDef, tokenize, PRIMITIVE_INFO, KAT_TOKENS, argRangesFor };
 })(window.GZ = window.GZ || {});

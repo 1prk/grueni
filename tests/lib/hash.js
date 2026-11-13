@@ -1,5 +1,6 @@
-/* GZT.hash: a fast 53-bit string hash (cyrb53). It is not for security.
-   It makes compact golden values for long arrays. The result is the same in every browser and in Node. */
+/* GZT.hash is a fast 53-bit string hash (cyrb53). It is not for security.
+   It makes compact golden values for long arrays.
+   The result is the same in every browser and in Node. */
 (function (root) {
   'use strict';
   function hash(str) {
@@ -15,7 +16,7 @@
     h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
     return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
   }
-  // Hash of a list of values. The separator cannot appear in the data.
+  // Hash of a list of values. The separator cannot occur in the data.
   function hashList(list) { return hash(Array.prototype.join.call(list, '\u0001')); }
 
   root.GZT = root.GZT || {};

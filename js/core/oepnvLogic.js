@@ -1,15 +1,20 @@
-/* GZ.oepnvLogic — ÖPNV Anmeldung/Abmeldung: reine Berechnungslogik. Eine
-   Anmeldung endet entweder regulär mit der Abmeldung (Ist-Fahrzeit gemessen,
-   Verlustzeit = Ist-Fahrzeit - Sollfahrzeit) oder wird nach Ablauf der
-   Zwangslöschzeit ohne Abmeldung zwangsweise gelöscht. Das LOS (A-F) bewertet
-   die Verlustzeit. */
+/* GZ.oepnvLogic is the pure calculation logic for public transport registration and
+   deregistration
+   (ÖPNV Anmeldung/Abmeldung).
+   A registration ends in one of two ways.
+   It ends normally with the deregistration. Then the code measures the actual travel time.
+   The lost time is the actual travel time minus the planned travel time (Sollfahrzeit).
+   Or the system clears the registration by force when the forced clearance time
+   (Zwangslöschzeit)
+   has passed without a deregistration.
+   The LOS (A to F) rates the lost time. */
 (function (GZ) {
   'use strict';
   const { wzIstBelegt, txAtTime, auslosenderDetektor } = GZ.wartezeitLogic;
 
   const LOS_LEVELS = ['A', 'B', 'C', 'D', 'E', 'F'];
-  // Obergrenzen [s] für LOS A..E (Orientierungswerte ohne Richtlinienbezug, in
-  // der UI überschreibbar); LOS F = alles darüber.
+  // Upper limits [s] for LOS A to E. The values are guide values without a guideline reference.
+  // The UI can override them. LOS F is everything above.
   const losDefaultBounds = [5, 10, 20, 35, 50];
   const sollfahrzeitDefault = 15;
   const zwangsloeschDefault = 60;
@@ -21,9 +26,10 @@
     return LOS_LEVELS[LOS_LEVELS.length - 1];
   }
 
-  // Alle steigenden Flanken (Belegt-Beginn) einer (ODER-verknüpften)
-  // Detektorbelegung als Rohpunkte - unabhängig von der Anmeldung/Abmeldung-
-  // Paarungslogik, für die Rohpunkte-Anzeige.
+  // All rising edges (start of occupied) of one detector occupancy (combined with OR) as raw
+  // points.
+  // They do not depend on the pairing logic of registration and deregistration.
+  // The raw points display uses them.
   function risingEdgeTimes(times, occupied) {
     const out = [];
     let prev = false;
@@ -34,11 +40,14 @@
     return out;
   }
 
-  // Anmeldung = Anmeldedetektor(en) werden belegt, während keine Anmeldung
-  // läuft (SG-Zustand spielt hier keine Rolle mehr - die Verlustzeit ergibt
-  // sich rein aus der gemessenen Fahrzeit An- zu Abmeldung gegenüber der
-  // Sollfahrzeit). Endet mit der Abmeldung oder, falls die keine
-  // Zwangslöschzeit lang ausbleibt, durch Zwangslöschung.
+  // A registration starts when the registration detectors become occupied while no registration is
+  // active.
+  // The state of the signal group does not matter here.
+  // The lost time comes only from the measured travel time from registration to deregistration,
+  // compared with the planned travel time.
+  // The registration ends with the deregistration.
+  // If the deregistration does not arrive for one forced clearance time, a forced clearance ends
+  // it.
   function computeOepnvEvents(times, anOccupied, abOccupied, splRaw, exclSpl, sollfahrzeitSek, zwangsloeschSek) {
     const n = times.length;
     const events = [];

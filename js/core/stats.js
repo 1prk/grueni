@@ -1,5 +1,5 @@
-/* GZ.stats — grundlegende Statistik-Helfer (rein numerisch, keine
-   Abhängigkeit von der Analyse oder vom DOM). */
+/* GZ.stats has basic statistics helpers.
+   They are purely numeric. They do not use an analysis or the DOM. */
 (function (GZ) {
   'use strict';
 
@@ -15,15 +15,15 @@
     return Math.sqrt(mean(a.map(v => (v - m) ** 2)));
   }
 
-  // Median-Absolute-Deviation-basierte Ausreißererkennung, robust gegen
-  // wenige starke Ausreißer (anders als z-Score auf Basis von Mittelwert/Sigma).
+  // Outlier detection that uses the median absolute deviation (MAD).
+  // It is robust against a few strong outliers. A z-score on mean and sigma is not.
   function detectAnomalies(values) {
     if (values.length < 4) return values.map(() => false);
     const med = median(values);
     const madVal = median(values.map(v => Math.abs(v - med)));
-    // Absolute Mindesttoleranz von 2s: Bei Festzeitprogrammen sind fast alle
-    // Grünzeiten identisch (MAD -> 0) - ohne Untergrenze würde schon 1s
-    // Mess-Jitter als "auffällig" markiert.
+    // The absolute minimum tolerance is 2 s.
+    // In fixed-time plans almost all green times are equal (MAD -> 0).
+    // Without a lower limit, 1 s of measurement jitter is marked as unusual.
     const toleranz = Math.max(3 * 1.4826 * madVal, 2);
     return values.map(v => Math.abs(v - med) > toleranz);
   }
@@ -37,15 +37,16 @@
     return sortedArr[lower] + frac * (sortedArr[upper] - sortedArr[lower]);
   }
 
-  // Kommagetrennte Zahlenliste ("0,-1,-2" / "16,48") -> Number-Array.
-  // Ungültige Einträge werden ignoriert.
+  // Converts a comma-separated list of numbers ("0,-1,-2" or "16,48") to a number array.
+  // The function ignores invalid entries.
   function parseNumListe(s) {
     return String(s || '').split(',')
       .map(t => Number(t.trim()))
       .filter(v => Number.isFinite(v));
   }
 
-  // Natürliche Sortierung von SPL-Bezeichnern (numerisch wenn möglich, sonst alphabetisch).
+  // Natural sort of SPL names. Names that are numbers sort by value. Other names sort
+  // alphabetically.
   function sortSplList(splSet) {
     return [...splSet].sort((a, b) => {
       const na = Number(a), nb = Number(b);

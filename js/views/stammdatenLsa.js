@@ -1,9 +1,9 @@
-/* GZ.views.stammdatenLsa — Tab "Stammdaten LSA": Phaseneinteilung festlegen.
-   Eine Phase = eine Menge von Signalgruppen, die gleichzeitig Grün zeigen
-   (siehe RiLSA-Erläuterung im Panel-Hinweistext). Editiert direkt
-   GZ.state.data.phases; die Auswertung selbst passiert im Tab
-   "Phasenauswertung" (js/views/phasenauswertung.js), das nach jeder
-   Änderung hier aufgefrischt wird. */
+/* GZ.views.stammdatenLsa is the tab "Stammdaten LSA": it sets the phase division.
+   A phase is a set of signal groups that show green at the same time (see the RiLSA explanation
+   in the hint text of the panel).
+   The view edits GZ.state.data.phases directly.
+   The evaluation itself runs in the tab "Phasenauswertung" (js/views/phasenauswertung.js).
+   The code refreshes that tab after each change here. */
 (function (GZ) {
   'use strict';
   const { esc } = GZ.format;
@@ -52,36 +52,39 @@
     renderPueSection();
     if (GZ.views.phasenauswertung) GZ.views.phasenauswertung.refresh();
     if (GZ.views.gruenzeitanalyse) GZ.views.gruenzeitanalyse.refresh();
-    // Umlaufprüfung zeigt dieselben Phasen als eigene Spur (PHASE-Objekt,
-    // siehe umlaufpruefung.js phaseCols()/buildPhaseTrack()) - deren
-    // Objekt-Liste (Checkbox erscheint/verschwindet mit der ersten/letzten
-    // Phase) UND Spuren-Rendering müssen nach jeder Änderung hier
-    // mitziehen, exakt wie schon bei Formel-Builder-/Umlaufstatistiken-
-    // Änderungen (refreshSyntheticColumns()).
+    // Umlaufprüfung shows the same phases as a separate track (PHASE object, see phaseCols() and
+    // buildPhaseTrack() in umlaufpruefung.js).
+    // After each change here, its object list and its track rendering must follow.
+    // The object list has a checkbox that appears with the first phase and disappears with the last
+    // phase.
+    // This is the same as for the changes in the formula builder and Umlaufstatistiken
+    // (refreshSyntheticColumns()).
     if (GZ.views.umlaufpruefung) GZ.views.umlaufpruefung.refreshSyntheticColumns();
   }
 
   /* ---------------- Speichern/Laden je Knoten (JSON) ----------------
-     Phasen + manuelle PÜ-Korrekturen (GZ.state.data.pueOverrides, siehe
-     umlaufpruefung.js PÜ-Detailwerkzeug) gemeinsam in EINER Datei, benannt
-     nach der Knotenkennung (Feld "No" im CSV-Kopf, siehe parser.js) - anders
-     als die bestehende Umlaufprüfung-Konfiguration (js/core/configIO.js)
-     bewusst NICHT über einen Datenfingerabdruck geprüft, sondern über diese
-     Kennung: eine Phaseneinteilung soll über verschiedene Aufzeichnungen
-     DESSELBEN Knotens hinweg wiederverwendbar sein (andere Uhrzeit/Dauer,
-     ggf. sogar andere Spaltenzahl bei einer Anlagenänderung), nicht nur bei
-     exakt identischer Aufzeichnung. Referenzen (Signalgruppen-Mitglieder,
-     PÜ-Korrektur-Zeilen) daher über den SPALTENNAMEN, nie den rohen Index -
-     der ist nur innerhalb einer geparsten CSV stabil (dasselbe Prinzip wie
-     GZ.configIO, siehe dortiger Kopfkommentar). PÜ-Korrekturen werden über
-     das KÜRZEL-Paar der beiden Phasen referenziert (nicht die nur innerhalb
-     dieser Sitzung gültige phase.id).
-  */
+     Phases and manual PÜ corrections (GZ.state.data.pueOverrides, see the PÜ detail tool in
+     umlaufpruefung.js) go together in ONE file.
+     The file name is the node identifier (field "No" in the CSV header, see parser.js).
+     This is different from the existing Umlaufprüfung configuration (js/core/configIO.js).
+     That configuration does NOT use a data fingerprint check on purpose.
+     This file uses the node identifier for the check.
+     A phase division must be reusable over different recordings of THE SAME node.
+     Time of day or duration can be different.
+     Also the number of columns can be different, if the intersection changed.
+     It must not work only for a recording that is exactly identical.
+     So references (signal group members, PÜ correction rows) use the COLUMN NAME and never the
+     raw index.
+     The raw index is stable only inside one parsed CSV.
+     This is the same principle as GZ.configIO (see its header comment).
+     PÜ corrections refer to the pair of SHORT NAMES of the two phases.
+     They do not refer to phase.id, which is valid only in this session. */
   function saveConfig() {
     const a = GZ.state.data.currentAnalysis;
     const topo = GZ.state.data.topology;
     const hasTopology = !!(topo && topo.axes.length);
-    // Phases and detectors refer to recording columns. Without a recording only the topology can be saved.
+    // Phases and detectors refer to recording columns.
+    // Without a recording, the user can save only the topology.
     if (!a && !hasTopology) return;
     const sgNameByIndex = a ? new Map(a.allStats.map(s => [s.col.index, s.col.name])) : new Map();
     const phases = a ? GZ.state.data.phases : [];
@@ -91,14 +94,14 @@
     Object.entries(a ? GZ.state.data.pueOverrides : {}).forEach(([key, ov]) => {
       const [fromId, toId] = key.split('→');
       const fromKuerzel = kuerzelById.get(fromId), toKuerzel = kuerzelById.get(toId);
-      if (!fromKuerzel || !toKuerzel) return; // referenziert eine inzwischen gelöschte Phase
+      if (!fromKuerzel || !toKuerzel) return; // refers to a phase that the user deleted in the meantime
       const rows = ov.rows
         .map(r => ({ sg: sgNameByIndex.get(r.sgIndex), an: r.an != null ? r.an : null, ab: r.ab != null ? r.ab : null, always: !!r.always }))
         .filter(r => r.sg);
       const entry = { rows };
       if (ov.endSec != null) entry.endSec = ov.endSec;
-      // Auch ein reines Ende-Override ohne Zeilenänderung persistieren
-      // (nicht nur, wenn zusätzlich Zeilen vorhanden sind).
+      // Also save a pure end override with no row change.
+      // It is not necessary that rows also exist.
       if (rows.length || entry.endSec != null) pueOverrides[fromKuerzel + '→' + toKuerzel] = entry;
     });
 
@@ -176,9 +179,8 @@
       const [fromKuerzel, toKuerzel] = key.split('→');
       const fromId = idByKuerzel.get(fromKuerzel), toId = idByKuerzel.get(toKuerzel);
       if (!fromId || !toId) { skipped.push(`PÜ-Korrektur „${key}“ (Phase fehlt)`); return; }
-      // Permanent in kanonischer Reihenfolge (K vor R vor F vor S, je Gruppe
-      // numerisch) unabhängig davon, in welcher Reihenfolge die Datei sie
-      // gespeichert hat.
+      // Permanent in standard order (K, R, F, S, and numerically ascending in each group).
+      // The order in which the file saved them does not matter.
       const rows = (ov.rows || []).slice().sort((r1, r2) => GZ.phases.compareSgNames(r1.sg, r2.sg)).map(r => {
         const sgIndex = sgIndexByName.get(r.sg);
         if (sgIndex == null) { skipped.push(`Signalgruppe „${r.sg}“ (PÜ ${key})`); return null; }
@@ -204,11 +206,13 @@
     els.loadHint.style.display = '';
   }
 
-  // Dezenter Hinweis nach jedem neuen Datenimport, WENN der Knoten aus dem
-  // CSV-Kopf erkannt wurde (siehe parser.js "No"-Feld) - echtes automatisches
-  // Laden ist im Browser ohne Nutzeraktion nicht möglich (kein Dateisystem-
-  // zugriff), daher nur ein Zeiger auf den Laden-Knopf statt eines
-  // tatsächlichen Ladevorgangs.
+  // A discreet hint after each new data import.
+  // The code shows it IF it detected the node from the CSV header (see the "No" field in
+  // parser.js).
+  // A real automatic load is not possible in the browser without a user action, because there is no
+  // file system access.
+  // So the hint only points to the Load button.
+  // It does not load anything.
   function renderLoadHint() {
     if (!els.loadHint) return;
     const a = GZ.state.data.currentAnalysis;
@@ -302,24 +306,25 @@
   }
 
   /* ---------------- Phasenübergänge (PÜ) ----------------
-     Editierbare Korrektur je tatsächlich vorkommendem Übergangstyp (nicht je
-     Vorkommen, siehe GZ.phases.listDistinctTransitions()) - die eigentliche
-     Auswertungslogik lebt in js/core/phases.js (view-unabhängig), hier nur
-     Darstellung + Verdrahtung. Die Lese-Ansicht in Umlaufprüfung
-     (renderPueDetailPanel dort) nutzt dieselbe GZ.phases-Logik rein lesend
-     und verlinkt hierher zurück (siehe jumpToTransition() unten). */
+     This is an editable correction for each transition type that really occurs.
+     It is not for each occurrence (see GZ.phases.listDistinctTransitions()).
+     The evaluation logic itself is in js/core/phases.js and does not depend on a view.
+     This file has only the display and the wiring.
+     The read-only view in Umlaufprüfung (renderPueDetailPanel there) uses the same GZ.phases
+     logic for reading only.
+     It has a link back to this view (see jumpToTransition() below). */
   function phaseLabelText(p) {
     return p.name && p.name !== p.kuerzel ? `${p.kuerzel} – ${p.name}` : p.kuerzel;
   }
 
   function formatPueNum(v) { return v != null ? v : '–'; }
 
-  // Sortiert Übergänge nach Nomenklatur (PÜ1.2, PÜ1.3, PÜ2.1, ...) statt nach
-  // Reihenfolge des ersten Vorkommens in der Aufzeichnung (siehe
-  // listDistinctTransitions) - numerischer Vergleich der beiden Zahlen im
-  // Standard-Label (GZ.phases.pueLabelFor), damit z.B. PÜ1.10 nicht vor
-  // PÜ1.2 einsortiert wird. Frei benannte Kürzel (Fallback-Label "PÜ k1→k2")
-  // fallen danach, alphabetisch, zurück.
+  // Sorts transitions by nomenclature (PÜ1.2, PÜ1.3, PÜ2.1, ...).
+  // It does not use the order of the first occurrence in the recording (see
+  // listDistinctTransitions).
+  // It compares the two numbers in the standard label (GZ.phases.pueLabelFor) as numbers.
+  // So, for example, PÜ1.10 does not come before PÜ1.2.
+  // Short names with free names (fallback label "PÜ k1→k2") come after them, in alphabetical order.
   function comparePueTransitionLabels(t1, t2) {
     const parse = t => { const m = /^PÜ(\d+)\.(\d+)$/.exec(t.label); return m ? [Number(m[1]), Number(m[2])] : null; };
     const p1 = parse(t1), p2 = parse(t2);
@@ -349,15 +354,16 @@
     }
     els.pueSection.style.display = '';
     els.pueBody.innerHTML = transitions.map(t => renderTransitionBlockHtml(t, phases, a, TU_MED)).join('');
-    // Bis zu 3 Spalten, so viele wie Blöcke vorhanden sind (statt einer
-    // auto-fit/minmax-Rasterbreite) - so nutzt z.B. ein einzelner Übergang
-    // die volle verfügbare Breite statt auf der Mindestbreite einer
-    // möglichen Mehrspalten-Aufteilung stehenzubleiben. Zusätzlich an der
-    // tatsächlich verfügbaren Breite gedeckelt (MIN_BLOCK_W je Spalte,
-    // inkl. Gap) - sonst könnte die Spur-Spalte (1fr) einer einzelnen Zeile
-    // bei zu vielen erzwungenen Spalten auf einem schmalen Fenster auf 0px
-    // zusammenschrumpfen (die festen Spalten - SG, "immer an", An, Ab, TF,
-    // Entfernen-Button - allein brauchen bereits ca. 480px).
+    // Up to 3 columns, as many as there are blocks.
+    // It does not use an auto-fit or minmax grid width.
+    // So, for example, a single transition uses the full available width.
+    // It does not stay at the minimum width of a possible multi-column layout.
+    // The number of columns also has a limit from the real available width (MIN_BLOCK_W for each
+    // column, including the gap).
+    // Without this limit, too many forced columns on a narrow window can make the track column
+    // (1fr) of a single row shrink to 0 px.
+    // The fixed columns alone need about 480 px.
+    // They are SG, "immer an", An, Ab, TF and the Remove button.
     const MIN_BLOCK_W = 560, GAP = 16;
     const containerW = els.pueBody.clientWidth || 0;
     const maxColsByWidth = containerW ? Math.max(1, Math.floor((containerW + GAP) / (MIN_BLOCK_W + GAP))) : 3;
@@ -372,18 +378,18 @@
     const cycleIdx = GZ.phases.cycleIdxAtTime(t.sampleOccurrence.start, a.cycleStarts);
     const resolved = GZ.phases.resolvePueRows(fromPhase, toPhase, cycleIdx, a, TU_MED, GZ.state.data.pueOverrides);
 
-    // K vor R vor F vor S, je Gruppe numerisch (GZ.phases.compareSgNames) -
-    // dieselbe Reihenfolge wie die Zeilen selbst (siehe autoDetectPueRows),
-    // damit die Auswahlliste nicht in der rohen CSV-Spaltenreihenfolge bleibt.
+    // The order is K, R, F, S, and numerically ascending in each group (GZ.phases.compareSgNames).
+    // It is the same order as the rows themselves (see autoDetectPueRows).
+    // So the selection list does not stay in the raw CSV column order.
     const sortedStats = [...a.allStats].sort((x, y) => GZ.phases.compareSgNames(x.col.name, y.col.name));
     const rowsHtml = resolved.rows.map((row, i) => {
       const sgOptions = sortedStats.map(s =>
         `<option value="${s.col.index}" ${s.col.index === row.sgIndex ? 'selected' : ''}>${esc(s.col.name)}</option>`
       ).join('');
-      // TF wird NICHT hier vorausberechnet, sondern erst in
-      // wirePueSectionEvents() aus dem tatsächlich gerenderten (ggf.
-      // überschriebenen) Segment abgelesen (siehe dort) - "TF relativ zum
-      // Diagramm, nie aus den Rohdaten hergeleitet".
+      // The code does NOT precalculate TF here.
+      // wirePueSectionEvents() reads it later from the segment that is really rendered (it can be
+      // overwritten).
+      // See there: "TF relative to the diagram, never derived from the raw data".
       return `
         <div class="sd-pue-row" data-row="${i}">
           <select class="sd-pue-sg" ${row.always ? 'disabled' : ''}>${sgOptions}</select>
@@ -397,10 +403,11 @@
     }).join('');
 
     const fromLabel = phaseLabelText(fromPhase), toLabel = phaseLabelText(toPhase);
-    // Achsen-Zeile teilt sich das Grid-Spaltenraster mit den echten Zeilen
-    // (siehe CSS .sd-pue-row/.sd-pue-axis-row) - dieselben leeren Platzhalter-
-    // Zellen wie eine Zeile, nur die Spur-Zelle trägt die Sekunden-Ticks
-    // (renderTimeAxis mit stepMs=5000, siehe wirePueSectionEvents).
+    // The axis row shares the grid column layout with the real rows (see the CSS .sd-pue-row and
+    // .sd-pue-axis-row).
+    // It has the same empty placeholder cells as a row.
+    // Only the track cell has the second ticks (renderTimeAxis with stepMs=5000, see
+    // wirePueSectionEvents).
     const axisRowHtml = resolved.rows.length ? `
         <div class="sd-pue-axis-row">
           <span></span><span></span><span></span><span></span><span></span>
@@ -431,35 +438,37 @@
       const seedRows = resolved.rows;
       const referenceAbsMs = a.cycleStarts[cycleIdx] + (resolved.referenceSec != null ? resolved.referenceSec : 0) * 1000;
 
-      // Fensterbreite fest an den Übergang selbst gekoppelt statt an eine
-      // pauschale Polsterung um die Zeilenwerte: -3s vor dem Start (früheste
-      // Signalgruppe der abwerfenden Phase auf Gelb), damit sichtbar bleibt,
-      // dass sie davor tatsächlich durchgehend grün war, +2s hinter dem Ende
-      // (späteste Signalgruppe der anwerfenden Phase im Grün). Ende bewusst
-      // nie VOR Start geklemmt (Math.max) - bei einer entarteten/falsch
-      // erkannten Übergangsdefinition (z.B. eine anwerfende Signalgruppe kam
-      // laut Rohdaten schon vor der abwerfenden Referenz ins Grün) wäre das
-      // Fenster sonst invertiert (wMax < wMin) und die Spur bliebe leer statt
-      // wenigstens das -3/+2s-Basisfenster um die Referenz zu zeigen.
+      // The window width is tied to the transition itself.
+      // It is not a general padding around the row values.
+      // The window starts 3 s before the start.
+      // The start is the earliest signal group of the stopping phase that goes to amber.
+      // So it stays visible that the group was really continuously green before.
+      // The window ends 2 s after the end.
+      // The end is the latest signal group of the starting phase that is in green.
+      // The code never clamps the end to a value BEFORE the start (Math.max).
+      // A transition definition can be degenerate or wrongly detected.
+      // An example: according to the raw data, a starting signal group was already green before the
+      // stopping reference.
+      // Then the window would be inverted (wMax < wMin).
+      // The track would stay empty.
+      // With the clamp, the track at least shows the basic -3/+2 s window around the reference.
       const startSec = resolved.startSec != null ? resolved.startSec : 0;
       const endSec = Math.max(resolved.endSec != null ? resolved.endSec : 0, startSec);
-      // cm je Zeile einmal vorab bestimmen (statt später im Render-Loop
-      // erneut) - wird sowohl für die Fensterbreite unten als auch für die
-      // Balken selbst gebraucht, so bleiben beide garantiert konsistent.
+      // Find cm for each row once in advance and not again later in the render loop.
+      // The code needs it for the window width below and for the bars themselves.
+      // So both are always consistent.
       const cmByRow = resolved.rows.map(row => row.always ? null : GZ.phases.cmForRow(row, referenceAbsMs, a));
-      // Das FENSTER (localWMax) muss zusätzlich den tatsächlichen Grün-
-      // Endpunkt jeder Zeile abdecken (An + reale Rotgelb-Dauer bzw. Ab +
-      // reale Gelb-Dauer), nicht nur das logische Ende - sonst könnte eine
-      // manuelle Korrektur, die über das (unverändert am echten Grünbeginn
-      // hängende) Ende hinausgeht, eine Zeile aus dem sichtbaren Fenster
-      // schieben und ihr synthetisierter Grün-Balken (buildRowDisplaySegs)
-      // würde als Nullbreite unsichtbar - obwohl er laut Phasendefinition da
-      // sein MUSS.
-      // Beide Seiten unabhängig einrechnen (nicht exklusiv An ODER Ab) -
-      // eine Zeile kann beides gleichzeitig gesetzt haben (siehe
-      // buildRowDisplaySegs: Ab<=An = zwei getrennte Grün-Abschnitte mit
-      // echter Lücke dazwischen), dann muss das Fenster auch den späteren
-      // der beiden Endpunkte abdecken.
+      // The WINDOW (localWMax) must also cover the real green end point of each row.
+      // That is An + the real red-amber duration, or Ab + the real amber duration.
+      // It must not cover only the logical end.
+      // Otherwise a manual correction can go past the end that stays tied to the real green start.
+      // Such a correction can push a row out of the visible window.
+      // Then its synthesized green bar (buildRowDisplaySegs) has zero width and is invisible.
+      // But by the phase definition, it MUST be there.
+      // Include both sides independently (not An EXCLUSIVE-OR Ab).
+      // A row can have both values set at the same time (see buildRowDisplaySegs: Ab<=An = two
+      // separate green parts with a real gap between them).
+      // Then the window must also cover the later of the two end points.
       const rowMaxSec = resolved.rows.reduce((m, r, i) => {
         const cm = cmByRow[i];
         const rotgelb = cm && Number.isFinite(cm.rotgelb) ? cm.rotgelb : 0;
@@ -471,15 +480,16 @@
       const windowEndSec = Number.isFinite(rowMaxSec) ? Math.max(endSec, rowMaxSec) : endSec;
       const localWMin = (startSec - 3) * 1000, localWMax = (windowEndSec + 2) * 1000;
 
-      // Ende-Markierung (siehe renderLane()'s endMarks) - eine durchgezogene
-      // senkrechte Linie bei Ende, sowohl je Zeile als auch auf der
-      // Achsen-Zeile, damit der definierte Übergangs-Stopp im Diagramm
-      // sichtbar bleibt, nicht nur als Zahl im Kopf.
+      // End mark (see endMarks in renderLane()).
+      // It is a solid vertical line at the end, for each row and also on the axis row.
+      // So the defined transition stop stays visible in the diagram and not only as a number in the
+      // header.
       const endMarks = resolved.endSec != null ? [{ t: resolved.endSec * 1000, label: `Übergangsende (Ende), ${resolved.endSec}s` }] : [];
 
-      // Eine gemeinsame Achse für den ganzen Block (nicht je Zeile) - Ticks
-      // alle 5s (stepMs=5000), exakt über den Balken dank identischem Grid-
-      // Spaltenraster (siehe CSS .sd-pue-row/.sd-pue-axis-row).
+      // One common axis for the whole block (not for each row).
+      // The ticks are every 5 s (stepMs=5000).
+      // They are exactly over the bars because the grid column layout is identical (see the CSS
+      // .sd-pue-row and .sd-pue-axis-row).
       const axisSvg = block.querySelector('.sd-pue-axis-track svg');
       if (axisSvg) renderTimeAxis(axisSvg, localWMin, localWMax, 5000, resolved.endSec != null ? resolved.endSec * 1000 : null);
 
@@ -489,8 +499,8 @@
         const tfEl = rowEl.querySelector('.sd-pue-tf');
 
         if (row.always) {
-          // "Immer an" - bewusst KEINE Rohdaten (siehe setPueOverrideRowAlways),
-          // ein durchgehend voller Grün-Balken über das ganze Fenster.
+          // "Immer an" uses NO raw data on purpose (see setPueOverrideRowAlways).
+          // It is a continuous full green bar over the whole window.
           renderLane(svg, {
             wMin: localWMin, wMax: localWMax, segs: [{ cat: 'GRUEN', start: localWMin, end: localWMax }],
             baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
@@ -499,24 +509,25 @@
           tfEl.textContent = 'TF –';
         } else {
           const cm = cmByRow[i];
-          // Balken wird DIREKT aus den (ggf. manuell überschriebenen)
-          // Zeilenwerten synthetisiert (buildRowDisplaySegs), nicht aus den
-          // Rohdaten gesucht und angepasst - eine anwerfende Zeile MUSS ab
-          // ihrem Wechsel bis mindestens Ende grün sein, eine abwerfende war
-          // bis zu ihrem Wechsel bereits durchgehend grün (Kern der
-          // Phasendefinition) - der Balken darf dort NIE einen anderen
-          // Zustand zeigen, unabhängig davon, was die Rohdaten an exakt
-          // dieser Stelle gerade hergeben.
+          // The code synthesizes the bar DIRECTLY from the row values (buildRowDisplaySegs).
+          // The row values can be manually overwritten.
+          // The code does not search the raw data and then adapt the result.
+          // A starting row MUST be green from its change to at least the end.
+          // A stopping row was already continuously green until its change.
+          // This is the core of the phase definition.
+          // At these points, the bar must NEVER show a different state.
+          // It does not matter what the raw data give at exactly this position.
           const rowSegs = GZ.phases.buildRowDisplaySegs(row, cm, localWMin, localWMax);
           renderLane(svg, {
             wMin: localWMin, wMax: localWMax, segs: rowSegs,
             baselineCat: 'ROT', baselineColor: 'var(--sig-red)', baselineHeight: 3,
             gridStepMs: 5000, laneStyle: 'minimal', endMarks,
-            // An/Ab-Sekunden direkt auf dem Balken (gleiches Muster wie die
-            // Hauptspuren in Umlaufprüfung) statt separat daneben. "An"
-            // markiert den Rot→Gelb-Wechsel (ROTGELB-Segment, sofern
-            // vorhanden - sonst fällt es auf den GRUEN-Beginn zurück),
-            // "Ab" bleibt das Ende des GRUEN-Segments (Beginn GELB).
+            // The An and Ab seconds are directly on the bar (the same pattern as the main tracks in
+            // Umlaufprüfung).
+            // They are not separate next to it.
+            // "An" marks the red-to-amber change (ROTGELB segment, if it exists).
+            // Otherwise it falls back to the start of GRUEN.
+            // "Ab" stays the end of the GRUEN segment (start of GELB).
             edgeLabelsFor: d => {
               const nearAn = row.an != null && (d.cat === 'ROTGELB' || d.cat === 'GRUEN') && Math.abs(d.start - row.an * 1000) < 500;
               const nearAb = row.ab != null && d.cat === 'GRUEN' && Math.abs(d.end - row.ab * 1000) < 500;
@@ -524,19 +535,20 @@
               return { left: nearAn ? row.an : null, right: nearAb ? row.ab : null };
             }
           });
-          // TF relativ zum ÜBERGANG (nicht die volle reale Freigabedauer,
-          // die sich weit vor/nach diesem Übergang erstreckt) - siehe
-          // GZ.phases.computeRowTf().
+          // TF is relative to the TRANSITION.
+          // It is not the full real release duration, which extends far before and after this
+          // transition.
+          // See GZ.phases.computeRowTf().
           const tf = GZ.phases.computeRowTf(row, cm, startSec, endSec);
           tfEl.textContent = 'TF ' + formatPueNum(tf);
         }
 
         rowEl.querySelector('.sd-pue-sg').addEventListener('change', e => {
           GZ.phases.setPueOverrideRowField(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, i, 'sgIndex', Number(e.target.value), seedRows);
-          // Andere Signalgruppe kann die kanonische Sortierposition der
-          // Zeile ändern (siehe sortPueOverrideRows) - im Gegensatz zu
-          // An/Ab/immer-an bleibt die Reihenfolge hier nicht automatisch
-          // stimmig.
+          // A different signal group can change the standard sort position of the row (see
+          // sortPueOverrideRows).
+          // This is different from An, Ab and "immer an".
+          // Here the order does not stay correct automatically.
           GZ.phases.sortPueOverrideRows(GZ.state.data.pueOverrides, fromPhaseId, toPhaseId, a);
           notifyChanged();
         });
@@ -584,11 +596,12 @@
     });
   }
 
-  // Vom "Bearbeiten in Stammdaten LSA"-Knopf in Umlaufprüfung aufgerufen
-  // (siehe dort renderPueDetailPanel()) - scrollt zum passenden Block und
-  // hebt ihn kurz hervor (siehe .sd-pue-highlight in css/charts.css), damit
-  // der Sprung aus der anderen Ansicht sichtbar ankommt statt nur stumm die
-  // Tabs zu wechseln.
+  // The "Bearbeiten in Stammdaten LSA" button in Umlaufprüfung calls this (see
+  // renderPueDetailPanel() there).
+  // It scrolls to the matching block and highlights it for a short time (see .sd-pue-highlight in
+  // css/charts.css).
+  // So the jump from the other view is visible.
+  // Without it, only the tabs would change, and the user would not see it.
   function jumpToTransition(fromPhaseId, toPhaseId) {
     const domId = 'sd-pue-' + fromPhaseId + '-' + toPhaseId;
     const el = document.getElementById(domId);
