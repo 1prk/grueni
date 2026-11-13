@@ -202,7 +202,7 @@ GZ.define('views.umlaufstatistiken', { layer: 'views', deps: ['exprEditor', 'exp
       `<div><b>Detektor-/APW-Namen:</b> ${esc(det)}</div>` +
       `<div><b>Funktionen:</b> ${esc(fns)}(…)</div>` +
       `<div><b>Bezeichner:</b> ${esc(scalars)}</div>` +
-      `<div style="margin-top:4px;color:var(--text-faint);">Zustand/Dauer/DauerSeit (Formel-Builder in Umlaufprüfung) sind hier nicht verfügbar - kein einzelner Zeitpunkt je Umlauf.</div>`;
+      `<div class="u-mt-4-faint">Zustand/Dauer/DauerSeit (Formel-Builder in Umlaufprüfung) sind hier nicht verfügbar - kein einzelner Zeitpunkt je Umlauf.</div>`;
   }
 
   /* ---------------- Spaltenzeilen (Bezeichnung + Formel) ---------------- */
@@ -222,7 +222,7 @@ GZ.define('views.umlaufstatistiken', { layer: 'views', deps: ['exprEditor', 'exp
         </span>
         <div class="us-col-error" hidden><div class="us-col-error-msg"></div><div class="us-col-error-snippet"></div></div>
       </div>`).join('')
-      : '<div class="cfg-empty" style="margin:12px 16px 0;">Keine Spalte definiert – „+ Spalte hinzufügen“ klicken.</div>';
+      : '<div class="cfg-empty u-m-12-16-0">Keine Spalte definiert – „+ Spalte hinzufügen“ klicken.</div>';
 
     els.colRows.querySelectorAll('.us-col-row').forEach(rowEl => {
       const id = rowEl.dataset.colId;

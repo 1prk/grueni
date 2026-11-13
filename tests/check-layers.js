@@ -17,7 +17,8 @@ const RANK = { domain: 1, store: 2, io: 3, ui: 4, views: 5, app: 6 };
 const FOLDER_LAYERS = { 'js/core': ['domain'], 'js/store': ['store'], 'js/io': ['io'], 'js/ui': ['ui'], 'js/charts': ['ui'], 'js/views': ['views'], 'js/app.js': ['app'] };
 
 /* ---------- reader: returns the code without comments and without the content of texts ---------- */
-function stripCode(src) {
+// keep = true keeps the text of strings, templates and regular expressions. Only the comments go away.
+function stripCode(src, keep) {
   let out = '';
   let i = 0;
   const n = src.length;
@@ -36,9 +37,10 @@ function stripCode(src) {
     // i is after the opening backtick or after the closing brace of a ${ }
     while (i < n) {
       const c = src[i];
-      if (c === '\\') { i += 2; continue; }
-      if (c === '`') { i++; lastSig = '`'; return; }
+      if (c === '\\') { if (keep) out += src.slice(i, i + 2); i += 2; continue; }
+      if (c === '`') { i++; if (keep) out += '`'; lastSig = '`'; return; }
       if (c === '$' && src[i + 1] === '{') { i += 2; stack.push(depth); depth++; out += '${'; lastSig = '{'; return; }
+      if (keep) out += c;
       i++;
     }
   }
@@ -47,12 +49,14 @@ function stripCode(src) {
     if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
     if (c === '/' && d === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; out += ' '; continue; }
     if (c === '"' || c === "'") {
+      const from = i;
       i++;
       while (i < n && src[i] !== c) { if (src[i] === '\\') i++; i++; }
-      i++; out += c + c; lastSig = c; continue;
+      i++; out += keep ? src.slice(from, i) : c + c; lastSig = c; continue;
     }
-    if (c === '`') { i++; out += '``'; readTemplate(); continue; }
+    if (c === '`') { i++; out += keep ? '`' : '``'; readTemplate(); continue; }
     if (c === '/' && regexAllowed()) {
+      const from = i;
       i++;
       let inClass = false;
       while (i < n) {
@@ -62,7 +66,7 @@ function stripCode(src) {
       }
       i++;
       while (i < n && /[a-z]/.test(src[i])) i++;
-      out += '/r/'; lastSig = '/'; continue;
+      out += keep ? src.slice(from, i) : '/r/'; lastSig = '/'; continue;
     }
     if (c === '{') depth++;
     if (c === '}') {

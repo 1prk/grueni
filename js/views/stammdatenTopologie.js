@@ -9,7 +9,7 @@
    The canvas needs no recording.
    Signal groups and detectors come from the loaded recording, if there is one.
    Otherwise the user can type names. */
-GZ.define('views.stammdatenTopologie', { layer: 'views', deps: ['configIO', 'detectors', 'format', 'phases', 'snackbar', 'state', 'topology'] }, function (GZ) {
+GZ.define('views.stammdatenTopologie', { layer: 'views', deps: ['configIO', 'cssom', 'detectors', 'format', 'phases', 'snackbar', 'state', 'topology'] }, function (GZ) {
   'use strict';
   const T = GZ.topology;
   const { esc } = GZ.format;
@@ -353,8 +353,8 @@ let linkStops = false;     // move all stop lines together
     // r > 0: the stroke rounds every corner
     T.freeRightIslands(derived).forEach(i => dark.push({ pts: i.polygon, r: i.r }));
     // Islands: one kerb outline under all fills, so no line shows where two islands meet.
-    dark.forEach(d => { html += `<polygon class="t-island-edge" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.3)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
-    dark.forEach(d => { html += `<polygon class="t-island" ${d.r ? `style="stroke-width:${f2(2 * d.r + 0.02)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
+    dark.forEach(d => { html += `<polygon class="t-island-edge" ${d.r ? `data-css="stroke-width:${f2(2 * d.r + 0.3)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
+    dark.forEach(d => { html += `<polygon class="t-island" ${d.r ? `data-css="stroke-width:${f2(2 * d.r + 0.02)}px"` : ''} points="${polyPts(d.pts)}"/>`; });
     // kerb lines
     jp.cmds.forEach((c, i) => {
       if (c.kerb) { if (c.kerb.length > 1) html += `<path class="t-kerb" d="${polyD(c.kerb)}"/>`; return; }
@@ -366,6 +366,7 @@ let linkStops = false;     // move all stop lines together
       sf.kerbs.forEach(line => { if (line.length > 1) html += `<path class="t-kerb" d="${polyD(line)}"/>`; });
     });
     layers.roads.html(html);
+    GZ.cssom.apply(layers.roads.node());
 
     // markings
     let mk = '';
@@ -534,6 +535,7 @@ let linkStops = false;     // move all stop lines together
       }
     });
     layers.labels.html(html);
+    GZ.cssom.apply(layers.labels.node());
   }
 
   function laneSgNames(lane) {
@@ -545,7 +547,7 @@ let linkStops = false;     // move all stop lines together
 
   function sgPill(p, name) {
     const w = Math.max(1.9, name.length * 0.72 + 0.8);
-    return `<g class="t-sg" transform="translate(${f2(p.x)},${f2(-p.y)})"><rect x="${f2(-w / 2)}" y="-.75" width="${f2(w)}" height="1.5" rx=".75" style="fill:${sgColor(name)}"/><text font-size="1.05">${esc(name)}</text></g>`;
+    return `<g class="t-sg" transform="translate(${f2(p.x)},${f2(-p.y)})"><rect x="${f2(-w / 2)}" y="-.75" width="${f2(w)}" height="1.5" rx=".75" data-css="fill:${sgColor(name)}"/><text font-size="1.05">${esc(name)}</text></g>`;
   }
   function detMark(p, name, showText, fs) {
     return `<g class="t-det" transform="translate(${f2(p.x)},${f2(-p.y)})"><rect x="-.7" y="-.7" width="1.4" height="1.4" rx=".25"/>` +
@@ -583,12 +585,13 @@ let linkStops = false;     // move all stop lines together
       const len = Math.hypot(e.x - q.x, e.y - q.y) || 1, tx = (e.x - q.x) / len, ty = (e.y - q.y) / len;
       const head = [{ x: e.x, y: e.y }, { x: e.x - tx * 0.8 - ty * 0.34, y: e.y - ty * 0.8 + tx * 0.34 }, { x: e.x - tx * 0.8 + ty * 0.34, y: e.y - ty * 0.8 - tx * 0.34 }];
       if (isSel) html += `<path class="t-conn-halo" stroke-width="${wd + 0.35}" d="${d}"/>`;
-      html += `<g style="opacity:${dim ? 0.3 : 1}"><path class="t-conn-hit" data-kind="conn" data-id="${conn.id}" d="${d}"/>` +
+      html += `<g data-css="opacity:${dim ? 0.3 : 1}"><path class="t-conn-hit" data-kind="conn" data-id="${conn.id}" d="${d}"/>` +
         `${(sg || bad) ? `<path class="t-conn-case" stroke-width="${wd + 0.2}" d="${d}"/>` : ''}` +
         `<path class="t-conn ${sg || bad ? '' : 'unassigned'}" stroke="${color}" stroke-width="${wd}" d="${d}"/>` +
         `<polygon points="${polyPts(head)}" fill="${color}"/></g>`;
     });
     layers.conns.html(html);
+    GZ.cssom.apply(layers.conns.node());
   }
 
   function renderAxes() {
@@ -678,11 +681,11 @@ let linkStops = false;     // move all stop lines together
         const poly = T.cleanPoly(T.sampleSpline(pts, 1));
         html += `<path class="t-axis" stroke-width="${f2(2 / tr.k)}" stroke-dasharray="${f2(6 / tr.k)} ${f2(4 / tr.k)}" d="${polyD(poly)}"/>`;
       }
-      draft.points.forEach(p => { html += `<circle class="topo-handle" cx="${f2(p.x)}" cy="${f2(-p.y)}" r="${f2(5 / tr.k)}" stroke-width="${f2(1.8 / tr.k)}" style="pointer-events:none"/>`; });
+      draft.points.forEach(p => { html += `<circle class="topo-handle u-no-pointer" cx="${f2(p.x)}" cy="${f2(-p.y)}" r="${f2(5 / tr.k)}" stroke-width="${f2(1.8 / tr.k)}"/>`; });
     }
     if (step === 2 && derived.center) {
       const c = derived.center, s = 1.6;
-      html += `<path class="t-center-mark" stroke-width="${f2(2 / tr.k)}" d="M${f2(c.x - s)},${f2(-c.y)} L${f2(c.x + s)},${f2(-c.y)} M${f2(c.x)},${f2(-c.y - s)} L${f2(c.x)},${f2(-c.y + s)}" style="pointer-events:none"/>`;
+      html += `<path class="t-center-mark u-no-pointer" stroke-width="${f2(2 / tr.k)}" d="M${f2(c.x - s)},${f2(-c.y)} L${f2(c.x + s)},${f2(-c.y)} M${f2(c.x)},${f2(-c.y - s)} L${f2(c.x)},${f2(-c.y + s)}"/>`;
     }
     layers.overlay.html(html);
   }
@@ -803,6 +806,7 @@ let linkStops = false;     // move all stop lines together
     if (step >= 3) html += sideAssign();
     if (step === 4) html += sideCoverage();
     els.side.innerHTML = html;
+    GZ.cssom.apply(els.side);
   }
 
   function sideAxes() {
@@ -812,22 +816,22 @@ let linkStops = false;     // move all stop lines together
         <span class="ts-note">${a.points.length} Pkt.</span>
         <button type="button" class="x" data-action="axis-del" data-id="${a.id}" title="Achse löschen">✕</button></div>`).join('');
     return `<div class="ts-sec"><div class="ts-title">Achsen</div>
-      <div class="ts-btns" style="margin-bottom:10px">
+      <div class="ts-btns u-mb-10">
         <button type="button" class="primary" data-action="axis-new" ${draft ? 'disabled' : ''}>+ Achse zeichnen</button>
       </div>
       <div class="ts-list">${rows || '<div class="ts-note">Noch keine Achse.</div>'}</div>
-      <div class="ts-note" style="margin-top:10px">Die Achse legt Verlauf und Länge der Straße fest. Zwei sich kreuzende Achsen ergeben vier Arme. Eine Achse, die an einer anderen endet (Einmündung), ergibt drei Arme.</div></div>`;
+      <div class="ts-note u-mt-10">Die Achse legt Verlauf und Länge der Straße fest. Zwei sich kreuzende Achsen ergeben vier Arme. Eine Achse, die an einer anderen endet (Einmündung), ergibt drei Arme.</div></div>`;
   }
 
   function sideArms() {
     const m = M();
     const c = derived.center;
-    const rows = derived.arms.map(arm => `<div class="ts-row" style="gap:6px">
+    const rows = derived.arms.map(arm => `<div class="ts-row u-gap-6">
         <span class="ts-man">${arm.approachId}</span>
-        <input type="text" data-field="armName" data-key="${arm.key}" value="${esc(arm.name)}" style="min-width:0">
+        <input class="u-minw-0" type="text" data-field="armName" data-key="${arm.key}" value="${esc(arm.name)}">
         <input type="number" step="0.5" min="2" data-field="stopDist" data-key="${arm.key}" value="${f2(arm.stopDist)}" title="Abstand der Haltlinie vom Mittelpunkt in m">
         <span class="ts-note">m</span></div>`).join('');
-    return `<div class="ts-sec"><div class="ts-title">Mittelpunkt ${m.center ? '<button type="button" data-action="center-auto" style="font-size:11px;padding:2px 8px">Automatisch</button>' : ''}</div>
+    return `<div class="ts-sec"><div class="ts-title">Mittelpunkt ${m.center ? '<button class="u-btn-small" type="button" data-action="center-auto">Automatisch</button>' : ''}</div>
       <div class="ts-note">${c ? (m.center ? 'Von Hand gesetzt (gelben Punkt ziehen).' : 'Automatisch aus dem Kreuzungspunkt der Achsen. Der gelbe Punkt lässt sich ziehen.') : 'Kein Mittelpunkt: mindestens eine Achse zeichnen (Schritt 1).'}</div></div>
       <div class="ts-sec"><div class="ts-title">Arme <span class="ts-note">Name · Haltlinie</span></div>${rows || '<div class="ts-note">Noch keine Arme.</div>'}
       <div class="ts-note">Die Nummer ist die Zufahrts-ID (im Uhrzeigersinn ab Nord). Haltlinien lassen sich einzeln ziehen oder mit „Haltlinien koppeln“ (unten links im Plan) gemeinsam verschieben.</div></div>`;
@@ -845,12 +849,12 @@ let linkStops = false;     // move all stop lines together
       const n = arm[g.dir].length;
       const canCut = n >= 2 && (g.index === 0 || g.index === n - 1);
       const cutTip = g.index === 0 ? 'Abbiegestreifen: endet nach dieser Länge mit Verzug, die freie Breite wird Mittelinsel' : 'Abbiegestreifen: endet nach dieser Länge mit Verzug, die freie Breite wird Gehweg';
-      return `<div class="ts-item ${sel && sel.kind === 'lane' && sel.id === g.lane.id ? 'sel' : ''}" data-action="lane-select" data-id="${g.lane.id}" style="flex-wrap:wrap">
-        <b style="min-width:24px">${g.label}</b>
+      return `<div class="ts-item ${sel && sel.kind === 'lane' && sel.id === g.lane.id ? 'sel' : ''} u-wrap" data-action="lane-select" data-id="${g.lane.id}">
+        <b class="u-minw-24">${g.label}</b>
         <select data-field="laneType" data-id="${g.lane.id}">${Object.entries(T.LANE_TYPES).map(([k, v]) => `<option value="${k}" ${g.lane.type === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
-        <input type="number" step="0.05" min="1" max="6" style="width:62px" data-field="laneWidth" data-id="${g.lane.id}" value="${g.lane.width}"><span class="ts-note">m</span>
-        ${g.dir === 'in' ? `<span class="ts-note" style="flex-basis:100%;display:flex;align-items:center;gap:6px" title="Haltlinie dieses Fahrstreifens weiter zurück als die Haltlinie des Arms">Haltlinie <input type="number" step="0.5" min="0" style="width:62px" data-field="laneStopOffset" data-id="${g.lane.id}" value="${g.lane.stopOffset || 0}"> m zurückversetzt</span>` : ''}
-        ${canCut ? `<span class="ts-note" style="flex-basis:100%;display:flex;align-items:center;gap:6px" title="${cutTip}">Länge <input type="number" step="1" min="5" style="width:62px" data-field="laneLength" data-id="${g.lane.id}" value="${g.lane.length || ''}" placeholder="ganz"> m (leer = bis Armende)</span>` : ''}</div>`;
+        <input class="u-w-62" type="number" step="0.05" min="1" max="6" data-field="laneWidth" data-id="${g.lane.id}" value="${g.lane.width}"><span class="ts-note">m</span>
+        ${g.dir === 'in' ? `<span class="ts-note u-basis-full-flex-center" title="Haltlinie dieses Fahrstreifens weiter zurück als die Haltlinie des Arms">Haltlinie <input class="u-w-62" type="number" step="0.5" min="0" data-field="laneStopOffset" data-id="${g.lane.id}" value="${g.lane.stopOffset || 0}"> m zurückversetzt</span>` : ''}
+        ${canCut ? `<span class="ts-note u-basis-full-flex-center" title="${cutTip}">Länge <input class="u-w-62" type="number" step="1" min="5" data-field="laneLength" data-id="${g.lane.id}" value="${g.lane.length || ''}" placeholder="ganz"> m (leer = bis Armende)</span>` : ''}</div>`;
     };
     const cw = arm.cross ? arm.cross.cw : null;
     return `<div class="ts-sec"><div class="ts-title">Arm</div><div class="ts-chips">${chips}</div></div>
@@ -862,11 +866,11 @@ let linkStops = false;     // move all stop lines together
         <div class="ts-row" title="Bordsteinradius der Ecke links der Zufahrt (Kreisbogen, der beide Fahrbahnränder berührt)"><label>Eckradius</label><input type="number" step="0.5" min="0" max="40" data-field="cornerRadius" data-key="${arm.key}" value="${arm.cornerRadius}"><span class="ts-note">m (Ecke links der Zufahrt)</span></div>
         <div class="ts-row" title="Die Ausfahrtsstreifen beginnen so weit hinter der Haltlinie (z. B. hinter einer großen Ecke)"><label>Ausfahrt ab</label><input type="number" step="0.5" min="0" max="40" data-field="outStart" data-key="${arm.key}" value="${arm.outStart || 0}"><span class="ts-note">m hinter der Haltlinie</span></div>
         ${arm.freeRight && T.freeRightPair(derived, arm) ? `<div class="ts-row" title="Wo der Rechtsabbiegestreifen den Arm verlässt (vor der Haltlinie) und wo er in die Ausfahrt mündet (nach deren Haltlinie)"><label></label>
-          ab <input type="number" step="1" min="0" style="width:52px" data-field="slipBack" data-key="${arm.key}" value="${arm.slipBack || 0}"> m vor, bis <input type="number" step="1" min="0" style="width:52px" data-field="slipAhead" data-key="${arm.key}" value="${arm.slipAhead || 0}"> m nach der Haltlinie</div>` : ''}
+          ab <input class="u-w-52" type="number" step="1" min="0" data-field="slipBack" data-key="${arm.key}" value="${arm.slipBack || 0}"> m vor, bis <input class="u-w-52" type="number" step="1" min="0" data-field="slipAhead" data-key="${arm.key}" value="${arm.slipAhead || 0}"> m nach der Haltlinie</div>` : ''}
         <div class="ts-row"><label>Fußgängerfurt</label><input type="checkbox" data-field="cross" data-key="${arm.key}" ${cw ? 'checked' : ''}>
           ${cw ? `<input type="number" step="0.5" min="1.5" max="8" data-field="crossWidth" data-id="${cw.id}" value="${cw.width}"><span class="ts-note">m Linienabstand</span>` : ''}</div>
-        <div class="ts-list" style="margin-top:6px">${arm.in.map(laneRow).join('')}${arm.out.map(laneRow).join('')}</div>
-        ${cw ? `<div class="ts-list" style="margin-top:4px"><div class="ts-item ${sel && sel.kind === 'cross' && sel.id === cw.id ? 'sel' : ''}" data-action="cross-select" data-id="${cw.id}"><b class="grow">Fußgängerfurt</b></div></div>` : ''}
+        <div class="ts-list u-mt-6">${arm.in.map(laneRow).join('')}${arm.out.map(laneRow).join('')}</div>
+        ${cw ? `<div class="ts-list u-mt-4"><div class="ts-item ${sel && sel.kind === 'cross' && sel.id === cw.id ? 'sel' : ''}" data-action="cross-select" data-id="${cw.id}"><b class="grow">Fußgängerfurt</b></div></div>` : ''}
       </div>`;
   }
 
@@ -887,20 +891,20 @@ let linkStops = false;     // move all stop lines together
       const man = MANEUVER_LABEL[T.connectionManeuver(a, b)];
       const cur = T.connectionSg(m, c);
       const opts = ['<option value="">– von Fahrstreifen –</option>'].concat(sgNames.map(n => `<option value="${esc(n)}" ${c.sg === n ? 'selected' : ''}>${esc(n)}</option>`)).join('');
-      return `<div class="ts-item ${sel && sel.kind === 'conn' && sel.id === c.id ? 'sel' : ''}" data-action="conn-select" data-id="${c.id}" style="flex-wrap:wrap">
-        <span class="ts-dot" style="background:${badSet.has(c.id) ? '#f59e0b' : cur ? sgColor(cur) : '#9aa5b1'}" title="${badSet.has(c.id) ? 'Kollidiert mit Insel oder Bordstein' : ''}"></span>
+      return `<div class="ts-item ${sel && sel.kind === 'conn' && sel.id === c.id ? 'sel' : ''} u-wrap" data-action="conn-select" data-id="${c.id}">
+        <span class="ts-dot" data-css="background:${badSet.has(c.id) ? '#f59e0b' : cur ? sgColor(cur) : '#9aa5b1'}" title="${badSet.has(c.id) ? 'Kollidiert mit Insel oder Bordstein' : ''}"></span>
         <span class="grow" title="${label(c.from)} → ${label(c.to)}">${label(c.from)} → ${label(c.to)}</span>
         <span class="ts-note">${man}</span>
         <button type="button" class="x" data-action="conn-del" data-id="${c.id}" title="Verbindung löschen">✕</button>
-        <select data-field="connSg" data-id="${c.id}" style="flex-basis:100%">${opts}</select></div>`;
+        <select class="u-basis-full" data-field="connSg" data-id="${c.id}">${opts}</select></div>`;
     }).join('');
     const has = m.lanes.some(l => l.dir === 'in');
     const issueCount = T.connectionIssues(m, derived).length;
     return `<div class="ts-sec"><div class="ts-title">Verbindungen <span class="ts-note">${m.connections.length}</span></div>
-      <div class="ts-btns" style="margin-bottom:10px">
+      <div class="ts-btns u-mb-10">
         <button type="button" class="primary" data-action="conn-propose" ${has ? '' : 'disabled'}>Vorschlag erzeugen</button>
         <button type="button" data-action="conn-clear" ${m.connections.length ? '' : 'disabled'}>Alle löschen</button></div>
-      ${issueCount ? `<div class="ts-note warn" style="margin-bottom:8px">⚠ ${issueCount} Verbindung${issueCount === 1 ? '' : 'en'} berühr${issueCount === 1 ? 't' : 'en'} eine Insel oder einen Bordstein (orange). Ein Fahrstreifen darf im Knoten nie mit einer Insel oder einem Bordstein kollidieren.</div>` : ''}
+      ${issueCount ? `<div class="ts-note warn u-mb-8">⚠ ${issueCount} Verbindung${issueCount === 1 ? '' : 'en'} berühr${issueCount === 1 ? 't' : 'en'} eine Insel oder einen Bordstein (orange). Ein Fahrstreifen darf im Knoten nie mit einer Insel oder einem Bordstein kollidieren.</div>` : ''}
       <div class="ts-list">${rows || '<div class="ts-note">Noch keine Verbindung. Zufahrt anklicken, dann Ausfahrt anklicken.</div>'}</div></div>`;
   }
 
@@ -956,7 +960,7 @@ let linkStops = false;     // move all stop lines together
       const on = target.sgs.includes(n);
       const info = sgInfo(n);
       const title = info.desc && info.desc !== n ? `${n} – ${info.desc}` : n;
-      return `<button type="button" class="ts-chip ${on ? 'on' : ''}" style="--chip:${sgColor(n)}" data-action="sg-toggle" data-name="${esc(n)}" title="${esc(title)}">${esc(n)}${usage[n] ? `<small>${usage[n]}</small>` : ''}</button>`;
+      return `<button type="button" class="ts-chip ${on ? 'on' : ''}" data-css="--chip:${sgColor(n)}" data-action="sg-toggle" data-name="${esc(n)}" title="${esc(title)}">${esc(n)}${usage[n] ? `<small>${usage[n]}</small>` : ''}</button>`;
     };
     // proposals: detectors that the detector assignment already links to the chosen signal groups
     const a = GZ.state.data.currentAnalysis;
@@ -975,13 +979,13 @@ let linkStops = false;     // move all stop lines together
     const sgs = allSgNames();
     const ordered = dets.slice().sort((x, y) => (proposed.has(y.name) ? 1 : 0) - (proposed.has(x.name) ? 1 : 0));
     return `<div class="ts-sec"><div class="ts-title">Zuordnung · ${esc(title)}</div>
-      <div class="ts-title" style="margin-top:4px">Signalgruppen</div>
+      <div class="ts-title u-mt-4">Signalgruppen</div>
       <div class="ts-chips">${sgs.map(sgChip).join('') || '<span class="ts-note">Keine Signalgruppen – Aufzeichnung laden oder Name eingeben.</span>'}</div>
       <div class="ts-add"><input type="text" data-field="sgAdd" placeholder="Signalgruppe hinzufügen (z. B. K5)"><button type="button" data-action="sg-add">+</button></div>
-      <div class="ts-title" style="margin-top:16px">Detektoren</div>
+      <div class="ts-title u-mt-16">Detektoren</div>
       <div class="ts-chips">${ordered.map(detChip).join('') || '<span class="ts-note">Keine Detektoren in der Aufzeichnung – Name eingeben.</span>'}</div>
       <div class="ts-add"><input type="text" data-field="detAdd" placeholder="Detektor hinzufügen (z. B. DF3)"><button type="button" data-action="det-add">+</button></div>
-      <div class="ts-note" style="margin-top:10px">Die kleine Zahl zeigt, auf wie vielen Spuren der Eintrag schon verwendet wird. Gestrichelt: der Detektor ist im Tab „Wartezeit“ bereits mit einer gewählten Signalgruppe verknüpft.</div></div>`;
+      <div class="ts-note u-mt-10">Die kleine Zahl zeigt, auf wie vielen Spuren der Eintrag schon verwendet wird. Gestrichelt: der Detektor ist im Tab „Wartezeit“ bereits mit einer gewählten Signalgruppe verknüpft.</div></div>`;
   }
 
   function sideCoverage() {
@@ -998,7 +1002,7 @@ let linkStops = false;     // move all stop lines together
     const list = arr => arr.length ? arr.slice(0, 40).join(', ') + (arr.length > 40 ? ' …' : '') : '–';
     return `<div class="ts-sec"><div class="ts-title">Abdeckung</div>
       <div class="ts-note ${missing.length ? 'warn' : ''}"><b>Signalgruppen ohne Fahrstreifen (${missing.length}):</b> ${esc(list(missing))}</div>
-      ${GZ.detectors.list().length ? `<div class="ts-note ${missingDet.length ? 'warn' : ''}" style="margin-top:6px"><b>Detektoren ohne Fahrstreifen (${missingDet.length}):</b> ${esc(list(missingDet))}</div>` : ''}</div>`;
+      ${GZ.detectors.list().length ? `<div class="ts-note ${missingDet.length ? 'warn' : ''} u-mt-6"><b>Detektoren ohne Fahrstreifen (${missingDet.length}):</b> ${esc(list(missingDet))}</div>` : ''}</div>`;
   }
 
   function toggle(arr, v) {

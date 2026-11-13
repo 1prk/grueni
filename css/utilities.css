@@ -1,0 +1,72 @@
+/* Utility classes that replace former inline style attributes.
+   The content security policy blocks inline styles, so these rules carry the same values.
+   Each declaration has !important, because an inline style won over every class rule before.
+   The names start with u-. Do not use these classes for new layout. Write a normal class instead. */
+.u-basis-full { flex-basis: 100% !important; }
+.u-basis-full-flex-center { flex-basis: 100% !important; display: flex !important; align-items: center !important; gap: 6px !important; }
+.u-bg-accent { background: var(--accent) !important; }
+.u-bg-apw { background: linear-gradient(90deg,var(--apw-a) 50%,var(--apw-b) 50%) !important; }
+.u-bg-band-p5p95 { background: rgba(47,111,163,.13) !important; border: none !important; }
+.u-bg-formula-on { background: var(--formula-on) !important; }
+.u-bg-formula-ref { background: #3d5afe !important; }
+.u-bg-fz-soll { background: var(--fz-soll) !important; }
+.u-bg-fz-verlust { background: var(--fz-verlust) !important; }
+.u-bg-hatch-redyellow { background: repeating-linear-gradient(45deg,var(--sig-redyellow) 0 3px,#8a6d00 3px 4px) !important; }
+.u-bg-hatch-zwl { background: repeating-linear-gradient(45deg,#fbd9ec 0 3px,var(--fz-verlust) 3px 4px) !important; }
+.u-bg-los-a-dot9 { background: var(--los-a) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; }
+.u-bg-los-b-dot9 { background: var(--los-b) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; }
+.u-bg-los-c-dot9 { background: var(--los-c) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; }
+.u-bg-los-d-dot9 { background: var(--los-d) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; }
+.u-bg-los-e-dot9 { background: var(--los-e) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; }
+.u-bg-los-f-dot9 { background: var(--los-f) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; }
+.u-bg-none-border-none { background: none !important; border: none !important; }
+.u-bg-req-marker { background: var(--req-marker) !important; }
+.u-bg-sig-dark { background: var(--sig-dark) !important; }
+.u-bg-sig-dark-triangle { background: var(--sig-dark) !important; width: 9px !important; height: 9px !important; clip-path: polygon(50% 0,100% 100%,0 100%) !important; }
+.u-bg-sig-green { background: var(--sig-green) !important; }
+.u-bg-sig-red { background: var(--sig-red) !important; }
+.u-bg-sig-red-line3 { background: var(--sig-red) !important; height: 3px !important; align-self: center !important; }
+.u-bg-sig-yellow { background: var(--sig-yellow) !important; }
+.u-bg-text { background: var(--text) !important; }
+.u-bg-text-faint-60 { background: var(--text-faint) !important; opacity: .6 !important; }
+.u-bg-text-faint-dot-excluded { background: var(--text-faint) !important; border-radius: 50% !important; width: 9px !important; height: 9px !important; opacity: .6 !important; }
+.u-bg-text-faint-line2 { background: var(--text-faint) !important; height: 2px !important; align-self: center !important; }
+.u-bg-topo-bike { background: var(--topo-bike) !important; }
+.u-bg-topo-bus { background: var(--topo-bus) !important; }
+.u-bg-topo-island { background: var(--topo-island) !important; }
+.u-bg-topo-road { background: var(--topo-road) !important; }
+.u-bg-topo-sg-veh { background: var(--topo-sg-veh) !important; }
+.u-bg-topo-walk { background: var(--topo-walk) !important; }
+.u-bl-1-dashed-req-marker { border-left: 1px dashed var(--req-marker) !important; }
+.u-bt-1_2-dashed-text-faint { border-top: 1.2px dashed var(--text-faint) !important; }
+.u-bt-1_4-solid-accent { border-top: 1.4px solid var(--accent) !important; }
+.u-bt-1_9-solid-sig-green { border-top: 1.9px solid var(--sig-green) !important; }
+.u-btn-small { font-size: 11px !important; padding: 2px 8px !important; }
+.u-font-mono { font-family: var(--mono) !important; }
+.u-gap-6 { gap: 6px !important; }
+.u-m-12-16-0 { margin: 12px 16px 0 !important; }
+.u-mb-10 { margin-bottom: 10px !important; }
+.u-mb-8 { margin-bottom: 8px !important; }
+.u-minw-0 { min-width: 0 !important; }
+.u-minw-24 { min-width: 24px !important; }
+.u-mt-10 { margin-top: 10px !important; }
+.u-mt-16 { margin-top: 16px !important; }
+.u-mt-4 { margin-top: 4px !important; }
+.u-mt-4-faint { margin-top: 4px !important; color: var(--text-faint) !important; }
+.u-mt-6 { margin-top: 6px !important; }
+.u-no-pointer { pointer-events: none !important; }
+.u-note-cell { text-align: left !important; font-family: var(--sans) !important; color: var(--text-faint) !important; font-style: italic !important; }
+.u-pad-0-16-12 { padding: 0 16px 12px !important; }
+.u-pad-0-16-16 { padding: 0 16px 16px !important; }
+.u-pad-10-16-0 { padding: 10px 16px 0 !important; }
+.u-pad-12-16-2 { padding: 12px 16px 2px !important; }
+.u-pad-14-0-0 { padding: 14px 0 0 !important; }
+.u-pad-14-16-0 { padding: 14px 16px 0 !important; }
+.u-pad-16 { padding: 16px !important; }
+.u-pad-8-16-0 { padding: 8px 16px 0 !important; }
+.u-sep-dash-16 { display: inline-block !important; width: 16px !important; border-top: 1.5px dashed var(--text) !important; }
+.u-sep-dash-9 { display: inline-block !important; width: 0 !important; height: 9px !important; border-left: 1px dashed var(--req-marker) !important; }
+.u-sep-solid-16 { display: inline-block !important; width: 16px !important; border-top: 1.5px solid var(--accent-strong) !important; }
+.u-w-52 { width: 52px !important; }
+.u-w-62 { width: 62px !important; }
+.u-wrap { flex-wrap: wrap !important; }

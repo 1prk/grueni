@@ -5,7 +5,7 @@
    3  Wait times over time or as CDF (whole recording, for each signal plan, for each hour)
    4  The longest waits (with log lines around them, if a log is loaded)
    GZ.wartezeitLogic.computeWartezeitEvents does the calculation. */
-GZ.define('views.wartezeit', { layer: 'views', deps: ['charts.kit', 'charts.logMarkers', 'charts.report', 'detectors', 'format', 'logs', 'segments', 'slices', 'state', 'stats', 'wartezeitLogic'] }, function (GZ) {
+GZ.define('views.wartezeit', { layer: 'views', deps: ['charts.kit', 'charts.logMarkers', 'charts.report', 'cssom', 'detectors', 'format', 'logs', 'segments', 'slices', 'state', 'stats', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { esc, fmtNum, fmtTs, fmtTimeShort } = GZ.format;
   const D = GZ.detectors;
@@ -361,9 +361,10 @@ GZ.define('views.wartezeit', { layer: 'views', deps: ['charts.kit', 'charts.logM
     }
     const keys = state.scope === 'total' ? [] : scopeSlices();
     els.trendLegend.innerHTML = state.mode === 'time'
-      ? `<span class="item"><span class="dot" style="background:var(--sig-green)"></span>OK</span><span class="item"><span class="dot" style="background:var(--sig-yellow)"></span>Warnung</span><span class="item"><span class="dot" style="background:var(--sig-red)"></span>Grenzwert überschritten</span><span class="item"><span class="dot" style="background:var(--text-faint);opacity:.6"></span>ausgeschlossen (SPL)</span><span class="item"><span class="line" style="border-top:1.4px solid var(--accent)"></span>Median</span><span class="item"><span class="line vertical" style="border-left:1px dashed var(--req-marker)"></span>Signalprogrammwechsel</span>`
-      : (keys.length ? `<span class="item">Anteil der Anforderungen mit höchstens dieser Wartezeit</span>` + keys.map(k => `<span class="item"><span class="line" style="border-top:2px solid ${sliceColor(k.key)}"></span>${esc(k.label)}</span>`).join('') + `<span class="item"><span class="line" style="border-top:1.2px dashed var(--text-faint)"></span>gesamt</span>`
-        : `<span class="item"><span class="line" style="border-top:1.9px solid var(--sig-green)"></span>Anteil der Anforderungen mit höchstens dieser Wartezeit</span>`);
+      ? `<span class="item"><span class="dot u-bg-sig-green"></span>OK</span><span class="item"><span class="dot u-bg-sig-yellow"></span>Warnung</span><span class="item"><span class="dot u-bg-sig-red"></span>Grenzwert überschritten</span><span class="item"><span class="dot u-bg-text-faint-60"></span>ausgeschlossen (SPL)</span><span class="item"><span class="line u-bt-1_4-solid-accent"></span>Median</span><span class="item"><span class="line vertical u-bl-1-dashed-req-marker"></span>Signalprogrammwechsel</span>`
+      : (keys.length ? `<span class="item">Anteil der Anforderungen mit höchstens dieser Wartezeit</span>` + keys.map(k => `<span class="item"><span class="line" data-css="border-top:2px solid ${sliceColor(k.key)}"></span>${esc(k.label)}</span>`).join('') + `<span class="item"><span class="line u-bt-1_2-dashed-text-faint"></span>gesamt</span>`
+        : `<span class="item"><span class="line u-bt-1_9-solid-sig-green"></span>Anteil der Anforderungen mit höchstens dieser Wartezeit</span>`);
+    GZ.cssom.apply(els.trendLegend);
     const dets = results.get(entry.col.index).dets;
     const block = document.createElement('div');
     block.innerHTML = `<div class="trend-head"><span class="name">${esc(entry.col.name)}</span><span class="sub inline">${esc(entry.col.beschreibung && entry.col.beschreibung !== entry.col.name ? entry.col.beschreibung + ' · ' : '')}${esc(dets.map(d => d.name).join(' + '))}</span></div><div class="host"></div><div class="caption"></div>`;

@@ -26,6 +26,9 @@ const GZT = ctx.window.GZT;
   const { problems } = require('./check-layers').check();
   if (problems.length) { problems.forEach(p => console.log('FAIL layers: ' + p)); process.exit(1); }
   console.log('ok   layers: modules, layers and declared dependencies');
+  const csp = require('./check-csp').check().problems;
+  if (csp.length) { csp.forEach(p => console.log('FAIL csp: ' + p)); process.exit(1); }
+  console.log('ok   csp: index.html and the code follow the content security policy');
 }
 
 (async () => {

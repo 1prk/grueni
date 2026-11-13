@@ -155,7 +155,8 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
 
     els.objSearch.addEventListener('input', applyObjSearch);
     els.addFilterBtn.addEventListener('click', () => {
-      const objs = allObjects();
+      // The phase track and the key figures have no raw series. A filter cannot use them.
+      const objs = allObjects().filter(o => o.kuerzel !== 'PHASE' && o.kuerzel !== 'KENNZAHL');
       if (!objs.length) return;
       const first = objs[0];
       filterRows.push({ id: nextFilterId++, key: objKey(first), ...defaultCondFor(first.kuerzel) });
@@ -1400,7 +1401,7 @@ GZ.define('views.umlaufpruefung', { layer: 'views', deps: ['charts.logMarkers', 
 
     if (rowData.length === 0) {
       els.rows.innerHTML = matchingCycles
-        ? '<div class="cfg-empty" style="padding:16px;">Keine Umläufe erfüllen den Filter.</div>'
+        ? '<div class="cfg-empty u-pad-16">Keine Umläufe erfüllen den Filter.</div>'
         : '';
       els.sgLabel.textContent = sgData.map(sd => sd.sgEntry.col.name).join(', ');
       els.info.textContent = `${n} Umlauf/Umläufe`;

@@ -5,7 +5,7 @@
    By definition, phases are never active at the same time. The intergreen times separate them.
    So the tab shows all phases in ONE common track. Each phase has its own color.
    There is no separate track for each phase. */
-GZ.define('views.phasenauswertung', { layer: 'views', deps: ['charts.phaseDurationChart', 'charts.timelineChart', 'charts.timelineLane', 'format', 'phases', 'segments', 'state', 'stats'] }, function (GZ) {
+GZ.define('views.phasenauswertung', { layer: 'views', deps: ['charts.phaseDurationChart', 'charts.timelineChart', 'charts.timelineLane', 'cssom', 'format', 'phases', 'segments', 'state', 'stats'] }, function (GZ) {
   'use strict';
   const { esc, fmtDauer, fmtTimeShort } = GZ.format;
   const { mean, median } = GZ.stats;
@@ -133,21 +133,22 @@ GZ.define('views.phasenauswertung', { layer: 'views', deps: ['charts.phaseDurati
 
   function renderLegend(occEntries) {
     const items = occEntries.map(e =>
-      `<span class="item"><span class="swatch" style="background:${e.color}"></span>${esc(e.phase.kuerzel)}${e.phase.name && e.phase.name !== e.phase.kuerzel ? ' – ' + esc(e.phase.name) : ''}</span>`
+      `<span class="item"><span class="swatch" data-css="background:${e.color}"></span>${esc(e.phase.kuerzel)}${e.phase.name && e.phase.name !== e.phase.kuerzel ? ' – ' + esc(e.phase.name) : ''}</span>`
     ).join('');
     els.legend.innerHTML = items +
-      `<span class="item"><span class="swatch" style="background:${NONE_COLOR}"></span>${esc(NONE_LABEL)}</span>` +
-      `<span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>`;
+      `<span class="item"><span class="swatch" data-css="background:${NONE_COLOR}"></span>${esc(NONE_LABEL)}</span>` +
+      `<span class="item"><span class="u-sep-dash-9"></span>Signalprogrammwechsel (SPL)</span>`;
+    GZ.cssom.apply(els.legend);
   }
 
   function renderStats(occEntries) {
     els.statsBody.innerHTML = occEntries.map(({ phase, intervals, color }) => {
       const label = phase.name && phase.name !== phase.kuerzel ? `${phase.kuerzel} – ${phase.name}` : phase.kuerzel;
-      const dot = `<span class="phase-color-dot" style="background:${color}"></span>`;
+      const dot = `<span class="phase-color-dot" data-css="background:${color}"></span>`;
       const gd = intervals.map(iv => (iv.end - iv.start) / 1000);
       if (gd.length === 0) {
         const reason = phase.members.size === 0 ? 'keine Signalgruppe zugeordnet' : 'in dieser Aufzeichnung nicht gemeinsam Grün erkannt';
-        return `<tr><td>${dot}${esc(label)}</td><td colspan="6" style="text-align:left; font-family:var(--sans); color:var(--text-faint); font-style:italic;">${reason}</td></tr>`;
+        return `<tr><td>${dot}${esc(label)}</td><td class="u-note-cell" colspan="6">${reason}</td></tr>`;
       }
       const sum = gd.reduce((x, y) => x + y, 0);
       return `<tr>
@@ -160,6 +161,7 @@ GZ.define('views.phasenauswertung', { layer: 'views', deps: ['charts.phaseDurati
         <td>${fmtDauer(sum)}</td>
       </tr>`;
     }).join('');
+    GZ.cssom.apply(els.statsBody);
   }
 
   function renderDurationChart(occEntries, cycleStarts, tMax, from, to) {

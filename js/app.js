@@ -144,6 +144,9 @@ GZ.define('app', { layer: 'app', deps: ['csvImport', 'format', 'logs', 'parser',
   }
 
   function init() {
+    // See the rule for [data-init-hidden] in css/base.css.
+    document.querySelectorAll('[data-init-hidden]').forEach(el => { el.style.display = 'none'; el.removeAttribute('data-init-hidden'); });
+
     els.rawInput = document.getElementById('rawInput');
     els.errorBox = document.getElementById('errorBox');
     els.statusLine = document.getElementById('statusLine');

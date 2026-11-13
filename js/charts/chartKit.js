@@ -10,7 +10,9 @@ GZ.define('charts.kit', { layer: 'ui', deps: ['format'] }, function (GZ) {
 
   function el(tag, attrs, parent) {
     const e = document.createElementNS(SVG_NS, tag);
-    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    // A style attribute set with setAttribute is blocked by the content security policy.
+    // The CSSOM property is allowed.
+    for (const k in attrs) { if (k === 'style') e.style.cssText = attrs[k]; else e.setAttribute(k, attrs[k]); }
     if (parent) parent.appendChild(e);
     return e;
   }

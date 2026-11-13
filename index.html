@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Grünzeitanalyse</title>
+<!-- Content security policy. The application runs from file:// and needs no network.
+     Scripts and styles load only from the same folder. Inline scripts and inline style attributes are not allowed.
+     Images can come from data: and blob: URLs (the plan image of the topology editor). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; font-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/layout.css">
@@ -11,6 +15,7 @@
 <link rel="stylesheet" href="css/charts.css">
 <link rel="stylesheet" href="css/report.css">
 <link rel="stylesheet" href="css/topology.css">
+<link rel="stylesheet" href="css/utilities.css">
 </head>
 <body>
 <div class="appshell">
@@ -71,8 +76,8 @@
             <button type="button" data-scope="hour">Je volle Stunde</button>
           </div>
         </div>
-        <div class="log-bar" data-log-bar style="display:none;"></div>
-        <div class="report-notice" id="gzNotice" style="display:none;"></div>
+        <div class="log-bar" data-log-bar data-init-hidden></div>
+        <div class="report-notice" id="gzNotice" data-init-hidden></div>
 
         <section class="rsec">
           <div class="rsec-label"><span class="rsec-no">1</span>Lief die Anlage in Festzeit oder verkehrsabhängig?</div>
@@ -120,7 +125,7 @@
           <div class="note" id="gzNote4"></div>
         </section>
 
-        <section class="rsec" id="gzDarkSection" style="display:none;">
+        <section class="rsec" id="gzDarkSection" data-init-hidden>
           <div class="rsec-label"><span class="rsec-no">5</span>Wann war die Anlage dunkel?</div>
           <div class="claim list" id="gzClaimDark"></div>
           <div class="table-scroll"><table class="report-table" id="gzTableDark"></table></div>
@@ -147,29 +152,29 @@
             <div class="panel-head-actions">
               <button type="button" id="sdConfigSaveBtn" class="btn" title="Phasen, PÜ-Korrekturen und Detektorzuordnung als JSON-Datei je Knoten speichern (ohne Rohdaten)">Konfiguration speichern</button>
               <label class="btn" for="sdConfigLoadInput">Konfiguration laden …</label>
-              <input type="file" id="sdConfigLoadInput" accept=".json" style="display:none;">
+              <input type="file" id="sdConfigLoadInput" accept=".json" data-init-hidden>
             </div>
           </div>
-          <div class="hint" style="padding:14px 16px 0;">
+          <div class="hint u-pad-14-16-0">
             Eine <b>Phase</b> fasst die Signalgruppen zusammen, die gleichzeitig Grün (Freigabe) zeigen
             und damit ohne Verkehrskonflikt gemeinsam abgewickelt werden (RiLSA). Ein Signalprogramm
             durchläuft je Umlauf eine feste Phasenfolge, getrennt durch Zwischenzeiten. Hier festlegen,
             welche Signalgruppen zu welcher Phase gehören – ausgewertet wird das im Tab „Phasenauswertung“.
           </div>
-          <div class="hint" id="sdLoadHint" style="display:none; padding:6px 16px 0;"></div>
-          <div class="hint warn" id="sdNoSgHint" style="display:none;">Keine Signalgruppen in der aktuellen Analyse gefunden.</div>
+          <div class="hint" id="sdLoadHint" data-init-hidden></div>
+          <div class="hint warn" id="sdNoSgHint" data-init-hidden>Keine Signalgruppen in der aktuellen Analyse gefunden.</div>
           <div class="panel-body phase-matrix-wrap">
             <table class="phase-matrix" id="sdPhaseTable"></table>
             <div class="cfg-empty" id="sdEmptyHint">Noch keine Phase angelegt.</div>
           </div>
-          <div style="padding:0 16px 16px;">
+          <div class="u-pad-0-16-16">
             <button type="button" class="primary" id="sdAddPhase">+ Phase hinzufügen</button>
           </div>
         </div>
 
-        <div class="panel" id="sdPueSection" style="display:none;">
+        <div class="panel" id="sdPueSection" data-init-hidden>
           <div class="panel-head">Phasenübergänge</div>
-          <div class="hint" style="padding:14px 16px 0;">
+          <div class="hint u-pad-14-16-0">
             Je Übergang eine Zeile pro beteiligter Signalgruppe (abwerfende Phase → Ab, anwerfende Phase → An),
             lokal auf den frühesten Ab-Wert der abwerfenden Phase bezogen (= relative TX 0 dieses Übergangs).
             Automatisch aus der aktuellen Aufzeichnung erkannt – bei Bedarf hier korrigieren; eine Korrektur
@@ -181,7 +186,7 @@
         </div><!-- /sdPanePhasen -->
 
         <!-- Topology: axes, arms, lanes, connections -->
-        <div class="sd-pane" id="sdPaneTopo" style="display:none;">
+        <div class="sd-pane" id="sdPaneTopo" data-init-hidden>
           <div class="panel topo">
             <div class="panel-head">
               <span>Stammdaten LSA — Topologie</span>
@@ -189,7 +194,7 @@
                 <button type="button" id="topoExample" class="btn" title="Beispiel-Kreuzung mit vier Armen laden">Beispiel-Kreuzung</button>
                 <button type="button" id="topoConfigSaveBtn" class="btn" title="Phasen, Topologie und Detektorzuordnung als JSON-Datei je Knoten speichern">Konfiguration speichern</button>
                 <label class="btn" for="topoConfigLoadInput">Konfiguration laden …</label>
-                <input type="file" id="topoConfigLoadInput" accept=".json" style="display:none;">
+                <input type="file" id="topoConfigLoadInput" accept=".json" data-init-hidden>
                 <button type="button" id="topoMapExport" class="primary" title="Topologie als MAPEM-JSON exportieren">MAP exportieren (JSON)</button>
               </div>
             </div>
@@ -198,7 +203,7 @@
             <div class="topo-bgbar" id="topoBgBar">
               <span class="topo-bgbar-title">Hintergrund</span>
               <label class="btn" for="topoBgInput" title="Lageplan, Luftbild oder PDF als Hintergrund laden. Bleibt im Browser.">Bild / PDF laden …</label>
-              <input type="file" id="topoBgInput" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" style="display:none;">
+              <input type="file" id="topoBgInput" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" data-init-hidden>
               <button type="button" id="topoBgScale" title="Zwei Punkte mit bekanntem Abstand anklicken und die Länge eingeben">Maßstab setzen</button>
               <button type="button" id="topoBgMove" title="Bild mit der Maus verschieben">Bild verschieben</button>
               <label class="topo-range">Bild <input type="range" id="topoBgOpacity" min="0" max="100" value="60"></label>
@@ -210,8 +215,8 @@
               <div class="topo-canvas" id="topoCanvas">
                 <svg id="topoSvg" xmlns="http://www.w3.org/2000/svg"></svg>
                 <div class="topo-empty" id="topoEmpty">Noch keine Achse. In Schritt 1 „Achse zeichnen“ wählen oder die Beispiel-Kreuzung laden.</div>
-                <div class="topo-draw-bar topo-scale-bar" id="topoScaleBar" style="display:none;"></div>
-                <div class="topo-draw-bar" id="topoDrawBar" style="display:none;">
+                <div class="topo-draw-bar topo-scale-bar" id="topoScaleBar" data-init-hidden></div>
+                <div class="topo-draw-bar" id="topoDrawBar" data-init-hidden>
                   <span>Punkte anklicken · Doppelklick oder Enter beendet · Esc bricht ab</span>
                   <button type="button" class="primary" id="topoDrawDone">Fertig</button>
                   <button type="button" id="topoDrawCancel">Abbrechen</button>
@@ -219,14 +224,14 @@
                 <details class="topo-legend" open>
                   <summary>Legende</summary>
                   <h5>Flächen</h5>
-                  <div class="lg"><span class="sw" style="background:var(--topo-road)"></span>Fahrbahn</div>
-                  <div class="lg"><span class="sw" style="background:var(--topo-bike)"></span>Radfahrstreifen (rot)</div>
-                  <div class="lg"><span class="sw" style="background:var(--topo-bus)"></span>Busspur</div>
-                  <div class="lg"><span class="sw" style="background:var(--topo-island)"></span>Mittelinsel / Sperrfläche</div>
-                  <div class="lg"><span class="sw" style="background:var(--topo-walk)"></span>Gehweg</div>
+                  <div class="lg"><span class="sw u-bg-topo-road"></span>Fahrbahn</div>
+                  <div class="lg"><span class="sw u-bg-topo-bike"></span>Radfahrstreifen (rot)</div>
+                  <div class="lg"><span class="sw u-bg-topo-bus"></span>Busspur</div>
+                  <div class="lg"><span class="sw u-bg-topo-island"></span>Mittelinsel / Sperrfläche</div>
+                  <div class="lg"><span class="sw u-bg-topo-walk"></span>Gehweg</div>
                   <div class="lg"><span class="sw rail"></span>Straßenbahn (Gleis)</div>
                   <h5>Zeichen</h5>
-                  <div class="lg"><span class="sw pill" style="background:var(--topo-sg-veh)"></span>Signalgruppe</div>
+                  <div class="lg"><span class="sw pill u-bg-topo-sg-veh"></span>Signalgruppe</div>
                   <div class="lg"><span class="sw det"></span>Detektor</div>
                   <div class="lg"><span class="sw furt"></span>Furt (Linienabstand 4 m)</div>
                 </details>
@@ -249,13 +254,13 @@
     <div class="tab-panel" id="tab-pa">
       <div class="view">
 
-        <div class="hint" id="paEmptyHint" style="padding:14px 0 0;">Noch keine Phase definiert – im Tab „Stammdaten LSA“ mindestens eine Phase mit Signalgruppen anlegen.</div>
+        <div class="hint u-pad-14-0-0" id="paEmptyHint">Noch keine Phase definiert – im Tab „Stammdaten LSA“ mindestens eine Phase mit Signalgruppen anlegen.</div>
 
-        <div id="paContent" style="display:none;">
+        <div id="paContent" data-init-hidden>
           <div class="panel">
             <div class="panel-head">
               <span>Phasendiagramm</span>
-              <div class="diagram-controls" id="paDiagramControls" style="display:none;">
+              <div class="diagram-controls" id="paDiagramControls" data-init-hidden>
                 <button id="paBtnWinPrev" title="Vorheriger Umlauf">◀</button>
                 <span class="win-label" id="paWinLabel"></span>
                 <button id="paBtnWinNext" title="Nächster Umlauf">▶</button>
@@ -267,11 +272,11 @@
               </div>
             </div>
             <div class="legend" id="paLegend"></div>
-            <div class="spl-bar-row" style="padding:10px 16px 0;">
+            <div class="spl-bar-row u-pad-10-16-0">
               <div class="spl-bar-label-fixed">Programm (SPL)</div>
               <div class="spl-bar" id="paSplBar"><svg></svg></div>
             </div>
-            <div style="padding:0 16px 12px;">
+            <div class="u-pad-0-16-12">
               <div class="lane-row">
                 <div class="lane-name">Phasen</div>
                 <div class="lane-track" id="paLaneTrack"><svg></svg></div>
@@ -313,9 +318,9 @@
             <button type="button" data-scope="hour">Je volle Stunde</button>
           </div>
         </div>
-        <div class="log-bar" data-log-bar style="display:none;"></div>
+        <div class="log-bar" data-log-bar data-init-hidden></div>
 
-        <div class="report-empty" id="wzEmpty" style="display:none;">Keine Detektor-Spalten (DET) in den Daten erkannt. Erwartet werden Spalten vom OCIT-Typ „single_loop“ oder Detektoren mit Namen wie IS1, IS1_2, DF1, RD1, FT1.</div>
+        <div class="report-empty" id="wzEmpty" data-init-hidden>Keine Detektor-Spalten (DET) in den Daten erkannt. Erwartet werden Spalten vom OCIT-Typ „single_loop“ oder Detektoren mit Namen wie IS1, IS1_2, DF1, RD1, FT1.</div>
 
         <div id="wzContent">
           <section class="rsec">
@@ -417,40 +422,40 @@
           <div id="oeFilterHint" class="hint"></div>
         </div>
 
-        <div class="panel" id="oeRawPanel" style="display:none;">
+        <div class="panel" id="oeRawPanel" data-init-hidden>
           <div class="panel-head">Rohpunkte — An-/Abmeldung im Zeitverlauf</div>
-          <div style="padding:12px 16px 2px;" id="oeRawRows"></div>
+          <div class="u-pad-12-16-2" id="oeRawRows"></div>
           <div class="axis oe-raw-axis" id="oeRawAxis"><svg></svg></div>
           <div class="chart-note">Alle erkannten Flanken der gewählten Anmelde-/Abmeldedetektor(en) je Signalgruppe, unabhängig von der Paarungslogik unten – zum schnellen Abgleich der Rohdaten.</div>
         </div>
 
-        <div class="panel" id="oeKpiPanel" style="display:none;">
+        <div class="panel" id="oeKpiPanel" data-init-hidden>
           <div class="panel-head">Kennzahlen</div>
           <div class="kpi-grid" id="oeKpiGrid"></div>
           <div class="los-dist" id="oeLosDist"></div>
-          <div class="table-scroll" style="padding:0 16px 16px;" id="oeSgBreakdown"></div>
+          <div class="table-scroll u-pad-0-16-16" id="oeSgBreakdown"></div>
         </div>
 
-        <div class="panel" id="oeChartPanel" style="display:none;">
+        <div class="panel" id="oeChartPanel" data-init-hidden>
           <div class="panel-head">
             <span>Anmeldungen im Zeitverlauf — je Signalgruppe</span>
           </div>
           <div class="legend">
-            <span class="item"><span class="swatch" style="background:var(--los-a);border-radius:50%;width:9px;height:9px;"></span>QSV A</span>
-            <span class="item"><span class="swatch" style="background:var(--los-b);border-radius:50%;width:9px;height:9px;"></span>QSV B</span>
-            <span class="item"><span class="swatch" style="background:var(--los-c);border-radius:50%;width:9px;height:9px;"></span>QSV C</span>
-            <span class="item"><span class="swatch" style="background:var(--los-d);border-radius:50%;width:9px;height:9px;"></span>QSV D</span>
-            <span class="item"><span class="swatch" style="background:var(--los-e);border-radius:50%;width:9px;height:9px;"></span>QSV E</span>
-            <span class="item"><span class="swatch" style="background:var(--los-f);border-radius:50%;width:9px;height:9px;"></span>QSV F</span>
-            <span class="item"><span class="swatch" style="background:var(--sig-dark);width:9px;height:9px;clip-path:polygon(50% 0,100% 100%,0 100%);"></span>Zwangsgelöscht (keine Abmeldung)</span>
-            <span class="item"><span class="swatch" style="background:var(--text-faint);border-radius:50%;width:9px;height:9px;opacity:.6;"></span>Ausgeschlossen (SPL)</span>
-            <span class="item"><span style="display:inline-block;width:0;height:9px;border-left:1px dashed var(--req-marker);"></span>Signalprogrammwechsel (SPL)</span>
+            <span class="item"><span class="swatch u-bg-los-a-dot9"></span>QSV A</span>
+            <span class="item"><span class="swatch u-bg-los-b-dot9"></span>QSV B</span>
+            <span class="item"><span class="swatch u-bg-los-c-dot9"></span>QSV C</span>
+            <span class="item"><span class="swatch u-bg-los-d-dot9"></span>QSV D</span>
+            <span class="item"><span class="swatch u-bg-los-e-dot9"></span>QSV E</span>
+            <span class="item"><span class="swatch u-bg-los-f-dot9"></span>QSV F</span>
+            <span class="item"><span class="swatch u-bg-sig-dark-triangle"></span>Zwangsgelöscht (keine Abmeldung)</span>
+            <span class="item"><span class="swatch u-bg-text-faint-dot-excluded"></span>Ausgeschlossen (SPL)</span>
+            <span class="item"><span class="u-sep-dash-9"></span>Signalprogrammwechsel (SPL)</span>
           </div>
           <div id="oeChartRows"></div>
           <div class="chart-note">Punkt anklicken, um im Signalzeitendiagramm zum betreffenden Umlauf zu springen.</div>
         </div>
 
-        <div class="panel" id="oeTablePanel" style="display:none;">
+        <div class="panel" id="oeTablePanel" data-init-hidden>
           <div class="panel-head">
             <span>Anmelde-Ereignisse</span>
             <div class="table-head-tools">
@@ -474,7 +479,7 @@
     <div class="tab-panel" id="tab-up">
       <div class="view">
 
-        <div class="log-bar log-bar-panel" data-log-bar style="display:none;"></div>
+        <div class="log-bar log-bar-panel" data-log-bar data-init-hidden></div>
 
         <div class="panel">
           <div class="panel-head">
@@ -482,7 +487,7 @@
             <div class="table-head-tools">
               <button type="button" id="upConfigSaveBtn" class="btn" title="Auswahl, Filter und Formeln als JSON-Datei speichern (ohne Rohdaten)">Konfiguration speichern</button>
               <label class="btn" for="upConfigLoadInput">Konfiguration laden …</label>
-              <input type="file" id="upConfigLoadInput" accept=".json" style="display:none;">
+              <input type="file" id="upConfigLoadInput" accept=".json" data-init-hidden>
             </div>
           </div>
           <div class="cfg-grid">
@@ -553,10 +558,10 @@
                 <div id="upFormulaRows" class="up-formula-list"></div>
                 <button type="button" id="upAddFormulaBtn" class="btn">+ Formel hinzufügen</button>
                 <div class="legend up-formula-legend">
-                  <span class="item"><span class="swatch" style="background:var(--accent)"></span>Objekt/Variable</span>
-                  <span class="item"><span class="swatch" style="background:var(--formula-on)"></span>Zustand</span>
-                  <span class="item"><span class="swatch" style="background:var(--req-marker)"></span>Funktion/Primitive</span>
-                  <span class="item"><span class="swatch" style="background:#3d5afe"></span>Formel-Referenz (eigene Farbe je Formel)</span>
+                  <span class="item"><span class="swatch u-bg-accent"></span>Objekt/Variable</span>
+                  <span class="item"><span class="swatch u-bg-formula-on"></span>Zustand</span>
+                  <span class="item"><span class="swatch u-bg-req-marker"></span>Funktion/Primitive</span>
+                  <span class="item"><span class="swatch u-bg-formula-ref"></span>Formel-Referenz (eigene Farbe je Formel)</span>
                 </div>
               </div>
             </div>
@@ -627,10 +632,10 @@
           </div>
         </div>
 
-        <div class="panel" id="upTablePanel" style="display:none;">
+        <div class="panel" id="upTablePanel" data-init-hidden>
           <div class="panel-head">
             <span>Umläufe — <span id="upSgLabel"></span></span>
-            <div class="diagram-controls" id="upDiagramControls" style="display:none;">
+            <div class="diagram-controls" id="upDiagramControls" data-init-hidden>
               <button id="upBtnWinPrev" title="Vorheriges Fenster">◀</button>
               <span class="win-label" id="upWinLabel"></span>
               <button id="upBtnWinNext" title="Nächstes Fenster">▶</button>
@@ -643,27 +648,27 @@
             <span class="win-label" id="upInfo"></span>
           </div>
           <div class="legend">
-            <span class="item"><span class="swatch" style="background:var(--sig-red);height:3px;align-self:center;"></span>Rot (Grundlinie)</span>
-            <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,var(--sig-redyellow) 0 3px,#8a6d00 3px 4px)"></span>Rot-Gelb/Gelb</span>
-            <span class="item"><span class="swatch" style="background:var(--sig-green)"></span>Grün</span>
-            <span class="item"><span class="swatch" style="background:var(--sig-dark)"></span>Dunkel</span>
-            <span class="item"><span class="swatch" style="background:var(--accent)"></span>Detektor belegt</span>
-            <span class="item"><span class="swatch" style="background:var(--text-faint);height:2px;align-self:center;"></span>Detektor frei (Grundlinie)</span>
-            <span class="item"><span class="swatch" style="background:var(--formula-on)"></span>Formel wahr (synthetischer Detektor, siehe „Formeln“)</span>
-            <span class="item"><span class="swatch" style="background:linear-gradient(90deg,var(--apw-a) 50%,var(--apw-b) 50%);"></span>APW/ÖPNV-Wert: Rohwert je Zeitabschnitt (alternierende Farbe)</span>
-            <span class="item"><span class="up-anom" style="font-family:var(--mono);">26</span> Auffälliger Umlauf (TF)</span>
-            <span class="item"><span class="swatch" style="background:var(--fz-soll)"></span>tFZ: Sollfahrzeit-Anteil</span>
-            <span class="item"><span class="swatch" style="background:var(--fz-verlust)"></span>tFZ: Verlustzeit-Anteil</span>
-            <span class="item"><span class="swatch" style="background:repeating-linear-gradient(45deg,#fbd9ec 0 3px,var(--fz-verlust) 3px 4px)"></span>ZwL: Zwangslöschzeit-Fenster</span>
-            <span class="item"><span style="display:inline-block;width:16px;border-top:1.5px dashed var(--text);"></span>Strg+Klick: manuelle Zeitmessung (2× klicken für Differenz)</span>
-            <span class="item"><span style="display:inline-block;width:16px;border-top:1.5px solid var(--accent-strong);"></span>Maus über Spur: Fadenkreuz mit TX in Sekunden</span>
+            <span class="item"><span class="swatch u-bg-sig-red-line3"></span>Rot (Grundlinie)</span>
+            <span class="item"><span class="swatch u-bg-hatch-redyellow"></span>Rot-Gelb/Gelb</span>
+            <span class="item"><span class="swatch u-bg-sig-green"></span>Grün</span>
+            <span class="item"><span class="swatch u-bg-sig-dark"></span>Dunkel</span>
+            <span class="item"><span class="swatch u-bg-accent"></span>Detektor belegt</span>
+            <span class="item"><span class="swatch u-bg-text-faint-line2"></span>Detektor frei (Grundlinie)</span>
+            <span class="item"><span class="swatch u-bg-formula-on"></span>Formel wahr (synthetischer Detektor, siehe „Formeln“)</span>
+            <span class="item"><span class="swatch u-bg-apw"></span>APW/ÖPNV-Wert: Rohwert je Zeitabschnitt (alternierende Farbe)</span>
+            <span class="item"><span class="up-anom u-font-mono">26</span> Auffälliger Umlauf (TF)</span>
+            <span class="item"><span class="swatch u-bg-fz-soll"></span>tFZ: Sollfahrzeit-Anteil</span>
+            <span class="item"><span class="swatch u-bg-fz-verlust"></span>tFZ: Verlustzeit-Anteil</span>
+            <span class="item"><span class="swatch u-bg-hatch-zwl"></span>ZwL: Zwangslöschzeit-Fenster</span>
+            <span class="item"><span class="u-sep-dash-16"></span>Strg+Klick: manuelle Zeitmessung (2× klicken für Differenz)</span>
+            <span class="item"><span class="u-sep-solid-16"></span>Maus über Spur: Fadenkreuz mit TX in Sekunden</span>
           </div>
-          <div class="lane-row lane-header up-main-row" style="padding:8px 16px 0;">
+          <div class="lane-row lane-header up-main-row u-pad-8-16-0">
             <div class="lane-name">Signalgruppe</div>
             <div class="lane-num">An</div>
             <div class="lane-num">Ab</div>
             <div class="lane-num">TF</div>
-            <div class="lane-track" style="background:none;border:none;"></div>
+            <div class="lane-track u-bg-none-border-none"></div>
           </div>
           <div class="up-rows" id="upRows"></div>
         </div>
@@ -688,7 +693,7 @@
           <div id="usHint" class="hint"></div>
         </div>
 
-        <div class="panel" id="usTablePanel" style="display:none;">
+        <div class="panel" id="usTablePanel" data-init-hidden>
           <div class="panel-head">
             <span>Umläufe</span>
             <div class="diagram-controls" id="usDiagramControls">
@@ -713,7 +718,7 @@
           </div>
         </div>
 
-        <div class="panel" id="usStatsPanel" style="display:none;">
+        <div class="panel" id="usStatsPanel" data-init-hidden>
           <div class="panel-head">Statistik</div>
           <div class="table-scroll">
             <table class="static-rows">
@@ -753,6 +758,7 @@
 <script src="js/io/configIO.js"></script>
 <script src="js/io/xlsxWriter.js"></script>
 <script src="js/ui/snackbar.js"></script>
+<script src="js/ui/cssom.js"></script>
 <script src="js/ui/exprEditor.js"></script>
 <script src="js/charts/tooltipHelper.js"></script>
 <script src="js/charts/chartKit.js"></script>

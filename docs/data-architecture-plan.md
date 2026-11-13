@@ -124,11 +124,43 @@ Results, the 24 h synthetic recording with 100 columns (25 MiB of text, 86,400 r
 
 Decoding five plain columns takes about 1 ms. A column chunk is the unit for lazy loading in Phase 4 and Phase 5.
 
-### Phase 3: store and layers (M to L)
+### Phase 3: store and layers (M to L). Done.
 
-- `GZ.define` with layer checks, the store, and no view-to-view calls.
-- Move `exprEditor.js` out of `core`.
-- Replace inline `style` attributes with classes. Add the strict meta CSP.
+- `js/core/define.js`: `GZ.define(name, { layer, deps }, factory)`. Layers: `domain` (js/core), `store` (js/store), `io` (js/io),
+  `ui` (js/charts and js/ui), `views` (js/views), `app` (js/app.js).
+  A module can use only modules of a lower or the same layer. A view cannot use a view. A `ui` module cannot use the store.
+  Nothing uses `app`. A wrong layer, a missing dependency or a wrong script order throws an `Error` when the page loads.
+- `tests/check-layers.js` (runs in `node tests/run-suite.js`): reads the code without comments and texts, and checks that every `GZ.<module>` that
+  the code uses is declared, that every declared dependency is used, that the layers fit the folders and that `index.html` loads the scripts in a valid order.
+  A test that breaks the rules in six ways made the check fail each time.
+- Moves: `snackbar` and `exprEditor` to `js/ui`, `configIO` and `xlsxWriter` to `js/io`, `state.js` to `js/store`.
+  The domain modules `detectors` and `logs` no longer read the store. The store gives them a holder object with `bind()`.
+  A cycle between `charts.kit` and `charts.logMarkers` is gone: the caller of `timeChart` passes `drawLogs`.
+- The store (`GZ.state`): `commit(topic, mutator?)` for changes, `command(topic, payload)` for actions, `on(topic, fn)`,
+  `provide(name, fn)` and `request(name, ...args)` for data, `inRecording(t)` as a selector.
+  The tables `TOPICS` and `PROVIDERS` list every name. An unknown name is an error. A subscriber that throws does not stop the others.
+- Views no longer call each other or the app. The 22 calls between views became topics and providers:
+  `phases:changed`, `detectors:changed`, `syntheticColumns:changed`, `nav:switchTab`, `nav:jumpToTime`, `nav:jumpToLog`, `topology:setModel`,
+  `nodeConfig:save`, `nodeConfig:load`, `transition:show`, and the providers `formulaColumns`, `formulaHighlights`, `formulaConfig:get`,
+  `formulaConfig:apply`, `kennzahlColumns`, `oepnvRows`.
+  The app still calls the lifecycle functions of the views (`init`, `onAnalyzeComplete`, `populateControls`). The layer rules allow this.
+- Content security policy: `index.html` has a meta policy with `default-src 'none'`, `script-src 'self'`, `style-src 'self'`,
+  `img-src 'self' data: blob:` and `connect-src 'none'`. It has no `unsafe-inline` and no `unsafe-eval`.
+- All inline `style` attributes are gone (69 in `index.html` and about 30 in templates of the views):
+  - `style="display:none"` in `index.html` became `data-init-hidden`. A CSS rule hides the element. `app.js` sets the inline display and removes the attribute at start-up.
+    So the views can still use `style.display = ''` to show the element.
+  - Fixed values became utility classes in `css/utilities.css` (names start with `u-`, each declaration has `!important`, as the inline style had).
+  - Values from data use `data-css="..."` in the template and `GZ.cssom.apply(container)` after the markup is in the page (`js/ui/cssom.js`).
+  - `GZ.charts.kit.el()` sets a `style` option through the CSSOM.
+- `tests/check-csp.js` (runs in `node tests/run-suite.js`): checks the policy and finds style attributes, `setAttribute('style')`, `eval`, inline scripts and event attributes in the code.
+- End-to-end scripts for a real browser (they need Playwright and are not part of the application): `node tests/e2e/crawl.js` clicks through all tabs and
+  reports violations and page errors, `node tests/e2e/exports.js` starts every export.
+- Check of the whole change: a Chromium run of the main paths (sample, all tabs, phases, topology example, formula, key figure, log, jumps, PNG and PDF background,
+  saving and loading both configuration files) gives the same markup, the same computed styles for every element (size, position and 60 properties) and the same saved
+  configuration files as before. The only differences are the new script and link elements.
+  PDF import (pdf.js without a worker) and all four downloads work under the policy.
+- A bug that the crawl found (it also happens before this phase): "add filter" in the cycle check chose the phase track as the first object and the page threw an error.
+  The filter now skips the phase track and the key figures.
 
 ### Phase 4: project model and persistence (L)
 
@@ -176,6 +208,8 @@ It does not cover `vendor/` and the generated `tests/fixtures/golden-data.js`.
 ## Running the tests
 
 - Browser: open `tests/index.html` from disk. The page has a strict CSP.
-- Node: `node tests/run-suite.js`. This runs the same suite.
+- Node: `node tests/run-suite.js`. This runs the layer check, the policy check and the same suite as the browser.
+  `node tests/check-layers.js` and `node tests/check-csp.js` run the two checks alone.
+- Real browser: `node tests/e2e/crawl.js` and `node tests/e2e/exports.js` (they need Playwright).
 - Update the golden data after an intended change: `node tests/run-suite.js --update-golden`.
 - The older `node tests/core.test.js` still runs.

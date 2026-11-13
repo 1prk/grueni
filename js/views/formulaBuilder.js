@@ -59,7 +59,7 @@
    - as a highlight color on an object track, if a highlight target is set (see
      getFormulaHighlights()).
    So the user can recognize a formula everywhere. */
-GZ.define('views.formulaBuilder', { layer: 'views', deps: ['exprEditor', 'exprEngine', 'format', 'parser', 'segments', 'snackbar', 'state', 'wartezeitLogic'] }, function (GZ) {
+GZ.define('views.formulaBuilder', { layer: 'views', deps: ['cssom', 'exprEditor', 'exprEngine', 'format', 'parser', 'segments', 'snackbar', 'state', 'wartezeitLogic'] }, function (GZ) {
   'use strict';
   const { esc } = GZ.format;
   const { buildSegments, makePointSegmentSweep, computeGlobalTU, computeCycleSgMetrics, computeCycleDetMetrics, makeRawValueSampler, makeSegmentDurationSampler } = GZ.segments;
@@ -602,7 +602,7 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['exprEditor', 'exprEn
       return `
       <div class="up-formula-row" data-id="${f.id}">
         <div class="up-formula-head">
-          <span class="up-formula-color-dot" style="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Akzent in anderen Formeln und als Hervorhebungs-Farbe"></span>
+          <span class="up-formula-color-dot" data-css="background:${formulaColorFor(f)}" title="Farbe dieser Formel - auch als Referenz-Akzent in anderen Formeln und als Hervorhebungs-Farbe"></span>
           <input type="text" class="up-formula-name mono-input" value="${esc(f.name)}" placeholder="Name">
           <span class="up-formula-status"></span>
           <span class="up-formula-head-spacer"></span>
@@ -623,6 +623,7 @@ GZ.define('views.formulaBuilder', { layer: 'views', deps: ['exprEditor', 'exprEn
         </span>
       </div>`;
     }).join('') || '<div class="cfg-empty">Keine Formeln definiert.</div>';
+    GZ.cssom.apply(els.formulaRows);
 
     // A change of a formula name can affect OTHER formulas that reference it (see
     // currentVarTypes()).

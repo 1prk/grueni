@@ -520,3 +520,6 @@ table.static-rows tbody tr{ cursor:default; }
 .help-table td{ padding:6px 10px 6px 0; font-size:12px; vertical-align:top; border-bottom:1px solid var(--border); line-height:1.5; }
 .help-table tr:last-child td{ border-bottom:none; }
 .help-fn{ white-space:nowrap; width:1%; color:var(--accent-strong); font-weight:600; padding-right:16px; }
+
+/* The hint under the buttons for the node configuration (Stammdaten LSA). The code sets its class name. */
+#sdLoadHint { padding: 6px 16px 0; }

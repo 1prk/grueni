@@ -288,7 +288,7 @@ GZ.define('views.oepnvQa', { layer: 'views', deps: ['charts.oepnvRawPointsChart'
           </div>
         </div>
       </div>`;
-    }).join('') || '<div class="cfg-empty" style="margin:12px 16px 0;">Keine Signalgruppe konfiguriert – „+ Signalgruppe hinzufügen“ klicken.</div>';
+    }).join('') || '<div class="cfg-empty u-m-12-16-0">Keine Signalgruppe konfiguriert – „+ Signalgruppe hinzufügen“ klicken.</div>';
 
     els.sgRows.querySelectorAll('.oe-sg-row').forEach(rowEl => {
       const id = Number(rowEl.dataset.rowId);

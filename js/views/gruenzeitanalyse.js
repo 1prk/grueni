@@ -8,7 +8,7 @@
    The user can evaluate each section for the whole recording, for each signal plan (SPL) or for
    each clock hour.
    Log markers appear in the time charts. */
-GZ.define('views.gruenzeitanalyse', { layer: 'views', deps: ['charts.kit', 'charts.logMarkers', 'charts.report', 'format', 'greenTime', 'logs', 'slices', 'state'] }, function (GZ) {
+GZ.define('views.gruenzeitanalyse', { layer: 'views', deps: ['charts.kit', 'charts.logMarkers', 'charts.report', 'cssom', 'format', 'greenTime', 'logs', 'slices', 'state'] }, function (GZ) {
   'use strict';
   const { esc, fmtNum, fmtTimeShort, fmtHoursMinutes, fmtDauer, fmtTs } = GZ.format;
   const GT = GZ.greenTime;
@@ -195,12 +195,13 @@ GZ.define('views.gruenzeitanalyse', { layer: 'views', deps: ['charts.kit', 'char
       : 'Gemischter Betrieb: ' + parts.map(p => `${p.label} ${p.actuated ? 'verkehrsabhängig' : 'in Festzeit'}${detail(p)}`).join(', ') + '.';
 
     const legend = state.scope === 'total' && slices.plans.length > 1
-      ? '<div class="legend"><span class="item">Balkenfarbe</span>' + slices.plans.map(p => `<span class="item"><span class="swatch" style="background:${sliceColor(p.key)}"></span>${esc(p.label)}</span>`).join('') + '</div>' : '';
+      ? '<div class="legend"><span class="item">Balkenfarbe</span>' + slices.plans.map(p => `<span class="item"><span class="swatch" data-css="background:${sliceColor(p.key)}"></span>${esc(p.label)}</span>`).join('') + '</div>' : '';
     els.note1.innerHTML = `${legend}Balken = Anteil der Grünphasen je 1-s-Klasse, Maßstab je Zeile auf die höchste Klasse normiert. Gemeinsame Zeitachse für alle Zeilen. ` +
       `<b>Verkehrsabhängig</b> heißt: die Grünzeit streut. <b>Festzeit</b> heißt: sie streut nicht. Die Anlage gilt als verkehrsabhängig, sobald eine Signalgruppe streut. ` +
       `Signalgruppen mit weniger als ${GT.MIN_GREENS} Grünphasen werden nicht eingestuft. ` +
       (model.irregularCount ? `${model.irregularCount === 1 ? '1 Umlauf, der länger' : model.irregularCount + ' Umläufe, die länger'} als das ${fmtNum(GT.IRREGULAR_CYCLE_FACTOR, 1)}-Fache des Median-Umlaufs ${model.irregularCount === 1 ? 'dauert' : 'dauern'} (meist Dunkelzeit, siehe 5), ${model.irregularCount === 1 ? 'fließt' : 'fließen'} nicht in die Statistik ein. ` : '') +
       `„bei Max“ = Anteil der Grünphasen, die genau das beobachtete Maximum erreichen (Hinweis auf Deckelung durch die Maximalgrünzeit).`;
+    GZ.cssom.apply(els.note1);
   }
 
   /* ---------------- Section 2: trend ---------------- */
@@ -286,15 +287,16 @@ GZ.define('views.gruenzeitanalyse', { layer: 'views', deps: ['charts.kit', 'char
     const height = sgs.length === 1 ? 250 : 175;
     const keys = state.scope === 'total' ? [] : scopeSlices();
     els.trendLegend.innerHTML = state.mode === 'time'
-      ? `<span class="item"><span class="dot" style="background:var(--text)"></span>Grünzeit je Zyklus</span>
-         <span class="item"><span class="line" style="border-top:1.4px solid var(--accent)"></span>Median</span>
-         <span class="item"><span class="swatch" style="background:rgba(47,111,163,.13);border:none"></span>P5–P95</span>
+      ? `<span class="item"><span class="dot u-bg-text"></span>Grünzeit je Zyklus</span>
+         <span class="item"><span class="line u-bt-1_4-solid-accent"></span>Median</span>
+         <span class="item"><span class="swatch u-bg-band-p5p95"></span>P5–P95</span>
          <span class="item"><span class="dim">×</span>Zyklus ohne Grün</span>
          <span class="item"><span class="swatch actuated"></span>verkehrsabhängig</span><span class="item"><span class="swatch fixed"></span>Festzeit</span>
-         <span class="item"><span class="line vertical" style="border-left:1px dashed var(--req-marker)"></span>Signalprogrammwechsel</span>`
+         <span class="item"><span class="line vertical u-bl-1-dashed-req-marker"></span>Signalprogrammwechsel</span>`
       : (keys.length
-          ? `<span class="item">Anteil der Zyklen mit höchstens dieser Grünzeit</span>` + keys.map(k => `<span class="item"><span class="line" style="border-top:2px solid ${sliceColor(k.key)}"></span>${esc(k.label)}</span>`).join('') + `<span class="item"><span class="line" style="border-top:1.2px dashed var(--text-faint)"></span>gesamt</span>`
-          : `<span class="item"><span class="line" style="border-top:1.9px solid var(--sig-green)"></span>Anteil der Zyklen mit höchstens dieser Grünzeit</span>`);
+          ? `<span class="item">Anteil der Zyklen mit höchstens dieser Grünzeit</span>` + keys.map(k => `<span class="item"><span class="line" data-css="border-top:2px solid ${sliceColor(k.key)}"></span>${esc(k.label)}</span>`).join('') + `<span class="item"><span class="line u-bt-1_2-dashed-text-faint"></span>gesamt</span>`
+          : `<span class="item"><span class="line u-bt-1_9-solid-sig-green"></span>Anteil der Zyklen mit höchstens dieser Grünzeit</span>`);
+    GZ.cssom.apply(els.trendLegend);
 
     sgs.forEach(sg => {
       const st = GT.stats(model, sg, null);

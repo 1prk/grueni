@@ -5,7 +5,7 @@
    button to remove the log.
    A click on a list entry opens its cycle in the cycle check.
    All containers with the attribute data-log-bar show the same state. */
-GZ.define('views.logBar', { layer: 'views', deps: ['charts.logMarkers', 'format', 'logs', 'state'] }, function (GZ) {
+GZ.define('views.logBar', { layer: 'views', deps: ['charts.logMarkers', 'cssom', 'format', 'logs', 'state'] }, function (GZ) {
   'use strict';
   const { esc, fmtTs } = GZ.format;
 
@@ -78,12 +78,13 @@ GZ.define('views.logBar', { layer: 'views', deps: ['charts.logMarkers', 'format'
       const chips = GZ.logs.SEVERITY.concat([{ id: 'other', label: 'Sonstige' }])
         .filter(s => counts[s.id])
         .map(s => `<label class="log-chip log-chip-${s.id}"><input type="checkbox" data-severity="${s.id}" ${st.hiddenSeverities.has(s.id) ? '' : 'checked'}>
-          <span class="log-swatch" style="border-bottom-color:${GZ.charts.logMarkers.SEVERITY_COLOR[s.id]}"></span>${esc(s.label)} <span class="dim">${counts[s.id]}</span></label>`).join('');
+          <span class="log-swatch" data-css="border-bottom-color:${GZ.charts.logMarkers.SEVERITY_COLOR[s.id]}"></span>${esc(s.label)} <span class="dim">${counts[s.id]}</span></label>`).join('');
       box.innerHTML = `<span class="log-summary">${summaryText()}</span>${chips}
         <input type="search" class="log-search" placeholder="Log durchsuchen …" value="${esc(st.search)}">
         <button type="button" data-log-list>${listOpen ? 'Liste ausblenden' : 'Liste anzeigen'}</button>
         <button type="button" data-log-clear>Log entfernen</button>
-        <div class="log-list" style="display:none;"></div>`;
+        <div class="log-list"></div>`;
+      GZ.cssom.apply(box);
     });
     renderLists();
   }
